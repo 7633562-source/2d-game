@@ -1,0 +1,129 @@
+---
+description: Segmental dog — quadruped stance; sibling of Human, not a child
+alwaysApply: false
+---
+
+# Dog physics
+
+Fourth species. Sibling of `Human`, `Bird`, `PlantTree`. Do not derive
+`Dog` from `Human`. Reuse `HumanSegment`, `Muscle`, `JointFriction`.
+
+Play: scene `Dog`, `dogCount = 1`. All other scenes: `dogCount = 0`.
+Headless: `-dog 1` on flat ground. The human stand does not spawn dogs
+unless `-dog` is set.
+
+Signs review (no `Dog.cs` yet): `Trials/Runs/dog_physics_signs.md`.
+
+## Body
+
+Sagittal, faces +X. Chest cranial (+X), pelvis caudal (−X). Digitigrade
+paws (small foot, high ankle). No second toe segment.
+
+| Part | Segments |
+|---|---|
+| Trunk | `Chest` (vestibular), `Pelvis`, lumbar hinge |
+| Head | `Neck`, `Head` — cranial face of Chest, not stacked on the withers |
+| Tail | one segment, friction + weak spring or weak muscles |
+| Front L/R | upper, forearm, paw |
+| Rear L/R | thigh, shin, paw |
+
+Left/right pair: visual offset on `Visual` only. Do not put
+`hipHalfSpacing` / shoulder spacing into X anchors (that is a lunge).
+Front vs rear **are** separated in X — that is body length, not a lunge.
+Play gizmos: Unity's green `BoxCollider2D` box is on the body, so a
+pair looks like one column. The far sprite is not missing a collider —
+`HumanSegment.OnDrawGizmos` draws a cyan wire on `Visual` only. Do not
+move the body to match that wire.
+
+Mass about **25 kg**. Torque ceilings from geometry, not copied 70 kg
+human numbers. `Muscle.direction`: flexor `+1`, extensor `−1`. Same
+`ApplySignal` as the human: positive signal = increase `jointAngle` =
+extensor.
+
+## Sign convention (human, do not fork)
+
+`jointAngle` = connected-body rotation minus own. The joint lives on
+the child. Positive `jointAngle` rotates the child clockwise vs the
+parent (distal end toward −X when facing +X).
+
+| Joint | Flexion / role | Limit | Extensor does |
+|---|---|---|---|
+| Lumbar (on `Chest`) | free coupler | `−20…+20` | increases `jointAngle` |
+| Neck, head | world pitch | `−30…+30` each | same |
+| Tail | rest spring | `−40…+40` | n/a (no CoM loop) |
+| Rear hip | stance more **minus** (stifle cranial) | `−90…+90` | increases `jointAngle` (stifle caudal) |
+| Rear knee | caudal fold, **plus** | `0…+120` | increases `jointAngle` (opens the fold) |
+| Rear paw | load-bearing | `−45…+45` | CoM only, not a pose |
+| Front shoulder | stance more **plus** (elbow caudal) | `−90…+90` | increases `jointAngle` |
+| Front elbow | caudal fold, **plus** (knee analog) | `0…+120` | increases `jointAngle` |
+| Front paw (carpus) | load-bearing, not a human wrist | `−45…+45` | CoM only, not a pose |
+
+Do **not** copy `CreateArm` (`elbow −140…0`). Knee and front elbow
+share the **plus** range. Hip and shoulder share `±90` limits but
+**opposite** stance targets (hip minus, shoulder plus).
+
+## Spawn (paws on y = −2.0)
+
+Do not use the human stacked-trunk formula
+`(pelvis+torso)/2 + thigh + shin + foot`. The dog trunk is horizontal.
+Front and rear soles must match:
+
+```
+H_front = (chestLocalY + shoulderInChest.y) + upper.y + forearm.y + paw.y
+H_rear  = (pelvisLocalY + hipInPelvis.y) + thigh.y + shin.y + paw.y
+require H_front == H_rear
+y0 = -2.0 + H_front
+```
+
+If centers sit at the same Y and limbs hang straight down,
+`shoulderInChest.y = −chest.y/2` and `hipInPelvis.y = −pelvis.y/2`.
+A 1 cm front/rear mismatch puts two paws in the air or in the ground.
+
+## Control
+
+`DogStanceController` only. Not `BalanceController`.
+
+- Four paws: CoM vs support of **grounded** paws. Same command on all
+  four: CoM ahead (+X) → positive signal → extensor. No angular PD.
+  No muscle damper on paw angle. Viscosity is `JointFriction` only.
+  Do not invert the front pair.
+- Rear hips: pelvis **world** pitch. Sign like human hips:
+  `+P*error − D*speed` (joint on the thigh; pelvis is `connectedBody`).
+- Lumbar / chest: chest **world** pitch. Formula like human lumbar:
+  `(-P)*error − (-D)*speed`. P and D stay positive. Do not PD the
+  lumbar to the pelvis joint angle. Do not mix world error with
+  `joint.jointSpeed`. Small plus target raises the cranial end; a
+  minus target is a nose-down hold — change the target, not P.
+- Front shoulders may share the chest world target **only** with the
+  hip sign (`+P*error − D*speed`). Joint on the upper, chest is
+  `connectedBody`. Same target + opposite formulas cooperate. The
+  same formula on both loops fights.
+- Rear knees / front elbows: joint pose, plus flexion.
+- Neck / head: Stable PD to world (same formula as
+  `ControlSegmentToWorldUpright`). Ordinary PD will chatter.
+- No `AddForce` up. No `HingeJoint2D.useMotor`.
+
+## Paw torque (geometry)
+
+`τ_max = m * g * lever_to_edge / n`. At 25 kg, paw ~0.08 m, toe ~0.055,
+heel ~0.025, four-way share ≈ **3.4 / 1.5 N·m**; pair-pitch ≈ **7 / 3**.
+Do not copy human 65 / 22.
+
+## Sensors
+
+Read only. `VestibularSystem` may `Find("Chest")` after `Torso` (human
+unchanged). Do not use stock `CenterOfMassCalculator` (`LeftLegFoot`).
+Four named paws; last support if all airborne. No player camera as eyes.
+
+## Ostrich-class bugs (dog)
+
+- Rear knee `−120…0`: shin folds cranial of the hip–paw line.
+- Front elbow `−140…0` (human arm): paw reaches forward/up.
+- Knee plus and elbow minus (human pair): one pair mirrored.
+- Front carpus with wrist PD, or any paw muscle-D: fall in ~2–3 s.
+- Chest PD to pelvis angle: chest rides the pelvis down.
+- Checking the sign by summing a near-zero chain (flat paws).
+
+## Budget
+
+One dog ≈ one human of bodies (~17 with tail). Not a pack in `World`.

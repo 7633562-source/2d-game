@@ -1,96 +1,632 @@
 ---
-description: Где остановились - устройство тела, рабочие коэффициенты, открытые дефекты
+description: Where we left off — body layout, working coefficients, open defects
 alwaysApply: true
 ---
 
-# Тело сейчас
+# The body now
 
-Торс разделён на два сегмента: `Pelvis` (0.24 × 0.16, доля массы 0.1117) и
-`Torso` (0.24 × 0.34, доля 0.3229). Сумма таза и груди 0.4346 — прежняя
-доля цельного торса. Доли **не** нормированы на 1: шея `0.012` добавлена
-поверх полного набора de Leva, сумма долей **1.012**, фактическая масса
-**70.84 кг** при `totalMass = 70`. Это не отдельный замысел «шея сверх
-нормы», а следствие учёта; физику и доли не менять, пока нет отдельной
-задачи на массу. Потолки моментов по-прежнему писались из расчёта 70 кг.
+The torso is split into two segments: `Pelvis` (0.24 × 0.16, mass fraction 0.1117) and
+`Torso` (0.24 × 0.34, fraction 0.3229). The pelvis-plus-chest sum 0.4346 is the former
+fraction of the one-piece torso. Fractions are **not** normalized to 1: the neck `0.012` was added
+on top of the full de Leva set, so the fraction sum is **1.012**, actual mass
+**70.84 kg** at `totalMass = 70`. This is not a separate design of “neck above
+norm”, but a bookkeeping consequence; do not change physics or fractions until there is a separate
+mass task. Torque ceilings were still written for 70 kg.
 
-Бёдра крепятся к тазу, шея и руки к торсу. Поясничный шарнир ±20°, момент
-90 Н·м. Плечо на прежней абсолютной высоте +0.125 через
-`shoulderDropFromNeck`. Точка спавна −0.82 не менялась.
+Hips attach to the pelvis, neck and arms to the torso. Lumbar hinge ±20°, torque
+90 N·m. The shoulder stays at the previous absolute height +0.125 via
+`shoulderDropFromNeck`. Spawn point −0.82 was not changed.
 
-Слой намерения (`MotionIntent`, `PlayerInputSource`, новый Input System)
-в проекте есть, но ни к кому не подключён: ходьбы и приседа пока нет.
+**Knee flipped 24.08: limit `0…+120` instead of `−120…0`.** The former
+range allowed only ostrich flexion. The `jointAngle` sign convention
+and how to check it are in `balance-actuators.mdc`; here only the
+consequence: knee flexion is now **plus**, hip flexion is still
+minus, and that is not a typo but opposite sides of anatomy under one convention.
 
-# Рабочие коэффициенты
+The intent layer (`MotionIntent`, `PlayerInputSource`) is wired to crouch and
+walk (`StepPhaseDriver`, CLI `-walk`). All brains — `.cursor/rules/ai.mdc`.
+Agent `ai` is currently bird AI (`BirdController.mode`), not the human.
+
+# Working coefficients
 
 ```
-hipBaseAngle 10        kneeBaseAngle -8
+hipBaseAngle -3        kneeBaseAngle 6
+pelvisP 2              pelvisD 0.3
+pelvisErrorReferenceDegrees 25
+crouchKneeFlex 55      crouchPelvisTilt 12
 lumbarP 2              lumbarD 0.3
 lumbarTargetTilt 0     lumbarErrorReferenceDegrees 25
 lumbarFriction 30      lumbarFrictionMaxTorque 40
 ankleComP 14           ankleComD 8
+neckP 1.5              neckD 0.4
+neckTilt 0             neckRef 25
+useStablePd 1          neckMuscleTorque 15
+neckFriction 0.00784
+shoulderFriction 0.177722
+elbowFriction 0.0509677
+wristFriction 0.0117525
+shoulderP 1.5          shoulderD 0.4   shoulderBase 0   shoulderRef 25
+armShoulderBal 25      armElbowBal 10  armWristBal 0
+elbowP 1.2             elbowD 0.4      elbowBase -20   elbowRef 25
+wristP 1.0             wristD 0.4      wristBase 0     wristRef 25
+swingHipFlex 40        swingKneeFlex 55
+swingHipUnloadBias 0.32
+backSwingHipUnloadScale 1.3 backSwingKneeGroundScale 1.4
+standLegPelvisTilt 10
+dualSupportSwingScale 0.32
+dualSupportStandCap 0.4
+walkSwingLiftScale 1
+walkStanceLiftDelay 6
+walkStanceLiftRamp 2
+walkLiftComMax 0.10
+walkArmShoulder 15
+walkArmElbow 5
+walkArmTransfer 0.35
 ```
 
-`lumbarPGain` / CLI `-lumbarP` — плюс 2. Минусы уже стоят в формуле
-поясницы, отрицательное значение через CLI передавать нельзя.
+`useStablePd` is on by default and applies **only** to the neck and head.
+CLI `-spd 0` restores the former ordinary PD on the same build — the flag was left
+exactly for comparison, not as a setting. Arms are on stable PD **always**:
+the muscle loop on light segments is not tuned with explicit PD.
 
-# Достигнутое
+`hipBaseAngle` is now the **world pelvis-tilt target**, not a joint angle.
+The thigh holds the pelvis to vertical via `ControlHipsToWorldUpright`, so
+`hipPGain`, `hipDGain`, and `crouchHipFlex` no longer affect anything. The names
+were kept so the stand and Inspector do not break; when reading summaries remember
+that these three fields are dead.
 
-Демпфер в `JointFriction` безусловно устойчив. Пороги толчка на текущем
-теле: вперёд держит 22, падает на 23; назад держит 23, падает на 24.
+The pelvis sign is **not the same as the lumbar**: `+P*error − D*speed`. The lumbar
+joint sits on the chest, the hip joint on the thigh, and the pelvis receives torque with
+a minus sign as `connectedBody`. Both gains are positive.
 
-Текущий воспроизводимый baseline — `Trials/Baselines/current/`
-(`curr_stand` … `curr_pb24`), fingerprint
-`5d6a30dce4daac3352512269ddbcfd57a56721634f694fd8d7a12627910cebd2`.
-Стойка 30 с: наклон 3.3802°, СКО смещения **0.0070**, дрожь
-**26.65 °/с**, насыщение 0.0015. При `activationSpeed 40` стоит
-(СКО 0.0327, насыщение 0.2326); при 80 падает за 7.065 с.
+The pair of base angles is linked: at knee +K the ankle sits under the pelvis if
+the thigh is tilted forward by K/2. The former `10 / −8` with plus-side flexion would have
+taken the ankle 21 cm behind the hip.
 
-Эти числа сняты после пересборки экспериментального слоя без смены
-физического алгоритма. Same-build/same-args повтор `repro_stand_0824`
-совпал побитово — стенд детерминирован. Расхождение со старыми
-`damp_*` (СКО 0.0110, дрожь 31.54) — новый attractor нового плеера,
-не доказанное улучшение регулятора.
+`lumbarPGain` / CLI `-lumbarP` — plus 2. The minuses are already in the lumbar
+formula; a negative value must not be passed via CLI.
 
-Старые `damp_*` без provenance лежат в
-`Trials/Baselines/legacy-no-provenance/`. Не перезаписывать и не
-дописывать им fingerprint. CSV — в `E:\Games\Unity3D LOGS\trials`.
+# What we reached
 
-Play Mode при `humanCount = 1` даёт `frictionMultiplier = 0.75`, стенд —
-1. Режимы несопоставимы.
+The damper in `JointFriction` is unconditionally stable.
 
-# Открытые дефекты
+On 24.08 two fixes were done in a row: knee flip and world-orientation
+control of the pelvis. The flip by itself worsened push thresholds; pelvis control
+restored them and also improved stance more than ever.
 
-1. Коэффициенты `damping` подбирались под сломанный демпфер и как настоящая
-   вязкость слишком велики: сустав гасится почти за один шаг, тело выходит
-   вязким. Превышение предела `K·Δt/I < 2`: шея 57×, локоть 4.3×, голова
-   2.4×, кисть 2.1×, плечо 1.6×, поясница 1.4×, голеностоп 1.3×; бедро и
-   колено в норме. Подбирать через постоянную времени `τ = I/K` (см.
-   `balance-actuators.mdc`), а не подгонкой чисел. Начинать с шеи, головы
-   и рук — они не входят в петлю равновесия, риск для стойки минимальный,
-   а поза рук сейчас страдает именно от этого.
-2. Руки не управляются вовсе: в `SetupBalanceController` нет плеча, локтя
-   и кисти. 6.9 кг висят на одном трении и валятся в упоры.
-3. Конечности рисуются почти друг на друге: при ракурсе 80° каждая нога
-   отстоит от оси лишь на 1.5 см, между ногами около 3.0 см. Нужен
-   визуальный разнос отдельно от физического.
-4. Маркеры суставов диаметром 0.1 юнита крупнее сегментов, поза не читается.
-5. Знак `kneeBaseAngle` не проверен: −8° задумано как сгибание, а геометрия
-   выходит «таз впереди, колено сзади». Тест: `-kneeBase -40` и `headDrop`.
-6. Быстрые мышцы валят: `activationSpeed 40` даёт СКО 0.033 и насыщение
-   0.233, при 80 человек падает за 7.1 с. Регулятор рассчитан на медленный
-   привод.
-7. У таза нет своего контроля ориентации: он держится только позиционным PD
-   бедра к `hipBaseAngle`, а это угол к ляжке, не к мировой вертикали.
-   Поэтому таз ходит широко, а поясница тратит ход, вычищая за ним. В
-   спокойной стойке `maxAbsPelvisTilt` 12.3° против 3.38° у торса; на
-   толчке 22 Н·с в текущем baseline таз 14.3°, поясница 13.5° из 20,
-   восстановление 4.1 с. Похоже, именно отсутствие мировой опоры таза,
-   а не коэффициенты поясницы, держит потолок порога толчка. Проверять
-   отдельной задачей, план ниже пока не менять.
+24.08 added a third fix: neck and head moved to world vertical.
+25.08 — fourth: stable PD (SPD) on the same two joints. It closed
+the chatter that started the whole effort.
 
-# Порядок работ
+**Stable PD is the current baseline.** Baseline `Trials/Baselines/stable-pd/`,
+fingerprint `05db3e8e1643bf1a1af2257628b0bccb9d5e7fcd2ddafc19f12daef0fc945f87`,
+runs `s_on` (stance 30 s), `son_squat`, `son_pf23` / `son_pf24`,
+`son_pb23` / `son_pb24`. Next to them sit `s_off` and `soff_squat` — the same arguments
+with `-spd 0`, a clean comparison on one build.
 
-Вязкость через `τ = I/K` (шея, голова, руки — потом остальное) → руки
-вместе с визуальным разносом и маркерами → присед (слой намерения, предел
-бедра до 90°, момент колена до 130 Н·м) → стойка на одной ноге → автомат
-шага по SIMBICON.
+| Stance 30 s | ordinary PD | **stable PD** |
+|---|---|---|
+| Torso tilt | 2.16° | **1.43°** |
+| Pelvis tilt | 5.08° | **3.61°** |
+| Lumbar travel | 5.42° | **3.68°** |
+| Offset RMS | 0.0063 | **0.0053** |
+| Head span | 5.03° | **0.46°** |
+| Head per physics step | 1.48° | **0.087°** |
+| Forward push | 22 / falls 23 | **23 / falls 24** |
+| Backward push | 21 / falls 22 | **23 / falls 24** |
+
+Saturation 0 and both feet on the ground 1.0000 in both. Neck torque stayed 15 N·m,
+`neckD` — 0.4: in the summaries `applied.useStablePd` is the only difference.
+
+| Crouch, hold window 8–14 s | ordinary PD | **stable PD** |
+|---|---|---|
+| Head reversals in 6 s | 400 (33 Hz) | **5 (0.4 Hz)** |
+| Head per physics step | 0.900° | **0.024°** |
+| Pelvis drop | 0.0659 | 0.0662 |
+| Torso tilt | 2.16° | **1.43°** |
+
+Head span in crouch even grew, 3.12° → 3.64°, and that is not
+a worsening: 5 reversals in 6 seconds is slow drift, while 400 is oscillation.
+You cannot judge chatter by span; you need step or frequency.
+
+The `neckD` landscape with SPD on is **not monotonic**: 0.4 gives span
+0.46°, 1 — a breakout to 13.8°, 2 — 0.71°, 4 — 0.38°, 8 — 4.75°. Meanwhile everything
+above 0.4 spoils stance (torso 2.17…2.91° vs 1.43°). Do not twiddle `neckD` without
+need; 0.4 is already the best.
+
+Previous baseline — `Trials/Baselines/pelvis-world/`, fingerprint
+`f6b2e7d3961974e3a901b564be22a6eea380bf093aff4d241c56cfa6a73b2e48`,
+runs `pelv_stand` and `pelv_squat`. Its numbers: torso 2.15°, pelvis 5.11°,
+lumbar 5.50°, RMS 0.0071, pushes 21 / 22.
+
+| | ostrich knee | +flip | **+pelvis control** |
+|---|---|---|---|
+| Torso tilt | 3.38° | 5.88° | **2.15°** |
+| Pelvis tilt | 15.4° | 15.4° | **5.11°** |
+| Lumbar travel | 10.2° | 14.4° | **5.50°** |
+| Offset RMS | 0.0070 | 0.0178 | **0.0071** |
+| Saturation | 0.0015 | 0.0002 | **0** |
+| Both feet on ground | 0.9985 | 0.9985 | **1.0000** |
+| Forward push | 22 / falls 23 | 18 / falls 20 | **21 / falls 22** |
+| Backward push | 23 / falls 24 | falls 12 | **22 / falls 23** |
+| Crouch | ~5 cm at pelvis 36° | 6.8 cm at pelvis 17.3° | 6.9 cm, return to stance |
+
+On all **survived** pushes the lumbar stays ≤ 9.58° of 20. It now
+hits the stop only after `Falling`, i.e. as a consequence of the fall,
+not as its cause. That was exactly the goal of the fix.
+
+The landscape stopped being holey: `pelvisP` 1, 1.5, and 2 all stand
+(`pelv_p1`, `pelv_p15`, `pelv_stand`); there are no neighboring “stands / falls”.
+
+The knee was checked geometrically from the logs: it protrudes **+2.9 cm forward** of
+the hip–ankle line instead of the former 4 cm back; the thigh is vertical, the foot
+is flat.
+
+Crouch became qualitatively different. Depth used to be limited by pelvis collapse: 5 cm
+was reached with the pelvis at 36° and the lumbar at the stop. Now `crouch 1` gives 6.9 cm
+at torso 2.15°, lumbar 17.3° without the stop, and the human returns to stance.
+
+**27.08: crouch depth retuned after SPD.** The gap between 40 and 70 is closed.
+Default `crouchKneeFlex` = **55** (drop 12.7 cm, knee 67°, saturation 0).
+The landscape is monotonic: 40→70 all `fell: false`, `returnedToStand: true`, torso
+1.43°. Saturation appears from 65 (0.0017) and 70 (0.0047). Push thresholds at
+default 55 are the same as `stable-pd`: 23 / falls 24 both ways. Runs
+`cknee_*`, `ck55_*`, summary `Trials/Runs/cknee_sweep_summary.json`.
+
+**27.08: CoM support brought to the load-bearing feet.** `CenterOfMassCalculator`
+computes bounds only from grounded feet (the same probe as
+`BodyStateEstimator`) and keeps the last support if both are in the air. In
+quiet stance and crouch with both feet on the ground the metrics matched the
+former ones bitwise (`com_stand` / `com_squat55` / `com_pf23` / `com_pb23`).
+The build fingerprint changed; the `stable-pd/` baseline was not reshot — stance
+numbers are the same.
+
+**27.08: neck and head viscosity lowered to τ ≈ 0.20 s.** `neckFriction`
+was 36 (effectively a weld: `K·Δt/Ieff` ≈ 115, the stop-torque clips
+everything above `Ieff/Δt` ≈ 0.31). SPD already holds both joints, so K can
+be dropped below the clamp. Arms were not touched. Sweep `visc_neck_*` on build
+`387f32b983245727…`; after the default change the fingerprint
+`8583e8fa5968458b0edd1b3a59eed4d49630f47fca02e1cafbe54818d9b4982e`.
+`visc_neck_def_stand` / `_squat` / `_pf24` / `_pf25` / `_pb23` / `_pb24`
+matched CLI τ=0.20. A new baseline was not opened.
+
+K from neck `Ieff` 0.00156743: `0.3135` (τ=0.005, clamp edge), `0.03135`
+(0.05), `0.01567` (0.10), `0.00784` (0.20). `applied.jointDamping.damping`
+and `tauSeconds` matched Extra; shoulders/elbows/wrists stayed 12 / 12 / 1.2.
+
+| Stance 30 s | K=36 (weld) | **τ=0.20, K=0.00784** |
+|---|---|---|
+| Torso tilt | 1.43° | **1.42°** |
+| Pelvis tilt | 3.61° | 3.61° |
+| Lumbar travel | 3.68° | 3.65° |
+| Offset RMS | 0.0053 | 0.0053 |
+| `rmsTorsoAngVel` | 5.94 °/s | **5.28 °/s** |
+| `rmsNeckJointSpeed` | 18.9 | **16.8** |
+| `rmsHeadJointSpeed` | 13.0 | **10.7** |
+| Saturation / feet | 0 / 1.0000 | 0 / 1.0000 |
+| Forward push | 23 / falls 24 | **24 / falls 25** |
+| Backward push | 23 / falls 24 | 23 / falls 24 |
+
+`visc_neck_tau005` on stance matched `visc_neck_k36` in the displayed
+metrics: above the clamp K does not work. Below the clamp stance is no worse than noise;
+torso jitter even drops a bit — the head is no longer welded to the balance
+loop. Crouch `crouch 1` / 55: drop 0.1270 vs 0.1271,
+return to stance, saturation 0. Forward 24 N·s now holds
+(`recoverySeconds` 3.01); 25 drops at 6.78 s. Backward unchanged.
+
+Working point — **τ=0.20, `neckFriction = 0.00784`**. τ was not
+touched further: that was the top of the original sweep 0.05 / 0.10 / 0.20.
+
+**28.08: arms got a joint pose on SPD.** Shoulder / elbow / wrist
+wired in `SetupBalanceController`. Goal — quiet hold, not
+a pendulum: `shoulderBase 0`, `elbowBase −20` (flexion is minus, we do not occupy stop `0`),
+`wristBase 0`. Sign as at the knee (`P·error − D·speed`);
+the elbow bends minus, that is not an error. Arm viscosity was not lowered
+(12 / 12 / 1.2). A new baseline was not opened. Build fingerprint
+`025a61eae2711f6f3afd59195b50df269344fa76850c529420f45c4e95f56de5`.
+Runs `arm_stand` / `arm_squat55` / `arm_pf24` / `arm_pf25` /
+`arm_pb23` / `arm_pb24`. `applied.elbowBaseAngle` = −20.
+
+| Stance 30 s | no arms (τ=0.20) | **arms SPD** |
+|---|---|---|
+| Torso tilt | 1.42° | **0.96°** |
+| Pelvis tilt | 3.61° | 3.67° |
+| Lumbar travel | 3.65° | **3.43°** |
+| Offset RMS | 0.0053 | 0.0053 |
+| `pelvisDrop` | 0.0017 | 0.0017 |
+| Saturation / feet | 0 / 1.0000 | 0 / 1.0000 |
+| `elbowLimitFraction` | 0.9855 | **0.0002** |
+| `rmsShoulder/Elbow/Wrist` | 5.29 / 2.02 / 2.73 | 5.72 / 8.38 / 10.89 |
+| Forward push | 24 / falls 25 | 24 / falls 25 |
+| Backward push | 23 / falls 24 | 23 / falls 24 |
+
+In stance the elbow settles near −17.5° of the −20° target (gravity pulls toward
+zero, finite P does not finish the squeeze). Crouch `crouch 1` / 55: drop 0.1270,
+return to stance, torso 0.96°, saturation 0, elbow not at the stop. Push
+thresholds the same; backward `recoverySeconds` a bit longer (2.44 → 4.50 at 23 N·s),
+does not affect the threshold.
+
+**28.08: arm viscosity lowered to τ ≈ 0.10 s.** Former `shoulderFriction` 12 /
+`elbowFriction` 12 / `wristFriction` 1.2 welded the joints (`stepRatio` 3.4 / 11.8 / 5.1;
+stop-torque clips everything above `Ieff/Δt`). SPD already holds the pose, so K can
+be dropped below the clamp. Sweep `visc_arm_*` on build `025a61eae2711f6f…`; after
+the default change the fingerprint
+`9ac0462d84d4d7a5f96d321e692082aed6436a4c73268d8172bac7a04de45bb6`.
+`visc_arm_def_stand` / `_squat` / `_pf24` / `_pf25` / `_pb23` / `_pb24`
+matched CLI τ=0.10. A new baseline was not opened. `neckFriction` and `crouchKneeFlex` 55
+were not touched.
+
+Ieff from `arm_stand`: shoulder 0.0177722, elbow 0.00509677, wrist 0.00117525.
+K = Ieff/τ: clamp edge τ=0.005 → 3.55444 / 1.01935 / 0.23505; 0.05 → 0.355444 /
+0.101935 / 0.023505; **0.10 → 0.177722 / 0.0509677 / 0.0117525**; 0.20 → 0.088861 /
+0.0254839 / 0.00587625. `applied.jointDamping.damping` and `tauSeconds` matched Extra.
+
+| Stance 30 s | weld (`arm_stand`) | **τ=0.10** |
+|---|---|---|
+| Torso tilt | 0.96° | 1.03° |
+| Pelvis tilt | 3.67° | 3.74° |
+| Lumbar travel | 3.43° | 3.57° |
+| Offset RMS | 0.0053 | 0.0052 |
+| `rmsTorsoAngVel` | 5.29 °/s | **4.48 °/s** |
+| `pelvisDrop` | 0.0017 | 0.0017 |
+| Saturation / feet | 0 / 1.0000 | 0 / 1.0000 |
+| `elbowLimitFraction` | 0.0002 | 0.0002 |
+| `rmsShoulder/Elbow/Wrist` | 5.72 / 8.38 / 10.89 | 5.52 / 12.36 / 19.18 |
+| Forward push | 24 / falls 25 | 24 / falls 25 |
+| Backward push | 23 / falls 24 | 23 / falls 24 |
+
+`visc_arm_tau005` on stance matched `arm_stand` in the displayed metrics: above
+the clamp K does not work. τ=0.05 and 0.10 stand and hold 24 N·s forward; τ=0.20 drops
+forward 24 at 8.74 s, so it was not taken. Crouch `crouch 1` / 55: drop 0.1271
+vs 0.1270, return to stance, saturation 0, elbow not at the stop.
+Forward `recoverySeconds` at 24 N·s is longer (3.27 → 7.02), does not affect the threshold.
+
+Working point — **τ=0.10**, `shoulderFriction = 0.177722`,
+`elbowFriction = 0.0509677`, `wristFriction = 0.0117525`.
+
+**28.08: arms on counter-reach from CoM.** Layer: `BalanceController`.
+`ControlArmsForBalance(balanceSignal)`: base ± `armShoulderBalanceGain` /
+`armElbowBalanceGain` / `armWristBalanceGain` (default **25 / 10 / 0**,
+CLI `-armShoulderBal` / `-armElbowBal` / `-armWristBal`). CoM ahead —
+shoulders plus (hand back), elbow toward zero. Zero gain — the former static pose.
+**On one-leg (`standLegLevel > 0`) counter-reach is off** — otherwise right
+support 2/5 fell; with the gate `oneg_r` is 5/5 again (`oneg_r_z*`, `oneg_r_arm0_*`).
+A new baseline was not opened. Runs `arm_bal_reg` / `arm_bal_pf24` /
+`arm_bal_gate` / `arm_bal_gate_pf24`.
+
+**28.08: leg commands split for one-leg stance; hold did not come out.**
+Layer: `MotionIntent.standLeg` (−1 left support / +1 right), CLI `-standLeg`.
+While `standLeg = 0`, the two-support path matched `visc_arm_def_*` bitwise
+(runs `oneg_reg_stand` / `_squat` / `_pf24` / `_pf25` / `_pb23` / `_pb24`,
+fingerprint `12b6baa951b43c11a5820d587956626885f8097cec71ac1aac0362c6b82aa8c2`).
+A new baseline was not opened. `oneg_l` / `oneg_r` — see defect 9.
+
+**28.08: swing flexor-bias while grounded; hold still did not come out.**
+Layer: `BalanceController.swingHipUnloadBias` (CLI `-swingHipUnload`).
+While the foot is on the ground, both hips stay on `ControlHipsToWorldUpright`;
+the swing gets `ApplySignal(Clamp(signal − standLegLevel·bias, −1, 1))`.
+After the first lift-off the latch holds `Min(angleAtLatch, −swingHipFlex)`.
+The swing ankle is still zeroed only after latch and `!grounded`.
+While `standLeg = 0`, `unload_reg_*` matched `oneg_reg_*` on listed metrics
+(stance, crouch, pushes 24 / falls 25 and 23 / falls 24). Build fingerprint
+`a64cc6d8dc338f3ae699d05c142a9946051d097e4442cf24ab9aab10611135f2`.
+A new baseline was not opened. Sweep `unload_l25` / `_l35` / `_l50` / `_r25` —
+see defect 9: do not twiddle bias further.
+
+**28.08: swing knee-gating while grounded; hold still did not come out.**
+Layer: knee targets in `BalanceController`. While the swing is grounded, the knee =
+`kneeTarget` as on the support; `swingKneeFlex` only after
+`swingHipLatched && !grounded`. While `standLeg = 0`, `knee_reg_*` matched
+`unload_reg_*` on listed metrics (stance, crouch, pushes 24 / falls 25
+and 23 / falls 24). Build fingerprint
+`18e0f5b958ae911a4103a082c0e8e455e7e9cb1577324980f90ae2d4dca2af34`.
+A new baseline was not opened. `knee_l` / `knee_r` — see defect 9: folding
+is closed, there is no lift-off.
+
+**28.08: stance-only CoM, partial grounded knee, forward/back asymmetry.**
+Layer: `BalanceController`. Ankle: `ankleOffsetN` from the center of the **support**
+foot; a grounded swing does not hold CoM. Knee: `swingKneeGroundedFraction`
+(default 0.25, CLI `-swingKneeGround`) — the fraction of `swingKneeFlex` before latch;
+after latch — full `swingKneeFlex`. Right leg ahead (+X): separate
+`forwardSwingHipUnloadScale` 1.3, `forwardSwingKneeGroundScale` 1.4 (CLI
+`-forwardUnloadScale` / `-forwardKneeScale`); `swingAnkleGroundedToeOff` by
+default 0 (CLI `-swingAnkleToeOff`; +12° drops left support). Toe-off
+±25° globally — rejected (`toe_l/r`, fell ~6 s). While `standLeg = 0`,
+`fwd_reg*_stand` / `stance_reg_stand` = `knee_reg_*` bitwise. Build
+fingerprint `6bbae4aba381e6876f56c9c9fcbcbc93b1614822e00281d85335b0250663d0ba`.
+A new baseline was not opened.
+
+| | **knee_l** | **fwd_l2** | **fwd_r32** | **fwd_r28** |
+|---|---|---|---|---|
+| Support | left | left | right | right |
+| `-swingKneeGround` | — | — | **0.32** | **0.28** |
+| `fell` / s | false / 20 | false / 20 | **false / 20** | false / 20 |
+| `pelvisDrop` | 0.0017 | 0.0017 | **0.0017** | 0.0017 |
+| `swingFoot` | 1.0000 | 1.0000 | **0.3812** | 0.3894 |
+| `stanceFoot` | 1.0000 | 1.0000 | **1.0000** | 1.0000 |
+| `muscleSaturation` | 0 | 0 | **0.0982** | 0.1040 |
+
+Left support: up to **0.50** grounded knee — `swingFoot` 1.0 (`pkgf_l50`).
+**28.08 later:** `standLegPelvisTilt` 10° on left support took off the forward swing
+(`oneg_l`, `swingFoot` **0.3024**, acceptance). Right support: CLI
+`-swingKneeGround 0.32` sometimes holds 20 s, but `swingFoot` ≈ 0.40, repeats
+diverge (`oneg_r32` vs `oneg_r32b`). Do not start SIMBICON.
+
+**28.08: back-swing — separate coefficients.** Layer: `BalanceController`.
+`backSwingHipUnloadScale` / `backSwingKneeGroundScale` (default **1.3 / 1.4**,
+CLI `-backUnloadScale` / `-backKneeScale`) — on the left swing when `standCmd > 0`.
+`backPelvisTiltFraction` (default **0**, CLI `-backPelvisTilt`) — rejected.
+
+**28.08: stand determinism — the root of “oneg_r32 vs oneg_r32b”.** Layer:
+`HeadlessTrial` + `Physics2DSettings`. Without `useConsistencySorting` and a fixed
+FixedUpdate order one exe gave fell 8 s **or** 20 s on the same args.
+Fix: `ConfigureDeterministicPhysics()` (before scene load and after
+`BuildTrialScene`), `Physics2DSettings.useConsistencySorting`,
+`[DefaultExecutionOrder]` sensor −100 / control 0 / muscles +50. Fingerprint
+after the follow-up `03f774900d0cb0d751e37276fcdbdd17efe3944703f99549a5b7fcf0d7383664`
+(`physicsJobOptions` in the summary). A new baseline was not opened.
+
+| | **oneg_l** | **det_r1…5** (plateau) |
+|---|---|---|
+| fell / s | false / 20 | **false / 20** (5/5) |
+| pelvisDrop | 0.0019 | **0.0019** |
+| swingFoot | 0.3014 | **0.09…0.11** |
+| saturation | 0 | **0.02…0.04** |
+
+**Both supports accepted** (`oneg_l`, `det_r*`). CSV between repeats is not bitwise
+(from ~5.06 s, see `trial-protocol.mdc`); two-leg regression `det_reg_a/b`
+is bitwise. Do not start SIMBICON.
+
+**28.08 later: walk swap is stable — cap + mid-ankle + soft on split.**
+Layer: `BalanceController`. `walk_swap_s4` (only soft 0.35 when both
+grounded) regressed on new builds (~16–23 s, fold). Root: cap
+only when both grounded → the lift-off frame lifts the clamp (`maxStandLegLevel`
+→ 1); stance-only ankle on walk dual-support pulls CoM toward the support by the 3rd swap;
+arm counter-reach on `walkActive` gave `elbowLimit` ~0.62. Packet:
+`dualSupportStandCap` **0.4** on all of `walkActive`; `dualSupportSwingScale`
+**0.35** on all of walk-split; mid-ankle on walk + both grounded;
+`ControlArmsForBalance` signal 0 on `walkActive`. Fingerprint
+`4d195a6b77575d30b1667275047479ef55b220f4fa44f6890eb95f2ba1437972`.
+Runs `walk_mid1…5` (5/5): 40 s, `walkSwapCount` 4, `fell: false`,
+`pelvisDrop` 0.0019, torso 1.95°, `bothFeet` 1.0. Regressions: `oneg_l_mid`,
+`oneg_r_mid`, `stand_mid`, `pf24_mid`, `pb23_mid` — no worsening.
+A new baseline was not opened. Next step — swing lift-off without fold.
+
+**28.08: age-gated lift — infrastructure, no acceptance.** `liftBlend =
+liftAge·comLiftGate`: cap level, unload/knee, ankle and fallOffset on a ramp
+(not a jump). Unload/knee — by `liftAct = liftBlend²`. CLI
+`-walkSwingLift` / `-walkLiftDelay` / `-walkLiftRamp` / `-walkLiftCom` /
+`-walkSwingToeOff` (0 = off). Defaults lift=1, delay=6, ramp=2,
+toeOff=0 — walk 40 s / 4 swap (`walk_reg_act`), `swingFoot` 1.0,
+`pelvisDrop` 0.0019. `-walkSwingLift 2 -walkLiftDelay 4 -walkLiftRamp 1`:
+`walk_act_ss3` — 4 swap, `swingFoot` **0.92**, fold ~22.6 s (was ~21 s
+with binary `walk_ss3_def`, swing **0.89**). Toe-off 8° on walk (`walk_act_ss3`
+with default 8) — fold ~11 s, 0 swap. **Lift-off <0.35 without fold is not closed.**
+Next step: a different lift-off mechanism (not global toe-off on back-swing).
+
+**28.08: arms on walk — swing + Transfer.** Stance: sin by phase, opposite
+the legs. Transfer: `walkArmTransferCarry` **0.35** — a decaying tail.
+CoM-balance on `walkActive` is off. Fingerprint
+`be2dfb34217828aeae666175840edca6b795b618b0480d5727702be652cefb22`.
+`walk_xfer_reg`: 40 s, 4 swap, `fell: false`, `pelvisDrop` 0.0016,
+`swingFoot` 1.0, `rmsShoulder` 8.28, `elbowLimit` 0. Peel infrastructure
+(default 0): `-walkKneePeel`, `-walkLiftUnload`, `-walkSwingToeOff` only
+forward; aggressive defaults — fold ~23 s (`walk_peel_def`). A baseline was not
+opened. Earlier: `walk_arm_safe`, `walk_arm_reg` fold ~15 s.
+
+Old baselines: `Trials/Baselines/current/` (`curr_*`, ostrich knee) and
+`Trials/Baselines/knee-flipped/` (`final_*`, knee flipped, pelvis still without
+control). Both are history; do not treat them as the goal. Push thresholds are comparable only
+inside one body.
+
+Old `damp_*` without provenance sit in
+`Trials/Baselines/legacy-no-provenance/`. Do not overwrite them and do not
+backfill a fingerprint. CSV — in `E:\Games\Unity3D LOGS\trials`.
+
+Drawing was split from physics on 24.08. The segment sprite lives on the child
+`Visual`; `Rigidbody2D` and the collider stay on the segment itself, so
+`SetVisualOffset` moves the picture without touching the body. Checked by run
+`vis_stand`: all 88 metrics and the whole CSV matched `pelv_stand` bitwise, even
+though the fingerprint changed. Segments became opaque, the left side
+is dimmed as the far one, the joint marker is one and 0.03 in diameter.
+
+**28.08, picture only:** limbs — capsules, head — ellipse (collider
+still a box). Colors skin/shirt/pants/sock/shoe, left side
+dimmed. Ground: dirt + a grass strip and sky without colliders. The camera
+in Play Mode follows the human in `LateUpdate`. Run `vis_look`: CSV
+matched `stand_mid` bitwise (SHA256 identical), `rigidbodyCount` 16.
+
+Play Mode at `humanCount = 1` now sets `muscleMultiplier` and
+`frictionMultiplier` to 1, as on the stand: the modes are comparable. Population
+spread turns on only at `humanCount > 1`. Keyboard and `MotionIntent`
+go only to the human with index 0.
+
+# Open defects
+
+1. ~~Neck and head viscosity must not be lowered while nobody holds the joints~~ —
+   **closed 27.08 for neck and head.** SPD already holds both joints;
+   `neckFriction` lowered from 36 to **0.00784** (`τ = Ieff/K ≈ 0.20 s`).
+   Stance is no worse than noise, forward push grew 23→**24**, backward unchanged.
+   Runs `visc_neck_*`.
+
+   ~~Do not lower arm viscosity yet~~ — **closed 28.08.** SPD already holds the pose;
+   K lowered to τ ≈ 0.10 s (`shoulderFriction` 0.177722, `elbowFriction` 0.0509677,
+   `wristFriction` 0.0117525, `stepRatio` ≈ 0.05). Stance is no worse than noise
+   (`rmsTorsoAngVel` 5.29 → 4.48), push thresholds the same 24 / 23. τ=0.20 drops
+   forward 24 N·s. Runs `visc_arm_*`. At neck/head `stepRatio` ≈ 0.025.
+2. ~~Arms are not controlled~~ — **closed 28.08.** Shoulder, elbow, and wrist hold
+   a joint pose with stable PD. `elbowLimitFraction` 0.9855 → **0.0002**.
+   Stance is no worse (torso 1.42° → 0.96°), push thresholds the same 24 / 23.
+   Runs `arm_*`. Viscosity lowered separately (`visc_arm_*`). For walk the arms
+   are not a balancer yet: both sides get one pose, there are no step phases.
+3. ~~Limbs draw on top of each other~~ — **closed 24.08.** The sprite moved
+   to the child `Visual`, which has its own offset `visualSideOffset` 0.045.
+4. ~~Joint markers larger than the segments~~ — **closed 24.08.** Diameter
+   `jointMarkerDiameter` 0.03 instead of 0.1, and there is now one marker per joint.
+5. ~~Sign of `kneeBaseAngle`~~ — **closed 24.08.** The knee really sat
+   mirrored and was flipped. Details in `balance-actuators.mdc`.
+6. Fast muscles topple: `activationSpeed 40` gives RMS 0.033 and saturation
+   0.233; at 80 the human falls in 7.1 s. The controller is sized for a slow
+   drive. Not rechecked after the knee flip.
+7. ~~Pelvis without orientation control~~ — **closed 24.08.** The thigh holds world
+   pelvis tilt. The hypothesis was fully confirmed: pelvis tilt 15.4° → 5.11°,
+   lumbar travel 14.4° → 5.50°, and both push thresholds grew by about 10 N·s
+   from this one fix. The lumbar stop at 20° no longer precedes the fall.
+8. Fall is diagnosed only from CoM offset, and it does not catch settling.
+   At `pelvisP 3` (`pelv_p3`) the summary honestly writes `fell: false` and 30 seconds
+   of life, but `pelvisDrop` there is **0.8385** — the human folded to the ground, and CoM
+   stayed over the feet. One `fell` is not enough for acceptance: also watch
+   `pelvisDrop` (stance holds 0.0017) and `maxAbsTorsoTilt`.
+9. ~~One-leg stance~~ — **closed 28.08.** Left: `standLegPelvisTilt`
+   + forward-swing. Right: `backSwing*` + PhysX determinism. Runs
+   `oneg_l`, `det_r1…det_r5`. Remainder: CSV is not bitwise between repeats
+   (trajectory drift, not fell/swingFoot). Do not start SIMBICON.
+10. Bitwise CSV on one leg: the outcome (`fell`, `pelvisDrop`) is stable,
+    the trajectory diverges from ~5.06 s — see `trial-protocol.mdc`. Does not block
+    acceptance of one-leg stance.
+
+# Work order
+
+Order 28.08: arms and one-leg **closed**. **Walk support swap accepted**
+(`walk_mid1…5`). **Arms on walk accepted** (`walk_xfer_reg`): 40 s, 4 swap, transfer-carry 0.35.
+`fell: false`, `pelvisDrop` 0.0016, arms not at the stop.
+**World profile taken** (`world_perf_capture.json`): 60 FPS, physics 0.17 ms,
+scripts 0.13 ms — the main bottleneck is not CPU.
+**30.08 PERF-1 lab** (optimization, not this body journal):
+`Trials/Runs/perf_wave1_lab.md`. Flat vs Test1 ~0.01 ms; trusted work
+~0.3 ms; `renderAvgMs = 0` still empty in batch. Do not cut 200 Hz.
+**Five margin cycles** (not FPS, not 100 Hz): ruler → one muscle pass →
+ground layers → support from contact → solver floor 8/3 — **closed 29.08**
+(`Trials/Runs/margin_cycles_summary.json`). Next in the game — swing
+lift-off without fold. Do not start SIMBICON. Do not cut 200 Hz.
+
+**29.08 swing lift-off:** stance-ankle + `weightBlend` (ramp=2).
+**Anti-mode closed:** `Interpolate=None` on the stand.
+**hipair base:** hip pose only `latched && !grounded`; swing **0.4053**,
+sat **0.0011**, 5/5. Target `< 0.35` is open.
+Rejected: CLI dual; holdknee/commit; heel-Transfer; push; lift 1.5; **slack**
+(0.5808); **airHold 0.15** (0.4112); liftDelay 4 (=hipair); liftUnload 0.10
+fold; peel 0.08/0.15 (=hipair); early lift delay0+1.2 fold; knee-rearm
+(0.6237); **heelPlant** fold ~16.7 s; **unlatchPlant** (0.6237);
+**latchAir 0.05/0.10**; **airLevel** (world foot horizontal in the air)
+on the restored arms — see the summary after restore `handSize.y=0.32`.
+**Regression:** `handSize.y` 0.32→0.19 broke walk fold ~25 s — **restored 0.32**.
+Predict infra default **0**. Summary `Trials/Runs/opt_swing_college_29.json`.
+
+**31.08 walk+run 10 cycles:** CLI series `Trials/Runs/opt_walk_run_10.json`.
+Winner: `swingHipUnloadBias` **0.32** + `dualSupportSwingScale` **0.32**.
+Walk swing 0.4053→**0.3928**, run 0.5695→**0.3646**, both hold 4 swaps,
+drop 0.0016. Regress stand / oneg_l / pf23 / pb23 OK. Lift-off **<0.35
+not closed**. Rejected: hip48, knee65, weightRamp 1.5, liftUnload 0.04,
+unload 0.28/0.35 alone, kneeGround 0.28 combo.
+
+**01.09 walk travels 0.21 m in 35 s — support swap is not walking.**
+Report `Trials/Runs/walk_travel_01.md`, numbers `walk_travel_01.json`.
+New metric `comTravelX` / `comSpeedX` in `TrialRecorder`: accepted walk
+(`walk_unstick_s8`, `wr10_c8_walk`) moves **0.208 m**, about 6 mm/s.
+`BalanceController` never read `MotionIntent.moveX` — the wish to go
+forward was dropped, the ankle held CoM over the support.
+New levers, **all default neutral**: `walkComLeadX` (`-walkComLead`, 0),
+`StepPhaseDriver.stanceComTrigger` / `stanceComMinAge` (`-walkComTrigger` /
+`-walkComTrigAge`, 0 / 0.35), `walkSwingScissorLevel` / `Flex`
+(`-walkSwingScissor` / `-walkSwingScissorFlex`, 0 / 1),
+`-walkTransferMin` (0.7, was not settable).
+Three blockers, each measured. (1) Lift schedule is sized for an 8 s stance:
+`standLegLevel` peaks near 0.6 in a one-second step, the swing never
+unloads. (2) The swing pose is behind a closed loop — the forward hip pose
+needs `swingHipLatched`, the latch needs air, and air needs the pose;
+breaking it with the scissor gives real lift-off, `swingFoot` 0.9991 →
+**0.4469** (`sci_c`). (3) The scissor throws the pelvis back (third law):
+`sci_a` travel **−1.110 m**, fold at 7.9 s. Dosing the grounded flex removes
+the reaction and the lift-off together (`scf_*`, `swingFoot` 1.0000); a
+forward trunk lean does not pay for it either (`lean_*`, fold 6…7.5 s).
+Stable but not travelling: `cad_i` / `cad_o` — 40 s, 8 swaps, torso 2.42°,
+`pelvisDrop` 0.033, travel 0.27 m. `walkStancePush` cannot help here: its
+gate needs `weightBlend > 0.99`, unreachable in a one-second stance
+(`cad_m` / `cad_n` byte-identical to `cad_i`).
+Regression on defaults: `wt_reg_walk` = `walk_unstick_s8`; stance 30 s RMS
+0.0052, saturation 0, feet 1.0000; `wt_reg_pf23` and `wt_reg_pb23` hold;
+`wt_reg_onegl` holds. `wt_reg_pf24` falls — after the 31.08 change the
+accepted forward threshold is **23**, not 24. Next is stance push-off on a
+body-driven cadence, not another sweep. Do not start SIMBICON.
+
+`PlayerInputSource`: →/D — lean forward, ←/A — back (`MotionIntent.lean`);
+↑/W — walk; **double-tap ↑/W + hold** — run (`intent.run`); ↓/S — crouch;
+Q/E — one-leg. `Tools/force-lean.flag` (`forward`/`back`), `Tools/force-run.flag`.
+Stand: `-lean 1|-1 -leanTime 5 -leanHold 10`, `-run 1 -runTime 5 -runHold 20`
+(`-runStance` 4, `-runLiftDelay` 2).
+`PlayerInputSource`: `Tools/force-crouch.flag` — crouch; Q / E or
+`Tools/force-stand-leg.flag` (`left`/`right`) — one-leg stance.
+Stand: `-standLeg left|right -standLegTime 5 -standLegHold 20`
+`-swingHip` / `-swingKnee` (hip minus after lift-off, knee plus
+after latch and `!grounded`; before lift-off — `swingKneeGroundedFraction`)
+`-swingHipUnload` (flexor-bias, default 0.25)
+`-swingKneeGround` / `-forwardUnloadScale` / `-forwardKneeScale` /
+`-backUnloadScale` / `-backKneeScale` /
+`-swingAnkleToeOff` / `-standPelvisTilt` (left support only).
+`-dualSupportSwing` / `-dualSupportCap`
+`-walkSwingLift` / `-walkLiftDelay` / `-walkLiftRamp` / `-walkLiftCom`
+`-walkSwingToeOff` / `-walkLiftLevelRate`
+`-walkArmShoulder` / `-walkArmElbow` / `-walkArmTransfer`
+`-walkKneePeel` / `-walkLiftUnload`
+`-walk 1 -walkTime 5 -walkDuration 25 -walkStance 10 -walkTransfer 8
+-walkTransferCom 0.02 -walkFirst right|left`
+
+Play Mode after SPD is not fully closed by eye (key injection into Input
+System did not arrive); the stand crouch with SPD matched `son_squat`.
+
+# What walk still lacks
+
+This is not coefficient tuning, but missing things in the control layer.
+
+1. ~~Both legs get the same command~~ — **closed 28.08 for
+   one-leg stance.** `standLeg` splits the legs; partial grounded knee +
+   stance-only ankle + forward/back-asymmetry + `standLegPelvisTilt` on the left.
+   **Both supports hold 20 s** (`oneg_l`, `det_r*`, `swingFoot` ≈ 0.30–0.33).
+   There are no step phases.
+2. **Support phases — `StepPhaseDriver` (event-gated).**
+   `EnsureRefs` + one driver before `PlayerInputSource`. The first phase holds
+   (`walk_ronly9`). **right→left swap accepted 28.08** (`walk_mid1…5`):
+   40 s, `walkSwapCount` 4, `fell: false`, `pelvisDrop` 0.0019, torso 1.95°,
+   5/5 repeats (early `walk_swap_s4` — only soft 0.35 when both
+   grounded, without cap and mid-ankle; regressed on new builds).
+   Root of fold after swap (`walk_swap10`): dual-support unload/tilt/knee
+   in a closed loop plus stance-only ankle on dual-support. Cure —
+   `dualSupportSwingScale` 0.35 on all of walk-split; `dualSupportStandCap`
+   0.4 on all of `walkActive` (CLI `-dualSupportCap`); mid-ankle on walk +
+   both grounded; arm counter-reach off on `walkActive`. Cold `oneg`
+   is not touched (cap/soft only on `walkActive`). Cap landscape: 0.55 fold
+   on 1 swap, 0.40 stands 5/5, 0.70 fold on 3 swap. While `bothFeet` 1.0 on
+   walk — there is no swing lift-off; this is weight transfer, not single support. Fall from
+   the support foot — only in true single-support; Recovery knee flexion
+   on dual-support split is off. Do not start SIMBICON.
+3. ~~Support from the midpoint of both feet~~ — **closed 27.08** in
+   `CenterOfMassCalculator`. On the one-leg probe there is no false Falling:
+   the automaton falls only when |CoM offset| is truly > 0.30.
+
+# Accepted walk decisions
+
+Decided 24.08: we go through one-leg stance; we do not try a step right away.
+Support is counted from the load-bearing foot.
+
+~~Two sensors contradicted each other~~ — **closed 27.08.**
+`CenterOfMassCalculator.TryGetSupportBounds` matches the logic of
+`BodyStateEstimator.CalculateSupport`: only grounded feet; both in the air
+— the last known support, not the midpoint of the feet.
+
+# Plants (30.08)
+
+New layer. Builder `PlantTree` (not `UnityEngine.Tree`). Play scene `Tree`,
+`treeCount = 1`. `SampleScene` and `World` keep `treeCount = 0`.
+
+A tree is the same segmental box as a human limb: `HumanSegment` +
+`HingeJoint2D`, size from collider, not `localScale`. Recursion `Grow`
+from the parent tip: leader near the axis, side branch at `forkAngle`,
+side alternates so CoM stays over the stump. Default `maxDepth = 3`,
+cap 15 segments — one Human of bodies.
+
+No muscles. Wood is `TreeSpring` (rest pose = grow pose) + `JointFriction`.
+Stump is Static. Wind is `½ ρ v² S` on each dynamic segment, via
+`TreeDriver` in `FixedUpdate`. Leaves are visual-only. `TreeRig.Static`
+is the cheap grove (same shape, no hinges). Bark/leaf: `Art/bark`,
+`Art/leaf` via `ArtLibrary`, same bake as clothing. Collider size unchanged.

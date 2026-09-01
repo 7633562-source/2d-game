@@ -1,0 +1,261 @@
+---
+description: Shared rules for every brain (AI). Intent, not force. English only, always.
+alwaysApply: true
+---
+
+# AI — shared rules
+
+**Language:** every AI rule file is **English only, always**. Do not add a
+Russian (or any other) rule document for a new brain. Chat with Yury stays
+Russian; this folder does not. All project documents follow
+`docs-english.mdc` (English only, always).
+
+This file binds **every** brain: bird, human, future species.
+A species does not invent its own laws or bypass this document.
+
+## Living organism (cognition)
+
+This hierarchy is **thinking**, not a physics parent. Do not derive `Bird`
+from `Human` or share a ragdoll. Bodies stay on their own layers.
+
+```
+LivingOrganism
+  Bird          ← first species for agent ai
+  Human         ← sibling, not a child of Bird
+  (later kinds)
+```
+
+Every `LivingOrganism` has **vision** and **hearing** — see **See and hear**.
+The brain reads those plus faction, then writes **what** the creature wants.
+Balance, takeoff, and joint pose belong to control and actuators. Torques
+come only from `Muscle` / `JointFriction`. Bird lift comes only from
+`BirdFlight` (the flap). There is no invisible upward force.
+
+## What a brain may write
+
+| Species | Brain writes | Brain does not write |
+|---|---|---|
+| Human | `MotionIntent` (`moveX`, `crouch`, `standLeg`, `lean`); `StepPhaseDriver.ArmWalk` / `EndWalk`; `OrganismVoice.Cry` | `AddForce` / `AddTorque`, PD, muscles, sizes |
+| Bird | `BirdController.mode` (`Stand` / `Walk` / `Fly` / `Glide` / `Sit` / `Attack` / `Peck`); `SetFacing` (±1); `OrganismVoice.Cry` | lift formula, `flapFrequency`, `walkThrust`, muscles, body `localScale` |
+| Any | `OrganismVoice.Cry` (`Alarm` / later `Call`) | mixer, `AudioSource` as ears, forces |
+| Any new | its own intent component under this same contract | forces, another layer's gains, another species |
+
+Do not invent `BirdIntent` without a task card.
+`takeoffDelay` auto-takeoff is not the brain: set `mode`, or touch the delay
+only if a card says so.
+
+```csharp
+// ❌ brain lifts the body
+bodyRb.AddForce(Vector2.up * lift);
+
+// ✅ bird: mode; BirdFlight supplies thrust
+control.mode = BirdMode.Fly;
+
+// ✅ human: wish; BalanceController holds the pose
+intent.moveX = 1f;
+```
+
+## Factions
+
+Every character belongs to a faction: human, bird, future species.
+Species is not a side. An allied human and an allied bird may share one
+faction. The player (index 0) is one faction; a `Flock` is another, or
+several flocks are several factions.
+
+Working names (not lore): `Player`, `Wildlife`. Lore names do not block
+the layer.
+
+Faction is **data**, not an actuator. When a card exists:
+
+- `FactionMember` — label on the body (human and bird).
+- `FactionTable` — pair of factions → `Ally` / `Neutral` / `Hostile`.
+  Spawn or scenario writes the table. Every brain **reads** it.
+  Do not hard-code “bird fears human” inside `BirdController`.
+
+Do not put faction inside `BalanceController`, `BirdFlight`, or
+`BirdSensors`. Do not add `AddForce` here. Do not invent `FactionMember`
+or a brain without a `.cursor/tasks/` card.
+
+The shared table is not a brain. One brain still owns one species.
+No god object that writes both human and bird intent.
+
+## Attitude
+
+First hostility is **avoidance**, not combat. There is no hit layer.
+Do not open damage, inventory, or an invisible upward force.
+
+The brain reads own label + table + sensors, then writes only the
+intent fields above.
+
+| Relation | Meaning | Bird may ask | Human may ask |
+|---|---|---|---|
+| `Ally` | same side | stay / walk / fly with flock | stand / walk toward |
+| `Neutral` | ignore | keep current mode | keep current intent |
+| `Hostile` | avoid or stoop | see → `Cry(Alarm)` then `Fly` away; close prey still `Attack` | `moveX` away; later `Cry` |
+
+`takeoffDelay` is still not the brain. Flock landing in
+`BirdController.TickFlock` sets `Sit` (contact rest), not faction.
+
+## See and hear
+
+World senses for every `LivingOrganism`. They answer “what is out there”,
+not “am I upright”. Tick in `Update`. No forces. Do not invent `Vision`
+or `Hearing` components without a card. `SoundEvent` / `SoundBus` /
+`OrganismVoice` exist (card `BIRD-6-voice`): the brain may `Cry`;
+hearing reads the bus. That is not the audio mixer.
+
+This is a **sagittal** 2D world. The bird’s nose is
+`BirdController.facing` (±1): +1 looks along +X, −1 along −X.
+Ahead is `facing` along X, behind is the other sign. There is no street
+left/right. “Side” means ahead or behind along X, never a second
+horizontal axis. The brain may call `SetFacing` (or write `facing`); it
+does not scale the body or invent a yaw motor.
+
+Do not use the player camera (`CameraFollow`) as eyes. Do not use
+`Light2D` / torch as sight. Do not use the audio mixer as ears.
+Do not fold these into `BirdSensors`, `VestibularSystem`,
+`CenterOfMassCalculator`, or `BodyStateEstimator` (inner ear and feet).
+
+### Vision — look
+
+Origin: the **head** (flock: body). A cone along `facing` (±X), finite range.
+A candidate in range is **seen** only if a line to it is free — occluder
+is the `Ground` layer (platforms, dirt). Use NonAlloc (`Linecast` /
+overlap). Not `OverlapBox` in `FixedUpdate`.
+
+Output the brain may read (no forces): who, distance, ahead/behind,
+blocked or not. Then the brain asks `FactionTable`. You do not see
+behind your back. You do not see through the ground.
+
+```csharp
+// ❌ camera or light is not sight
+bool seen = renderer.isVisible;
+
+// ✅ head, cone along facing (±X), Ground blocks
+// seen = inCone && !Linecast(head, other, Ground)
+```
+
+### Hearing — listen
+
+A **sound** is a short-lived fact (`SoundEvent`): who made it, where, how
+loud, what kind (`Alarm`, later Call / step / flap). `OrganismVoice.Cry`
+announces the fact. That is not a force. An optional `AudioClip` is
+picture for the player, not ears.
+
+Hearing is omnidirectional. Range falls with loudness. **v1: no occlusion**
+— sound goes around a 2D ledge. Direction is the sign of
+`(source.x − hearer.x)`: ahead or behind.
+
+You can **hear** a Hostile you cannot see (behind you, or behind dirt).
+
+### What the brain does with it
+
+| Knows | Then (first attitude) |
+|---|---|
+| Sees Hostile / prey close and high enough | `Attack` (stoop, no hit) — prey marker only |
+| Sees threat / Hostile far | `Cry(Alarm)`, then `Fly` away (not `Attack`) |
+| Hears `Alarm` / Hostile, does not see | `Fly` (alert). Do not cry unless also seen |
+| Sees Ally | stay / walk / fly with |
+| Grounded, no prey ahead, or just landed | `Sit` |
+| Only Neutral | keep current intent |
+
+A flock shares one cheap scan — not a Linecast per bird at 200 Hz.
+Cap the seen/heard lists. Ranges are public fields, not a hard-coded fear.
+
+## Rate and budget
+
+Decide in `Update`, not at 200 Hz. A brain does not compute or apply forces
+in `FixedUpdate`.
+
+A full ragdoll is 1–2 heroes. A flock uses a cheap or shared brain on
+`Flock` — not `Human`, not a ragdoll bird per body.
+
+## Scenes and other layers
+
+| Brain | Play | Stay out of |
+|---|---|---|
+| Bird | `Bird`; flock — `BirdFlock50`; hen — `Chicken` | `World`, `SampleScene` |
+| Human | `World` | `SampleScene`; do not spawn birds |
+
+Balance sensors are read-only. World senses: **See and hear**. No forces.
+Do not mix a brain into the human `HeadlessTrial` unless a card says so.
+`BirdDrive` is already silent when `HeadlessTrial.Active` — do not turn
+it on for the human stand.
+
+One brain, one species. No god object that writes both human and bird.
+
+## Handshake with agent `bird` (accepted 30.08)
+
+Colleague: profile `bird`, rule `bird-physics.mdc`. They write **how**
+the body flies. This profile writes **what** the bird wants.
+
+| | Agent `ai` (this file) | Agent `bird` |
+|---|---|---|
+| Owns | `BirdDrive` / `BirdFlockDrive` / `OrganismVoice` / `SoundBus` | `Bird`, `BirdFlight`, pose, landing |
+| Writes | `mode`, `SetFacing`, `OrganismVoice.Cry` in `Update` | lift, flap, `walkThrust`, PD, perch |
+| Must not write | `AddForce`, lift formula, `flapFrequency` | `BirdDrive` circumstances, Vision, faction |
+
+`takeoffDelay` Stand→Fly is a demo timer, not the brain. Flock landing
+in `TickFlock` sets `Sit` and zeroes the delay — contact rest, not
+faction. After touchdown `BirdDrive` keeps `Sit` for `sitHold` so it
+does not fight that write.
+
+Card `BIRD-2-sit-attack`. Prey is the `BirdPrey` marker (position only).
+Not Vision, not a hit, not HP. Do not add `FactionMember` / `Vision` /
+`Hearing` without a new card. Do not edit `BirdFlight`.
+
+v1 prey circumstances stay on `BirdDrive.kind = Prey`.
+
+**Wander** (`kind = Wander`, card `BIRD-3-wander`): Sit → Fly → turn
+`SetFacing` ±X → Glide → Sit. Seeded (`wanderSeed`). No prey marker.
+Play `Bird` defaults to wander. Headless: `-birdDrive wander`.
+
+**Chicken** (card `BIRD-7-chicken`): same `Bird` family, `BirdKind.Chicken`.
+`ChickenWander` writes Sit / Walk / Peck. No Fly, Glide, or perch return.
+Play `Chicken`. Headless: `-birdKind chicken -birdDrive wander`.
+Threat alarm on a hen is Walk away, not Fly.
+
+**Beak (card `BIRD-8-beak`):** every bird has a `Beak` segment. The brain
+writes `Peck` or `Attack`. `BeakStrike` reads the beak collider and may
+`Damageable.Hurt`. The brain does not call Hurt and does not `AddForce`.
+
+**Flock** (card `BIRD-4-flock`): `BirdFlockDrive` — one `Update` for
+the pack, per-bird seed, leash to the centroid. Not a Linecast per body.
+Play `BirdFlock50`. Headless: `-birdDrive wander -birdCount 5`.
+
+**Tree perch (handshake with `plant`, 30.08):** `PlantTree.GetPerchSlots`
+(twigs first) and `SeatBirds`. The flock may `BindPerches` — that only
+changes `homeX` / facing. Lift stays in `BirdFlight`. Wood is ghost:
+`Bird.GhostTreeWood` ignores trunk/branch colliders. Sit is `BirdPerch`
+pads only. `BirdSensors` still writes `bothGrounded` on those pads;
+`NearPerch` keeps the probe alive above the flat-ground skip. Do not
+add forces on the tree.
+
+**Return (card `BIRD-5-perch-return`):** if a slot is bound and the bird
+touches dirt (`!BirdSensors.treeSupport`), do not `Sit` — face the slot
+and `Fly`. Do not use raw `NearPerch` for that bit: the AABB includes
+soil under the stump. `treeSupport` is grounded + NearPerch + height
+> 0.35 m above dirt. Glide faces `homeX` only when
+`|x − homeX| > homeFaceDeadzone` (default 0.15 m); inside the slot
+facing holds.
+Count `perchLandCount` / `dirtRejectCount`. Body (`TickFlock`) still
+Sit+Settle on first contact — overwrite dirt on the next `Update`.
+
+Do not add `FactionMember` / `Vision` / `Hearing` without a new card.
+Do not edit `BirdFlight`.
+
+**Voice (card `BIRD-6-voice`):** every `LivingOrganism` may vocalize.
+`OrganismVoice.Cry` → `SoundBus`. Threat v1 is the `BirdThreat` marker
+(ahead along `facing`), same style as `BirdPrey`. Default offset 0 —
+wander without a marker is unchanged (`cryCount` 0). Headless:
+`-birdThreat` / `-threatRange`. Flock: one cheap see + shared bus,
+not a Linecast per bird.
+
+Body (agent `bird`, 30.08 after wander): Sit/Stand/Walk pitch goal is 0
+(the 12° flare is glide-near-ground only). After `SetFacing` the pitch
+spring is softer for 0.4 s — do not compensate with extra turns. This
+profile accepts both; sit/fly times stay. `BirdWander.Step` enters Glide
+`glideLead` seconds before `phaseEnds`. Prey faces the marker when leaving
+Sit / entering Fly or Attack, not every frame. Tree perch: `BindPerches`
+writes `homeX` / facing only. Glide `SetFacing` to the slot uses
+`homeFaceDeadzone` 0.15 m.

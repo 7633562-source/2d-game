@@ -1,89 +1,155 @@
 ---
-description: Знаки моментов и особенности голеностопа в балансировщике
+description: Torque signs and ankle specifics in the balancer
 alwaysApply: true
 ---
 
-# Единое соглашение по знакам
+# What `jointAngle` is on HingeJoint2D
 
-Положительный сигнал регулятора означает «увеличить `jointAngle`», и это
-работа extensor. Проверено на колене: момент против часовой (flexor,
-`direction = +1`) уменьшает `jointAngle`.
+**`jointAngle` = connected-body rotation minus own rotation.** The joint
+lives on the child segment, `connectedBody` is the parent, so at the knee this is
+“thigh angle minus shin angle”, not the other way around.
+
+Verified on a deep squat, where the lumbar is jammed exactly at its limit
+`−20.00`, and `pelvis − torso` in the same frame gives `−19.74`. The reverse would
+have given `+19.74` — a 40° miss.
+
+You **cannot** check this sign by summing the chain angles “pelvis → hip → knee → ankle”:
+with a flat foot the sum is near zero, and zero is symmetric,
+so both variants pass the check the same way. You need a joint that sits far from
+zero, and independently measured orientations of both bodies.
+
+Hence the geometry: a positive joint angle rotates the child segment
+**clockwise** relative to the parent, that is, takes its lower end backward
+(into −X when looking right).
+
+The human faces right: the toe is at +0.195 from the ankle, the heel at −0.065.
+So for human flexion
+- the **knee** must grow positive (heel back) — limit `0…+120`;
+- the **elbow** must grow negative (hand forward and up) — limit `−140…0`.
+
+Knee and elbow bend in opposite directions, so the same sign
+of the range on both is always an error. That is exactly how it was found that the knee sat
+mirrored: `−120…0` allowed only ostrich flexion, the knee went
+4 cm past the hip–ankle line in stance and 12 cm in a squat.
+
+# Single sign convention
+
+A positive controller signal means “increase `jointAngle`”, and that is
+extensor work. Verified on the knee: a counterclockwise torque (flexor,
+`direction = +1`) decreases `jointAngle`. This matches the formula above:
+a counterclockwise torque increases own rotation, and that enters
+`jointAngle` with a minus sign.
 
 ```csharp
-// ✅ так устроен ApplySignal — использовать его, не писать своё
+// ✅ this is how ApplySignal is built — use it, do not write your own
 if (signal > 0f) { UpdateMuscle(extensor, signal); UpdateMuscle(flexor, 0f); }
 else             { UpdateMuscle(extensor, 0f); UpdateMuscle(flexor, -signal); }
 ```
 
-Перевёрнутый знак не даёт явной ошибки: он превращает регулятор в
-положительную обратную связь, и сустав уезжает в упор. Так шея роняла
-голову на ±30° за две секунды.
+A flipped sign does not give an obvious error: it turns the controller into
+positive feedback, and the joint drives into the stop. That is how the neck dropped
+the head to ±30° in two seconds.
 
-# Голеностоп — особый сустав
+# The ankle is a special joint
 
-Стопа прижата к земле, поэтому момент мышцы уходит не в поворот сустава,
-а в разворот всего тела. Отсюда два запрета:
+The foot is pressed to the ground, so muscle torque does not go into joint rotation,
+but into turning the whole body. Hence two bans:
 
-- Не добавлять голеностопу PD к целевому углу. Пружина роняет человека за
-  2.5 с при любом знаке.
-- Не демпфировать угол голеностопа мышцей. `ankleD 1.0` роняет за 2.8 с.
-  Вязкость даёт пассивный `JointFriction`.
+- Do not add a PD to a target angle on the ankle. The spring drops the human in
+  2.5 s at either sign.
+- Do not damp the ankle angle with a muscle. `ankleD 1.0` drops in 2.8 s.
+  Viscosity is supplied by passive `JointFriction`.
 
-Голеностоп получает только момент против смещения центра масс.
+The ankle gets only a torque against center-of-mass offset.
 
-Стопа — один прямоугольник. Второй сегмент (пальцы) на сотне существ
-не окупается: свободный шарнир плюсны ломает голеностоп, а сварка даёт
-два лишних `Rigidbody2D` без новой степени свободы.
+The foot is one rectangle. A second segment (toes) does not pay off
+on a hundred creatures: a free metatarsal hinge breaks the ankle, and a weld gives
+two extra `Rigidbody2D` with no new degree of freedom.
 
-# Поясница держит мировую вертикаль, а не угол к тазу
+# The lumbar holds the world vertical, not the angle to the pelvis
 
-Торс разделён на `Pelvis` и `Torso` с поясничным шарниром. Позиционный PD к
-углу относительно таза там не работает: торс не знает, где верх, и при
-заваливании таза послушно едет вниз вместе с ним, добавляя 35 кг в падение.
+The torso is split into `Pelvis` and `Torso` with a lumbar hinge. A positional PD to
+the angle relative to the pelvis does not work there: the torso does not know where up is, and when
+the pelvis topples it obediently rides down with it, adding 35 kg to the fall.
 
-Ошибку берут из `VestibularSystem.GetBodyTilt()` (абсолютный наклон торса),
-производную — из `GetBodyAngularVelocity()`. Смешивать мировую ошибку с
-`joint.jointSpeed` нельзя, это разные системы отсчёта. Поле и CLI
-`lumbarPGain` / `-lumbarP` — **плюс 2**. Минусы уже стоят в формуле
-`(-P)*error - (-D)*speed`; передавать отрицательное значение нельзя, это
-перевернёт контур. Переход с угла к тазу на мировую вертикаль дал наклон
-торса 3.02° против 8.43°, при том же СКО.
+The error is taken from `VestibularSystem.GetBodyTilt()` (absolute torso tilt),
+the derivative — from `GetBodyAngularVelocity()`. Mixing the world error with
+`joint.jointSpeed` is forbidden; those are different reference frames. The field and CLI
+`lumbarPGain` / `-lumbarP` are **plus 2**. The minuses are already in the formula
+`(-P)*error - (-D)*speed`; you must not pass a negative value, that
+will invert the loop. Switching from the angle to the pelvis to the world vertical gave torso
+tilt 3.02° versus 8.43°, at the same RMS.
 
-Запрет позиционного PD относится только к голеностопу: он особый потому, что
-стопа прижата к земле. Поясница соединяет два свободных сегмента, там пружина
-к целевой ориентации законна.
+The ban on positional PD applies only to the ankle: it is special because
+the foot is pressed to the ground. The lumbar connects two free segments; a spring
+to a target orientation is legal there.
 
-Следить за рабочей точкой сустава, а не только за максимумом. В текущем
-baseline 10.9° — это пик стартового перехода, а не постоянная рабочая точка;
-после толчка 22 Н·с поясница доходит до 13.5° из диапазона ±20°. При быстрых
-мышцах она стучит в упор. Наклон таза логировать обязательно — с разделением
-торса это отдельная переменная равновесия.
+Watch the joint’s operating point, not only the maximum. In the current
+baseline 10.9° is the peak of the startup transient, not a constant operating point;
+after a 22 N·s push the lumbar reaches 13.5° of the ±20° range. With fast
+muscles it slams into the stop. Pelvis tilt must be logged — with the torso split
+this is a separate equilibrium variable.
 
-# Пассивное трение: явный демпфер надо ограничивать
+# A light joint needs Stable PD, not coefficient tuning
 
-`JointFriction` считает `τ = −K·ω` и прикладывает пару к обоим телам, поэтому
-угловое ускорение равно `τ/I`, где `I` — инерция тела относительно **своего
-центра масс** (`Rigidbody2D.inertia`), а не относительно сустава. Явное
-интегрирование устойчиво лишь при `K·Δt/I < 2`; выше этого демпфер перелетает
-через нуль скорости и разгоняет сустав, а потолок момента только превращает
-расходимость в предельный цикл.
+Ordinary PD is unstable when `K·Δt/I` is large: in a step it applies a torque
+computed from the velocity at the **start** of the step, and overshoots the target. At the neck
+`K·Δt/Ieff` ≈ 115, at the head ≈ 119 — there this is not margin, it is a guarantee of oscillation.
+That is how the head thrashed: 400 reversals in 6 seconds, 33 Hz, up to 0.9° per step.
 
-Поэтому момент режется дважды: сначала до величины, ровно останавливающей
-относительное вращение за шаг, потом по `maxTorque`.
+Coefficient tuning does not fix this, and both attempts are recorded as dead ends.
+Lowering `neckMuscleTorque` from 15 to 4 N·m removes chatter by a factor of 35, but drops
+the forward push from 21 to 18 N·s. Lowering `neckD` from 0.4 to 0.2 removes chatter
+by a factor of 22, but the neck punches through its ±30° stop and 5.7 kg slam the torso. The same
+term holds against a push and creates chatter: with ordinary PD this is inseparable.
+
+It is fixed by a formula — Stable PD (Tan, Liu, Turk, 2011). Torque is computed from
+the **predicted** angle at the end of the step, and the result is divided by `1 + K·Δt/I`:
+
+```csharp
+// ✅ this is how it stands in ControlSegmentToWorldUpright
+float tiltForError = tilt + angVel * dt;                  // angle at the end of the step
+float damping      = k * dt / effectiveInertia;           // k in N·m·s/rad
+float signal       = Mathf.Clamp(raw / (1f + damping), -1f, 1f);
+```
+
+The denominator is not a fudge: it equals the exact solution of the implicit step for
+a linear damper, so it is stable at any `K`. Take **paired** inertia,
+`1/(1/Iself + 1/Iconn)`, for the same reasons as in `JointFriction`.
+
+`Rigidbody2D.inertia` in `Awake` has not yet been recomputed from the collider, so
+compute paired inertia lazily, on the first `FixedUpdate`.
+
+The change is purely formulaic: at the same 15 N·m torque and the same `neckD` 0.4
+chatter fell by a factor of 17 per step, torso tilt 2.16° → 1.43°, and both push
+thresholds rose — forward 22 → 23, backward 21 → 23. This is the only case in
+the project where rest and stability improved at the same time.
+
+# Passive friction: an explicit damper must be limited
+
+`JointFriction` computes `τ = −K·ω` and applies a pair to both bodies, so
+angular acceleration equals `τ/I`, where `I` is the body’s inertia about **its own
+center of mass** (`Rigidbody2D.inertia`), not about the joint. Explicit
+integration is stable only at `K·Δt/I < 2`; above that the damper overshoots
+through zero velocity and accelerates the joint, and a torque ceiling only turns
+divergence into a limit cycle.
+
+So the torque is cut twice: first to the magnitude that exactly stops
+relative rotation in one step, then by `maxTorque`.
 
 ```
-τ_max = ω_отн / ((1/I₁ + 1/I₂) · Δt)
+τ_max = ω_rel / ((1/I₁ + 1/I₂) · Δt)
 ```
 
-С этим ограничением демпфер устойчив при любом `K`, но слишком большой `K`
-превращает сустав в почти сварной шов: он гасит вращение за один шаг.
-Подбирая `K`, смотреть на постоянную времени `τ = I/K` — она не зависит от
-шага физики, в отличие от самого условия устойчивости.
+With this limit the damper is stable at any `K`, but too large a `K`
+turns the joint into an almost welded seam: it kills rotation in one step.
+When picking `K`, look at the time constant `τ = I/K` — it does not depend on
+the physics step, unlike the stability condition itself.
 
-# Потолки момента выводятся из геометрии
+# Torque ceilings are derived from geometry
 
-Стопа не передаст момент больше, чем `m*g*(плечо до края опоры)`: дальше
-тело просто вращается вокруг носка или пятки. При 70 кг, носке 0.195 и
-пятке 0.065 это 65 Н·м на extensor и 22 Н·м на flexor каждой стопы.
-Отношение 3:1 совпадает с реальным: икра втрое сильнее передней мышцы
-голени.
+The foot will not transmit more torque than `m*g*(moment arm to support edge)`: beyond that
+the body simply rotates about the toe or the heel. At 70 kg, toe 0.195 and
+heel 0.065 that is 65 N·m on the extensor and 22 N·m on the flexor of each foot.
+The 3:1 ratio matches reality: the calf is three times stronger than the anterior
+tibialis.

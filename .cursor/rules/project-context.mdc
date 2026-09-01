@@ -1,41 +1,89 @@
 ---
-description: Контекст проекта - 2D симулятор баланса человека на Unity
+description: Project context — Unity 2D muscle-balance ragdoll simulator
 alwaysApply: true
 ---
 
-# Проект
+# Project
 
-2D физический симулятор человека на Unity 6000.5.8f1. Это не платформер:
-цель — заставить ragdoll стоять и удерживать равновесие за счёт мышц.
+2D physics ragdoll simulator in Unity 6000.5.8f1. Four models, do not mix
+layers: human (stance and balance by muscles), bird (flap → lift on the
+body), tree (recursive segments, spring, no muscles), and dog (quadruped
+stance by muscles). A flock in scene is `BirdRig.Flock` (one body). The
+human and the dog have no invisible "up" force.
 
-Физическая сцена строится программно из `GameProcess.Start()`. Префабов
-нет; в сохранённой сцене остаются камера и `GameManager` со скриптами
-`GameProcess` и `GroundBuilder`.
+The physics scene is built in code from `GameProcess.Start()`. No prefabs.
+Seven saved scenes — do not mix Play Mode, so chats do not open the wrong
+model in one Editor:
 
-## Слои (не смешивать)
+| Scene | Whose Play | What it spawns |
+|---|---|---|
+| `SampleScene` | 2D physics / stand | `humanCount = 1`, no birds, no trees, no dogs. **Do not touch.** |
+| `Bird` | Bird / bird AI | `humanCount = 0`, `birdCount = 1`, `cameraFollowsBird`. Flat ground, no `LevelGenerator`. |
+| `BirdFlock50` | bird AI flock | `humanCount = 0`, `birdCount = 50`, `birdDrive` wander. Flat ground, no `LevelGenerator`. |
+| `Chicken` | ground bird | `humanCount = 0`, `birdCount = 5`, `birdKind` chicken, `birdDrive` wander. Flat ground. |
+| `Tree` | plants | `humanCount = 0`, `birdCount = 0`, `treeCount = 1`. Flat ground, no `LevelGenerator`. |
+| `Dog` | dog stance | `humanCount = 0`, `dogCount = 1`. Flat ground, no `LevelGenerator`. |
+| `World` | levels / optimization | human + yard. `birdCount = 0`, `birdDrive` off, `treeCount = 0`, `dogCount = 0`. |
 
-| Слой | Файлы |
-|------|-------|
-| Запуск | `GameProcess`, `GroundBuilder` |
-| Тело | `Human`, `HumanSegment` |
-| Актюаторы | `Muscle`, `JointFriction` |
-| Сенсоры | `VestibularSystem`, `CenterOfMassCalculator`, `BodyStateEstimator` |
-| Управление | `BalanceController` |
-| Эксперимент | `HeadlessTrial`, `TrialRecorder`, `HeadlessBuild`, `GlobalHumanLogger` |
+One Unity Editor and one `-Rebuild` for the project. Scenes split Play
+eyes, not two solvers at once. Headless human: `run-trial.ps1` on
+`SampleScene`, Editor not required. Bird on the stand: `-bird 1`, not
+scene `World`.
 
-Сенсоры только читают состояние и никогда не прикладывают силы.
-Моменты создают исключительно `Muscle` и `JointFriction`.
+## Layers (do not mix)
 
-## Общение
+| Layer | Files |
+|---|---|
+| Boot | `GameProcess`, `GroundBuilder` |
+| World | `LevelGenerator`, `StaticPlatform` |
+| Body (human) | `Human`, `HumanSegment` |
+| Body (bird) | `Bird` |
+| Body (plant) | `PlantTree`, `TreeSpring`, `TreeDriver` |
+| Body (dog) | `Dog` |
+| Actuators | `Muscle`, `JointFriction` |
+| Aero (bird) | `BirdFlight`, `BodyAero` |
+| Sensors (human) | `VestibularSystem`, `CenterOfMassCalculator`, `BodyStateEstimator` |
+| Sensors (bird) | `BirdSensors` |
+| Control (human) | `BalanceController` |
+| Control (bird) | `BirdController` |
+| Control (dog) | `DogStanceController` |
+| Intent | `MotionIntent`, `PlayerInputSource`, `StepPhaseDriver` |
+| AI (every species) | rule `ai.mdc`; bird — `BirdDrive` writes `mode` / `SetFacing`; human — `MotionIntent` |
+| Experiment | `HeadlessTrial`, `TrialRecorder`, `HeadlessBuild`, `GlobalHumanLogger` |
 
-Отвечать только по-русски, даже если вопрос задан на другом языке.
-Названия классов, методов и API Unity не переводить: `FixedUpdate`,
-`Rigidbody2D`, `HingeJoint2D`.
+Sensors only read state and never apply forces.
+Joint torques come from `Muscle` and `JointFriction`. Bird lift comes from
+`BirdFlight` on the body (on while wings flap; zero without a flap). That
+is not a muscle and not a joint motor.
+Bird rules: `.cursor/rules/bird-physics.mdc`. Plants: `plant-physics.mdc`.
+Dog: `dog-physics.mdc`. Every brain: `.cursor/rules/ai.mdc`.
+The human headless stand does not spawn birds, trees, or dogs unless
+the matching CLI flag is set.
 
-Пользователь — новичок в Unity, поэтому объяснять физический смысл
-правки, а не только код.
+## Language
 
-## Отладка
+Project documents are **English only, always** (`docs-english.mdc`).
+Chat with Yury stays Russian. Do not translate class names or Unity API:
+`FixedUpdate`, `Rigidbody2D`, `HingeJoint2D`.
 
-Отлаживать баланс на одном человеке (`humanCount = 1`), а не на 50 —
-800 Rigidbody2D делают поведение шумным и медленным.
+Yury is new to Unity — explain the physical meaning of a change, not only
+the code.
+
+## Debug
+
+Debug human balance on one body in `SampleScene` (`humanCount = 1`), not
+on 50. Bird — scene `Bird` or CLI `-bird 1`, not together with the human.
+Chicken — scene `Chicken` or `-birdKind chicken`.
+Dog — scene `Dog` or CLI `-dog 1`, not together with the human.
+in `World`. Tree — scene `Tree`. The human headless stand does not create
+birds or trees.
+
+## Documents
+
+Map: `DOCS.md`. Acceptance canon: `Trials/Baselines/stable-pd/`.
+Folder `Baselines/current/` is history. Do not delete summaries.
+
+## Desk
+
+Windows clicks — User Rule "Protocol, then mouse"; PC desk — `F:\Kursor\Admin`.
+Here, Unity only.

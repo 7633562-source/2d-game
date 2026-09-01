@@ -1,0 +1,116 @@
+---
+description: CPU budget — full ragdoll count, 200 Hz, jobs, CCD, do not retune PD for FPS
+alwaysApply: true
+---
+
+# Physics budget
+
+A full physical character `Human` or `Bird` is about 16 `Rigidbody2D`,
+muscles, and a 200 Hz step. This is the hero budget: keep 1–2 such
+characters on screen at once, not a crowd.
+
+- Leave the player at 200 Hz. Switching to 50 Hz breaks the controller
+  and is not a way to raise FPS.
+- `humanCount` 10–50 is allowed only as a laboratory load in
+  `SampleScene`, not as the `World` game mode.
+- In the `World` game keep `birdCount = 0` and `treeCount = 0`. Watch
+  flight in scene `Bird`, the tree in scene `Tree`, not together with
+  the human: a `Sway` tree is about 15 bodies, same as one `Human`.
+  A grove is `TreeRig.Static` only.
+- In the game, `Physics2D jobs` may be on. `HeadlessTrial` must turn
+  them off: one-leg probe `oneg_r` determinism depends on it.
+- Keep `Maximum Allowed Timestep` low, about 0.05 s, not 0.333 s,
+  so a dropped frame does not queue a long physics-step backlog.
+- `OverlapBoxAll` in `FixedUpdate` is forbidden: use `NonAlloc`.
+  Do not call `Find` or `GetComponent` every step — cache the references.
+- `CollisionDetectionMode2D.Continuous` is needed on the feet, not on
+  every segment. Do not turn `Interpolate` off for FPS: physics runs at
+  200 Hz, the frame is about 60 Hz.
+- A 10 s stand measurement is skewed by exe startup. Estimate the budget
+  from a 30 s run or from the difference between runs of different
+  duration.
+- Do not change `lumbarP`, muscles, or other control gains for
+  performance: that changes body stability, not the cost of the model.
+
+# Course (college 28.08)
+
+The game is one controlled `Human` with honest muscle physics, not a
+crowd of active ragdolls and not a platformer with an upward force.
+Do not stop the model. Do not lower 200 Hz: the `World` profile is
+already taken (below); there is no new controller. 50 Hz is closed by
+the stand. A controller substep on coarser physics is not a saving.
+Do not amputate the arms: they are in the CoM and the stance. Do not
+fuse the pelvis with the chest. Merging `Muscle`+`JointFriction` into
+one pass is legitimate plumbing after the profile. 100 Hz
+(`-fixedDelta 0.01`) is a separate experiment with no other edits, not
+the next step. The bottleneck is the main thread and 3–4 steps per
+frame, not "all cores busy".
+
+# World profile (28.08, cycle 2)
+
+Scene `World`, 1 human, `birdCount = 0`, jobs ON, batch Play 35 s
+(warmup 5 s). Summary `Trials/Runs/world_perf_capture.json`.
+
+| | Number |
+|---|---|
+| Frames after warmup | 1801 |
+| FPS | **60** (`targetFrameRate` cap) |
+| Frame p50 / p95 / p99 | 16.67 / **16.72** / 16.83 ms |
+| Physics2D | **0.17 ms** |
+| FixedUpdate scripts | **0.13 ms** |
+| Render marker | 0 (batch did not catch URP) |
+| `maxFixedSteps` | 4, once **5** (frame 26.7 ms around t=9) |
+| GC.Alloc | ~34 bytes/frame |
+
+`Main Thread` ≈ 16.66 ms here equals the 60 FPS frame length: the
+`WaitForTargetFPS` marker in batch is almost zero, so `busyMain` cannot
+be taken from it. Physics+scripts work ≈ **0.3 ms**. There is no step
+spiral.
+
+**Verdict:** the main thread is in the green zone. Do not cut 200 Hz.
+Next is swing liftoff on walk, not a new profile and not 100 Hz.
+
+# Frame lab (30.08, PERF-1)
+
+Colleague note: `Trials/Runs/perf_wave1_lab.md`. Numbers:
+`perf_wave1_lab.json`. Do not drop the 28.08 table above.
+
+| | Test1 c20 | Flat c21 |
+|---|---|---|
+| Physics2D | 0.198 ms | 0.184 ms |
+| Scripts | 0.126 ms | 0.121 ms |
+| **knownWork** | **0.32 ms** | **0.30 ms** |
+| `maxFixedSteps` | 10 (Play-enter hitch) | **4** |
+| render | 0, `renderMarkerEmpty` | same |
+
+Yard − Flat ≈ 0.01 ms. The level does not eat the frame.
+`busyMain` in batch is the 60 FPS cap. `renderAvgMs = 0` is not GPU cost.
+URP CPU and FrameTiming stay **−1** in Editor batch. GPU-10 max **7%**.
+Do not cut 200 Hz. Do not retune PD. Lights/bloom stay closed.
+
+# Five margin cycles (college 28.08 evening)
+
+Course: not FPS (already 60 / 0.3 ms), but the cost of adding a hinge
+and a contact at 200 Hz. 100 Hz is not in the series. Production solver
+is **8/3**; do not lower it "into the piggy bank". Do not drop
+`IgnoreCollision` inside the body.
+
+| Cycle | What | Acceptance |
+|---|---|---|
+| 1 ruler | JSON: `wallPerSim`, CCD=2, probe saturation, `Muscle`/`JointFriction` count | CSV without forces; stance 10+30 s |
+| 2 actuators | one pass `JointFriction` then `Muscle`, no `Muscle.FixedUpdate` | listed: stance, pf24/pb23, `oneg_l`, walk 40 s |
+| 3 layers | ground layer + probe mask; self-contact as now | listed; Test1 must not lose ground |
+| 4 contacts | `GetContacts` NonAlloc instead of `OverlapBox` 0.06, or revert | do not break `oneg`/`walk`; do not retune PD |
+| 5 solver floor | sweep 6/2, 8/3, 10/4; prod stays 8/3 | table, not a new default |
+
+# Five cycles — result (29.08)
+
+| Cycle | Verdict | Numbers |
+|---|---|---|
+| 1 ruler | accepted | CCD=2, Muscle=30, Friction=15, `wallPerSim`≈0.77, probeSat≈0; stance 10+30 s |
+| 2 actuators | accepted | `ActuatorDriver`: friction→muscles; stance/oneg_l/walk/pb23 ok; forward threshold **23** (24 falls — as early SPD, not from the merge) |
+| 3 layers | accepted | `Ground` layer + probe mask; `meanProbeHits` 3.0→**1.0**; body IgnoreCollision as it was |
+| 4 contacts | accepted | `GetContacts` NonAlloc; stance/oneg_l/walk without fold; revert — `useGetContactsProbe=false` |
+| 5 solver | table | 6/2 drop 0.0034, **8/3** drop 0.0016, 10/4 drop 0.0007; `wallPerSim` 0.81→0.85→0.87; prod **8/3** |
+
+After the series: swing liftoff on walk, not a new World profile and not 100 Hz.

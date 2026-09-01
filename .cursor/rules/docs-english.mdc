@@ -1,0 +1,24 @@
+---
+description: All project documentation is English only, always. Do not add Russian docs.
+alwaysApply: true
+---
+
+# Document language
+
+**Every project document is English only, always.**
+
+This covers `.md`, `.mdc`, task cards, READMEs, agent profiles, trial
+narrative reports, and `DOCS.md`. Do not add a Russian (or any other)
+document for a new rule, card, baseline note, or report.
+
+Chat with Yury stays Russian. Files on this disk do not.
+
+Class names and Unity API stay untranslated: `FixedUpdate`, `Rigidbody2D`,
+`HingeJoint2D`. Metric names stay as in JSON (`fell`, `pelvisDrop`).
+
+When editing a file that still has Russian, translate that file in the
+same change. Do not leave a mixed-language living document.
+
+Do not delete old tables to "clean up" a translation. Translate them.
+C# comments already in the tree are not this pass; new comments in files
+you touch should be English.

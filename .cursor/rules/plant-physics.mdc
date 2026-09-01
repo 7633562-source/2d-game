@@ -1,0 +1,70 @@
+---
+description: Recursive tree physics — segments, spring, no muscles
+globs: Assets/PlantTree.cs, Assets/TreeSpring.cs, Assets/TreeDriver.cs
+alwaysApply: false
+---
+
+# Plants
+
+Separate layer. Do not touch `Human`, `BalanceController`, `HeadlessTrial`,
+or the yard. Play is scene `Tree`. Keep `treeCount = 0` in `SampleScene`
+and `World`.
+
+The builder class is `PlantTree`, not `Tree`: Unity already has
+`UnityEngine.Tree`. A segment is `HumanSegment` (box + Visual), same as
+the bird. Size is `collider.size`, not `localScale`. Leaves are
+`InitializeVisualOnly`, no rigidbody.
+
+## Two rigs
+
+| `TreeRig` | Where | Bodies |
+|---|---|---|
+| `Sway` | scene `Tree` | static stump + up to 15 dynamic hinges |
+| `Static` | future grove | same recursion, every body Static, no spring, no wind |
+
+One `Sway` tree costs about one `Human` in body count. Do not plant a
+`Sway` grove in `World`.
+
+## Recursion
+
+`Grow` from the parent's tip: a leader near the axis, a side branch at
+`forkAngle`. Side alternates so CoM stays over the stump.
+`maxDepth = 3` → up to 15 segments. `maxSegments` cuts growth.
+
+`TreeKind` picks the recipe. **Oak** is the hold/perch canon (same
+numbers as 30.08). Pine is tall and sparse, willow wide (Sway weeps
+a little), bush short with a three-way root, poplar thin.
+`KindFromPlantIndex` cycles 0…4. Scene `Tree` plants five (first
+`Sway`, rest `Static`). Yard grove stays `Static` and uses the same
+kinds. Headless default is oak: `-treeKind pine`. Do not plant a
+`Sway` row in `World`.
+
+## Hold pose, still bend
+
+Wood gravity is cancelled at the grow pose (`TreeSpring.holdTorque`).
+Without that, a side branch sags to the hinge limit — it looks like the
+branch fell off. Extra mass (a bird on `Ground`) is not in the hold
+sum, so `stiffness` still bends the joint.
+
+Human hinges: `+AddTorque` (CCW) **decreases** `jointAngle`. Wood spring
+is `+k·(θ−θ_rest)`, not textbook `−k·θ`. Cap by `maxTorque` only —
+a one-step `springStop` is < 1 N·m on wood inertia and kills the pose.
+
+Wood colliders use the `Ground` layer. A bird does not collide with
+wood (`Bird.GhostTreeWood`) — it flies through the crown. Sit points
+are `BirdPerch` pads from `EnsureBirdPerches` (top of twigs, cap 20).
+`GetPerchSlots` / `SeatBirds` / `NearPerch` stay the handshake with
+agent `ai`. Play flock: `BirdFlock50` has `treeCount = 1`. Headless:
+`-tree 1`, with birds `-bird 1 -tree 1`. Do not plant pads in World
+unless a bird is there.
+
+## Do not
+
+- No muscles and no `HingeJoint2D.useMotor`. Wood is `TreeSpring` +
+  `JointFriction`.
+- Forces only in `FixedUpdate` through `TreeDriver` (spring → damping →
+  wind).
+- Wind is `½ ρ v² S` on the segment, not an "up" force.
+- The stump is Static. The tree does not fall like a human ragdoll.
+- Do not bake bark/leaf textures here: card `VIS-TREE`, do not change
+  collider size.

@@ -1,0 +1,64 @@
+---
+description: World layer — procedural levels, no body physics
+alwaysApply: true
+---
+
+# Levels
+
+World layer: `LevelGenerator`, `StaticPlatform`, `LevelPiece`, `LevelGrove`.
+World scene: `Assets/Scenes/World.unity`. There are no level prefabs.
+
+## Scenes — do not mix
+
+| Scene | Whose | What is inside |
+|---|---|---|
+| `SampleScene` | physics / stand | camera + `GameManager` (`GameProcess`, `GroundBuilder`). Simple. **Do not touch.** |
+| `Bird` | flight + bird AI | flat ground, `humanCount = 0`, `birdCount = 1`, `birdDrive` wander. No generator. |
+| `BirdFlock50` | flock AI | flat ground, `birdCount = 50`, `birdDrive` wander. No generator. |
+| `Chicken` | hens | flat ground, `birdCount = 5`, `birdKind` chicken. No generator. |
+| `Tree` | plants | flat ground, `treeCount = 1`. Do not attach the generator. |
+| `Dog` | quadruped | flat ground, `dogCount ≥ 1`. Do not attach the generator. |
+| `World` | levels | `WorldManager` + `LevelGenerator` Test1. `birdCount = 0`, `birdDrive` off. |
+
+`HeadlessTrial` and `HeadlessBuild` stay on `SampleScene` and draw flat
+ground themselves. `World` and `Bird` are not in the stand build.
+
+Do not attach the generator on `SampleScene`, `Bird`, `BirdFlock50`,
+`Chicken`, `Tree`, or `Dog`, and do not call `AddComponent<LevelGenerator>`.
+`GameProcess` starts the yard only when there is a human and no birds,
+trees-from-`treeCount`, or dogs. A stray generator on a bird scene is
+ignored — wander leash stays on flat ground.
+
+## Profiles
+
+| Profile | Where | Ground |
+|---|---|---|
+| `Flat` | stand, no `LevelGenerator` | `GroundBuilder`, one rectangle |
+| `Test1` | `World` by default | authored "Yard": 5 cm curbs with a dip, square, gate and lookout; finish sign at x=48; tape to x=96 |
+| `Course` | `course` flag | random steps with no gaps |
+| `Steps` | `steps` flag | even stair by `stepHeight` |
+
+Textures: `Assets/Resources/Level/` and fallback path `Art/dirt`, `Art/grass`.
+visul assignment — `Tools/visul-test1-textures.md`.
+Do not touch `SampleScene`.
+
+Parallax: `LevelBackdrop` builds 8 layers under `ParallaxRoot` (not under
+`Level`). `follow` near 1 = horizon almost glued to the camera; near 0 =
+moves like the ground. Yard `PlantTree` stay in world space. No colliders
+on backdrop. Update in `LateUpdate` after `CameraFollow`.
+
+Yard grove: `LevelGrove` plants `PlantTree` with `TreeRig.Static` on
+Test1. Do not set `GameProcess.treeCount` on World (that path is `Sway`,
+scene `Tree` only). Do not change `PlantTree` sizes or springs.
+
+When `humanCount > 1`, it stays `Flat`.
+
+Spawn surface is **y = −2.0**, the human is at **y = −0.82**. Chunks ≤ 0
+are always flat at this height.
+
+## Spawn platforms
+
+Static `BoxCollider2D`, no `Rigidbody2D`. Size is `sprite.size` and
+`collider.size`, not `localScale`.
+No gaps between pieces: a gap for a ragdoll is a fall, not an obstacle.
+Chunk generation is in `Update`, not in `FixedUpdate`.

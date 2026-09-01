@@ -1,0 +1,64 @@
+---
+description: Human AI appendix to ai.mdc. MotionIntent only. English only.
+globs: Assets/{CharacterAI,NpcBrain,CreatureAI,AiPerception}*
+alwaysApply: false
+---
+
+# Human AI
+
+Read `.cursor/rules/ai.mdc` first — shared law for every brain, English only.
+This file is human-only. Agent `ai` currently works on birds; open this layer
+only when a human-brain task card exists.
+
+The brain decides **what** the human wants. Balance is `BalanceController`.
+Torques come only from `Muscle` and `JointFriction`.
+
+The human is a `LivingOrganism`, a **sibling** of Bird, not its child.
+Vision and hearing: `.cursor/rules/ai.mdc` (**See and hear**). Do not use
+`VestibularSystem` as eyes or `CameraFollow` as sight.
+
+Factions: read `.cursor/rules/ai.mdc` (Factions, Attitude). This file
+does not invent a second law. The human brain reads `FactionMember` /
+`FactionTable` and writes only `MotionIntent`. Hostility is avoidance,
+not a punch.
+
+## Layer
+
+| Writes | Does not write |
+|---|---|
+| `MotionIntent.moveX` / `crouch` / `standLeg` / `lean` / `run` | `AddForce` / `AddTorque` |
+| `StepPhaseDriver.ArmWalk` / `EndWalk` | PD gains, muscles, segment sizes |
+| `OrganismVoice.Cry` (same bus as the bird; no human card yet) | mixer as ears |
+| its own perception fields (distance, target) | `Human`, balance sensors |
+
+Human sensors (`VestibularSystem`, `CenterOfMassCalculator`,
+`BodyStateEstimator`) are read-only (balance). Vision and hearing are
+the organism senses in `ai.mdc`, not these.
+
+## Who sits on which body
+
+- Index 0 is the player: `MotionIntent` + `StepPhaseDriver` + `PlayerInputSource`.
+- Everyone else is AI: the same `MotionIntent`, no keyboard.
+- `GameProcess` currently attaches intent only when `i == 0`. Hanging a brain
+  on the others is this layer, not physics.
+
+`HeadlessTrial` sets intent itself. Do not mix AI into the human stand
+unless a card says so.
+
+## Rate and budget
+
+Poll and decide in `Update` (same as `PlayerInputSource`). In `FixedUpdate`
+do nothing except let the balancer read intent already written.
+
+A full ragdoll is the hero — 1–2 on screen. Do not spawn a crowd of `Human`.
+Do not run the brain at 200 Hz.
+
+## Scenes
+
+Play is `World`. Do not touch `SampleScene`. Do not spawn birds.
+
+## Forbidden
+
+No invisible upward force. Do not start SIMBICON.
+Do not change `jointAngle` signs or muscle caps. Do not start a new stand
+baseline. No human-brain task card — do not write this layer.

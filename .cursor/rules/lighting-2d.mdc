@@ -1,0 +1,77 @@
+---
+description: 2D lighting concept (URP Light2D). Not physics.
+globs: Assets/{Torch,SceneLighting,SpriteLighting,LightingPipelineSetup}*
+alwaysApply: false
+---
+
+# Lighting
+
+This layer is look only. Do not touch torques, colliders, or
+`BalanceController`.
+
+## Why URP
+
+The project was on Built-in: `Sprites/Default` does not accept light.
+In Unity 6, real 2D light is the **URP 2D Renderer** + `Light2D`
+(not a 3D Light). Documentation 6000.5: Global / Spot(Point) / Freeform /
+Sprite.
+
+Pipeline: `Assets/Settings/URP-2D.asset` + `Renderer2D.asset`.
+Created by `LightingPipelineSetup` when the editor opens.
+
+## Light layers
+
+| Layer | Type | Meaning |
+|---|---|---|
+| Moon | `Light2D.Global`, Multiply, intensity 0.22, cold blue | night base. One Global per blend style |
+| Torch | `Light2D.Point` 360°, Additive, intensity ~0.028, outer ~2.2 m | very dim local key. Perlin flicker in `Update` |
+| Sky | Unlit, dark color | the sky is not a wall; the torch does not paint it |
+| Body, dirt, slabs | `Sprite-Lit-Default` | accept Global and Point |
+| Flame | Unlit, bright orange | the source lights itself |
+
+Bloom (URP Volume, intensity 0.01, threshold 1.4) — almost off. HDR is on.
+Normal maps are **off**: a full pre-pass on every batch does not pay off
+on a ragdoll.
+Do not attach `ShadowCaster2D` shadows yet: a long ground would make a
+false wall.
+
+Light Render Texture scale 0.5. Depth/stencil is off: there are no 2D
+shadows. Max light RT is 4 (moon + torch), shadow RT is 0.
+
+## Frame budget (college 28.08)
+
+Do not cut physics or 200 Hz. The next measurement is the Profiler on
+`World` (physics / scripts / Render2D), not a Hz sweep.
+
+Look already taken out of the budget:
+- torch volumetric is off
+- Quality Ultra without 3D shadows, pixel lights, anisotropic, reflection
+  probes; do not touch `vSyncCount` = 1 — otherwise FPS is about
+  desync, not the frame
+- URP-2D: 3D Main/Additional Light and the shadow atlas are off
+  (light is Light2D only)
+- Renderer2D without depth/stencil, light RT ≤ 4, shadow RT = 0
+- Keep Interpolate on segments (smoothness at 60 Hz while physics is 200 Hz)
+- the `-nographics` stand does not bake capsules and does not place
+  joint markers
+
+Do not do: MSAA, ShadowCaster2D on the ground, a second Point Light with
+volume.
+
+## Torch
+
+`SceneLighting.Enabled` is **false** for now: no moon, no torch, no Bloom.
+Sprites go Unlit so the frame is not black. Set `true` to restore night.
+
+`Torch.Spawn` from `GameProcess` (Play Mode, not headless). No Rigidbody2D.
+Stands at y = −2, 1.25 m ahead of the human.
+Volumetric is off for the frame budget (`volumetricEnabled = false`,
+`volumeIntensity = 0`); do not turn it on without a separate task.
+
+## Do not
+
+- 3D Light / Standard shader on sprites
+- `HingeJoint2D.useMotor` and any light in `FixedUpdate`
+- SIMBICON
+- Attach Light2D to every body segment
+- Enable volumetric on Light2D without a separate frame-budget task

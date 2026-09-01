@@ -1,0 +1,127 @@
+---
+description: Segmented bird physics — lift from a flap, do not mix with the human
+globs: Assets/Bird*.cs, Assets/BirdFlight.cs, Assets/BodyAero.cs
+alwaysApply: false
+---
+
+# Bird
+
+A separate model. Do not touch `Human`, `BalanceController`, or the
+`HeadlessTrial` stand.
+
+Layer: body `Bird`, actuators `Muscle` / `JointFriction` (ragdoll only),
+flight `BirdFlight` + drag `BodyAero`, sensor `BirdSensors`,
+control `BirdController`. Who sets `mode` (the brain) is
+`.cursor/rules/ai.mdc`; this file is flap and landing physics, not
+behavior.
+
+## Handshake with agent `ai`
+
+Colleague: profile `ai`, law `.cursor/rules/ai.mdc`. They write **what**
+the bird wants. This profile writes **how** the body flies.
+
+| | Agent `ai` | Agent `bird` (this file) |
+|---|---|---|
+| Writes | `mode` / `SetFacing` (`BirdDrive`, `BirdWander`, `BirdFlockDrive`) | lift, flap, `walkThrust`, PD, perch, pose |
+| Must not write | `AddForce`, `BirdFlight` formula, `flapFrequency` | `FactionMember`, vision/hearing, fear of a human |
+| Sensors | world see/hear (own layer, later) | `BirdSensors` — inner ear and feet, not eyes |
+
+Do not invent `BirdIntent`, `Vision`, `Hearing`, or `FactionMember` here.
+
+`takeoffDelay` Stand→Fly is a **demo timer**, not the brain. Flock
+landing in `TickFlock` may set `mode = Sit` and zero the delay —
+that is contact rest, not faction. `BirdDrive` (card `BIRD-2`) decides
+in `Update`; it must not fight the landing write in the same physics
+step (`sitHold` after touchdown).
+
+Flock eye origin later is the **body** (`headVisual` has no
+`Rigidbody2D`). Ragdoll eye origin is `Head`. Facing is
+`BirdController.facing` (±1): ahead is that sign along X, not a street
+left/right. Do not use `CameraFollow` or `Light2D` as sight.
+
+Turn (flock): do **not** `localScale` the `Rigidbody2D` / perch and do
+**not** rotate the body 180° (legs would point at the sky). Put neck,
+wings, tail, legs under `Look` and set `lookRoot.localScale.x = facing`.
+Thrust heading is `Rot(pitch) * (facing, 0)`; pitch goal is
+`target * facing` (+8° right, −8° left). Walk thrust uses the same sign.
+Ragdoll stay +X until a card. CLI: `-birdFacing` / `-birdTurnAfter`.
+Play: `Bird` / `BirdFlock50` default `birdDriveKind` wander (BIRD-3 / BIRD-4).
+Prey stoop stays `birdDriveKind` prey. Sit pitch is 0 (not the 12° flare).
+Facing flip softens pitch spring 0.4 s — wander turns ±X in the air.
+`BirdWander` now enters Glide `glideLead` before fly ends (agent `ai`).
+BIRD-5: dirt is not home — the brain writes Fly toward `homeX`. This
+profile still Sit+Settle on contact in `TickFlock` (one physics step);
+the brain overwrites dirt on the next `Update`. Enable the perch and
+the glide flare when `PlantTree.NearPerch`, not only when height above
+flat dirt is < 0.45 m (a twig is higher). Facing-flip soft pitch does
+not extend if already in the 0.4 s window — Glide may chatter ±X at
+the slot.
+Visual (agent `visual`, 30.08): Look mirror is enough — capsules/ellipse
+are symmetric, no new texture. Keep `DimFar` / sorting after the flip
+(near wing stays bright and in front). Do not move `Body/Visual` under
+`Look` until a directed albedo exists.
+
+Two builds:
+
+| `BirdRig` | Where | Bodies |
+|---|---|---|
+| `Ragdoll` | stance stand (`-bird` without `-birdRig flock`) | joints and muscles |
+| `Flock` | scene, flock | **one** `Rigidbody2D`; wings and legs are look |
+
+Dozens of birds in a scene — `Flock` only. A ragdoll per individual
+gives ~16 bodies.
+Flock: one `FixedUpdate` (`BirdController` calls `sensors.Tick` → pose
+cache → `flight.Tick`).
+Wing and leg look is `LateUpdate`, not a physics step.
+Above `skipProbeAboveHeight` (0.5 m) the flock does not call `OverlapBox`,
+unless `PlantTree.NearPerch` — a tree branch is higher than flat ground,
+and Sit still needs a foot read. `treeSupport` is grounded + NearPerch +
+height > 0.35 m above dirt stance — the AABB alone counts soil under
+the stump as a perch. The brain reads `treeSupport` for BIRD-5, not
+raw `NearPerch`. Plant seats Play birds via
+`PlantTree.SeatBirds`; this profile keeps perch pose and pitch. Headless
+flat wander does not spawn trees.
+Wood is ghost to a bird (`Bird.GhostTreeWood`): the body flies through
+the crown. Sit contact is only `BirdPerch` pads at `GetPerchSlots`,
+not the trunk collider. Do not add a second Rigidbody2D per pad.
+Flock look has no `HumanSegment` on the feathers: the component is only
+on the body.
+
+Lift is one force on the body in `BirdFlight`. The flap is a switch:
+Fly gives thrust in time with the flap; without a flap the force is
+zero. Glide is lift ~ v², stall at low speed. In flight and on descent
+the body holds pitch with a spring; near the ground — a nose-up flash.
+Enable the support (`perchCollider`) before impact, or it lands on the
+chest and tumbles. Body drag is computed by the same `BirdFlight`
+(`BodyAero.Apply`); there is no second `FixedUpdate` per individual.
+The stand writes bird summary fields `wallPerSim`,
+`applied.rigidbodyCount`, `continuousBodyCount`, `muscleBehaviourCount`,
+`frictionBehaviourCount`, `meanProbeHits`, `humanSegmentCount` — a cost
+ruler, not a flight tune.
+
+Flock landing: `-stopFlap` switches to `Glide` (not `Stand`). Like a
+stone — `-stopFlapMode stand`. Liftoff counts only above
+`takeoffClearance`; otherwise Fly near the ground lands immediately.
+After contact the pitch spring stays — otherwise support friction
+spins the body. Flock walk is a look step + `walkThrust` thrust with
+a `walkSpeed` cap.
+
+Paired limbs: anchors with no X spread, look is `SetVisualOffset`.
+Play spawn: scene `Assets/Scenes/Bird.unity` (`humanCount = 0`,
+`birdCount = 1`, `cameraFollowsBird`). Do not open `World` /
+`SampleScene` for flight.
+Flock Play is scene `BirdFlock50`, not `Bird` and not `World`.
+Hens: same `Bird` class, `BirdKind.Chicken`. Play scene `Chicken`.
+Crow is the flying canon. Chicken is heavier, short-winged,
+`hoverMean` 0.55 — a hop, not a cruise. Stance Y after `ApplyKind`.
+CLI `-birdKind chicken`.
+Every kind has a `Beak` segment (card `BIRD-8-beak`). Ragdoll: hinge
+on the head. Flock: look child + trigger, no extra `Rigidbody2D`.
+Hits go through `BeakStrike` only — not a wing, not the chest.
+Stand: `run-trial.ps1 -Rebuild -Duration 10 -Label bird_stand -Extra @('-bird','1')`.
+Without `-bird` the human path does not change. `-takeoffDelay 0` —
+stance without takeoff. `-birdMode fly` — flap and thrust.
+`-birdRig flock` — flock build. `-stopFlap 4` — drop the flap at the
+4th second (glide by default). `-stopFlapMode glide|stand`.
+`-walkThrust` — flock step. `-birdFacing 1|-1`. `-birdTurnAfter`.
+`-birdMode sit|attack`. Play drive: `birdDrive` on `Bird` / `BirdFlock50`.

@@ -1,5 +1,11 @@
-# 2D симулятор баланса
+# 2D balance simulator
 
-Unity 6000.5.8f1. Ragdoll должен стоять за счёт мышц, это не платформер.
+Unity 6000.5.8f1. The ragdoll must stand by muscles. This is not a platformer.
 
-Стенд и приёмка: [Trials/README.md](Trials/README.md). Канон чисел — [Trials/Baselines/current](Trials/Baselines/current). Память проекта — `.cursor/rules`.
+Document map: [DOCS.md](DOCS.md). Chat door: [CURRENT.md](CURRENT.md).
+Documents are English only, always.
+
+Stand: [Trials/README.md](Trials/README.md). Acceptance canon —
+[Trials/Baselines/stable-pd](Trials/Baselines/stable-pd).
+Folder [Baselines/current](Trials/Baselines/current) is the old ostrich
+knee, not the live baseline. Project memory is `.cursor/rules`.

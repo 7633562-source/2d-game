@@ -1,44 +1,61 @@
 ---
-description: Конвенции C# и физики 2D для скриптов в Assets
+description: C# and 2D physics conventions for scripts in Assets
 alwaysApply: true
 ---
 
-# Физика
+# Physics
 
-Силы и моменты — только в `FixedUpdate`. В `Update` ничего физического.
+Forces and torques — only in `FixedUpdate`. Nothing physical in `Update`.
 
-Размер сегмента задаётся размером спрайта и коллайдера, а не масштабом:
+Segment size is set by sprite size and collider size, not by scale:
 
 ```csharp
-// ❌ ПЛОХО — искажает физику и дочерние объекты
+// ❌ BAD — distorts physics and child objects
 transform.localScale = new Vector3(size.x, size.y, 1f);
 
-// ✅ ХОРОШО
+// ✅ GOOD
 sprite.drawMode = SpriteDrawMode.Sliced;
 sprite.size = size;
 collider.size = size;
 ```
 
-Момент всегда прикладывается к обоим телам сустава (третий закон Ньютона):
+The X axis is “forward–back”, not “left–right”. There is no separate lateral axis in
+the sagittal model, so you cannot spread paired limbs along X:
+`hipHalfSpacing` and `shoulderHalfSpacing` enter the joint anchors, and the human
+will stand in a real lunge. Spread only the picture — the sprite lives on
+the child `Visual`, physics on the segment itself:
+
+```csharp
+// ❌ BAD — shifts the body; that is a step forward, not a viewpoint
+thigh.transform.localPosition = new Vector3(sideOffset, y, 0);
+
+// ✅ GOOD — only what is drawn moves
+thigh.SetVisualOffset(sideOffset);
+```
+
+Check such a change with a run: a purely visual change must give
+bitwise the same CSV as before it.
+
+Torque is always applied to both bodies of the joint (Newton’s third law):
 
 ```csharp
 rbSelf.AddTorque(torque, ForceMode2D.Force);
 joint.connectedBody.AddTorque(-torque, ForceMode2D.Force);
 ```
 
-Для управления суставами использовать мышцы-антагонисты (`direction` +1/-1),
-а не `HingeJoint2D.useMotor`.
+For joint control use antagonist muscles (`direction` +1/-1),
+not `HingeJoint2D.useMotor`.
 
-# Код
+# Code
 
-Комментарии на русском, как в существующих файлах: объяснять зачем и какой
-физический смысл, а не пересказывать строку.
+New comments in English. Do not mass-rewrite existing C# comments:
+explain why and the physical meaning, not restate the line.
 
-Ссылки на суставы, мышцы и `Transform` искать один раз в `Awake`, а не
-каждый кадр через `transform.Find` или `GetComponents`.
+Look up joints, muscles, and `Transform` once in `Awake`, not
+every frame through `transform.Find` or `GetComponents`.
 
-Проверять `null` перед использованием: тело собирается динамически, и
-сегмент может отсутствовать.
+Check `null` before use: the body is assembled dynamically, and
+a segment may be missing.
 
-Параметры выносить в public поля с `[Header]` и не перезаписывать их
-жёстко в `Start` — иначе Inspector бесполезен.
+Put parameters in public fields with `[Header]` and do not overwrite them
+hard in `Start` — otherwise the Inspector is useless.

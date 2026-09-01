@@ -1,55 +1,89 @@
 ---
-description: Разделение работы между агентами - диспетчер проектирует, исполнитель программирует
+description: Work split — dispatcher designs, executor programs
 alwaysApply: true
 ---
 
-# Роли
+# Roles
 
-Роли определяются функцией, а не моделью: кто сидит в чате с человеком —
-диспетчер, кем бы он ни был. Модель может меняться, разделение — нет.
+Roles are a function, not a model: whoever sits in the chat with the human
+is the dispatcher, whoever they are. The model may change; the split does not.
 
-**Диспетчер (чат с человеком)** — архитектура и приёмка. Решает, что менять
-и в каком слое, задаёт контракт и критерии готовности. Сам не гоняет серии
-прогонов и не вставляет CSV в переписку.
+**Dispatcher (chat with the human)** — architecture and acceptance. Decides
+what to change and in which layer, sets the contract and done criteria.
+Does not run trial series or paste CSV into the thread.
 
-**Исполнитель (новый агент на одну задачу)** — реализация. Читает
-`.cursor/rules`, правит файлы, гоняет стенд, возвращает таблицу чисел.
-Историю чата диспетчера ему не передавать — она дороже всех исходников
-проекта вместе. Пока на этой роли Grok 4.6 xHigh Fast.
+**Executor (a new agent for one task)** — implementation. Reads
+`.cursor/rules`, `CURRENT.md`, and `Trials/Runs/opt_agent_proposals.md`
+(own section), edits files, runs the stand, returns a table of numbers.
+Do not pass the dispatcher's chat history — it costs more than every
+source file in the project. The proposals file is a brief, not a GO card.
 
-Правку в две-три строки дешевле сделать в чате, чем разворачивать
-исполнителя. Делегируется работа, а не каждое присваивание.
+A two- or three-line fix is cheaper in chat than spinning an executor.
+Delegate work, not every assignment.
 
-# Что исполнитель решать не вправе
+Documents are English only, always (`docs-english.mdc`).
 
-- Заводить новые слои и переносить ответственность между ними.
-- Переименовывать public поля, которые читают другие скрипты и стенд.
-- Менять соглашение по знакам моментов.
-- Возвращать запрещённое в `balance-actuators.mdc`.
+# Who takes which task (thrifty mode, 25.08)
 
-Если задание противоречит физике — не переделывать замысел молча, а вернуть
-числа и описание противоречия.
+Tokens count. The dispatcher answers short: decision, table, next step.
+No CSV, no reciting rules, no trial series from the human chat.
 
-# Карточка задачи (пишет диспетчер)
+- **Ordinary executor** — Grok 4.6 xHigh Fast. Code, CLI, runs, summaries,
+  rule edits for an already accepted design.
+- **Profile physics** — Claude. Torque signs, SPD / PD, inertia and damper,
+  balance loop, "why they fell". The card must say this is physics;
+  otherwise Grok. Claude does not run series and does not edit look.
+- **Grok Bot (separate app)** — background clerk: compare summaries to
+  `stable-pd`, draft cards, scout papers. Not Unity, not physics.
+  Ready roster and prompts: `Tools/grok-bot-roster.txt`. Grok Bot weekly
+  limit ≠ the Cursor Models pool in the editor.
 
-1. Одна фраза: что должно стать иначе.
-2. Слой: тело / актюаторы / сенсоры / управление. Чужие не трогать.
-3. Контракт: какие поля и подписи обязаны остаться прежними.
-4. Приёмка: текущий baseline в `Trials/Baselines/current/` и
-   `current-front.mdc`. Исторический цельный торс в `trial-protocol.mdc`
-   — не путать с текущим. Явно новый эталон — только если карточка так
-   сказала.
-5. Запреты и форма отчёта — таблица чисел, без простыней CSV.
+After a closed stage — a new dispatcher chat. Do not copy the thread:
+`CURRENT.md`, `.cursor/ROSTER.md`, the rules, and
+`Trials/Baselines/stable-pd/` are full memory. Profiles: `.cursor/agents/`.
+Do not continue old wave chats.
 
-# Приёмка (делает диспетчер)
+# Watching a long executor
 
-Отчёт не принимать на слово: прочитать изменённые файлы и `*.json` сводки.
-Так уже нашлось расхождение — в отчёте «падает на 24 Н·с», а в сводке
-`fell: false`; порог оказался нестабильным, а не пройденным.
+If the executor did not answer in the time the task should take, or the
+user asked for status, do not treat "no notification" as still working.
+Check available status and actual results on disk. On timeout or resume
+error, accept what is already saved, name the unfinished part, and restart
+only that piece as a shorter task. Do not invent a current step from a
+"running" status alone.
 
-# Экономия токенов
+# What the executor may not decide
 
-- Память проекта — правила и эталон, не переписка.
-- После закрытого этапа начинать новый чат диспетчера.
-- Коэффициенты крутить аргументами стенда, не пересборкой плеера.
-- Редактор Unity закрыт, пока исполнитель собирает плеер.
+- Invent new layers or move responsibility between them.
+- Rename public fields that other scripts and the stand read.
+- Change the torque-sign convention.
+- Bring back anything forbidden in `balance-actuators.mdc`.
+- Delete or rename `Trials/Baselines/*`, `Trials/Runs/*`,
+  `.cursor/tasks/archive/`.
+
+If the assignment contradicts physics — do not silently redo the design;
+return the numbers and describe the contradiction.
+
+# Task card (dispatcher writes)
+
+1. One sentence: what must become different.
+2. Layer: body / actuators / sensors / control. Do not touch others.
+3. Contract: which fields and signatures must stay.
+4. Acceptance: `Trials/Baselines/stable-pd/` and `current-front.mdc`.
+   Folder `current/` is the outdated ostrich-knee baseline.
+   A new baseline only if the card said so.
+5. Forbids and report form — a table of numbers, no CSV dumps.
+
+# Acceptance (dispatcher)
+
+Do not take a report on faith: read the changed files and the `*.json`
+summaries. That is how a mismatch was caught — the report said "falls at
+24 N·s" while the summary had `fell: false`; the threshold was unstable,
+not passed.
+
+# Token thrift
+
+- Project memory is the rules and the baseline, not the thread.
+- After a closed stage, start a new dispatcher chat.
+- Tune coefficients with stand arguments, not a player rebuild.
+- Unity Editor is closed while the executor builds the player.

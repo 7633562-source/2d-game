@@ -1,0 +1,33 @@
+---
+description: Document map and no-loss rule. Baseline is stable-pd, not folder current/. English only.
+alwaysApply: true
+---
+
+# Documents
+
+Map: `DOCS.md`. Role: agent `docs`. Body journal is not here —
+`current-front.mdc`. Language: English only (`docs-english.mdc`).
+
+Stance acceptance is `Trials/Baselines/stable-pd/`. Folder
+`Baselines/current/` is a historical name, ostrich knee, not canon.
+
+Do not delete or rename `Trials/Baselines/*`, `Trials/Runs/*`,
+`.cursor/tasks/archive/`. Do not "clean" Runs. Do not backfill fingerprint
+in `legacy-no-provenance/`. A new baseline only from a card.
+
+If two files disagree, fix the pointer; do not drop the old table.
+`current-front.mdc` is append-only.
+
+Night 02:00 — local task `Unity-Docs-daily` (`Tools/run-docs-daily.ps1`),
+not Cursor cloud. Report: `Trials/Runs/docs_daily_latest.md`.
+
+Painted ragdoll parts: `.cursor/rules/painted-parts.mdc`. Do not
+accept a folder of independent gens as the animal.
+
+World frame lab (30.08): `Trials/Runs/perf_wave1_lab.md`. Do not read
+`renderAvgMs = 0` as GPU cost. Do not delete the JSON next to it.
+Every new profile chat reads `Trials/Runs/opt_agent_proposals.md`
+(own section). Not a GO card. PERF-1 is pre-grove (`LevelGrove` came
+later). Do not delete the JSON next to the lab.
+Latest verification: `Trials/Runs/opt_code_audit_31.md`. Flat cycles
+31/32 are invalid (`sampleCount = 0` and stale capture).
