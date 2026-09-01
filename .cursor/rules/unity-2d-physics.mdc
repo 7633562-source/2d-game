@@ -1,0 +1,44 @@
+---
+description: Конвенции C# и физики 2D для скриптов в Assets
+alwaysApply: true
+---
+
+# Физика
+
+Силы и моменты — только в `FixedUpdate`. В `Update` ничего физического.
+
+Размер сегмента задаётся размером спрайта и коллайдера, а не масштабом:
+
+```csharp
+// ❌ ПЛОХО — искажает физику и дочерние объекты
+transform.localScale = new Vector3(size.x, size.y, 1f);
+
+// ✅ ХОРОШО
+sprite.drawMode = SpriteDrawMode.Sliced;
+sprite.size = size;
+collider.size = size;
+```
+
+Момент всегда прикладывается к обоим телам сустава (третий закон Ньютона):
+
+```csharp
+rbSelf.AddTorque(torque, ForceMode2D.Force);
+joint.connectedBody.AddTorque(-torque, ForceMode2D.Force);
+```
+
+Для управления суставами использовать мышцы-антагонисты (`direction` +1/-1),
+а не `HingeJoint2D.useMotor`.
+
+# Код
+
+Комментарии на русском, как в существующих файлах: объяснять зачем и какой
+физический смысл, а не пересказывать строку.
+
+Ссылки на суставы, мышцы и `Transform` искать один раз в `Awake`, а не
+каждый кадр через `transform.Find` или `GetComponents`.
+
+Проверять `null` перед использованием: тело собирается динамически, и
+сегмент может отсутствовать.
+
+Параметры выносить в public поля с `[Header]` и не перезаписывать их
+жёстко в `Start` — иначе Inspector бесполезен.

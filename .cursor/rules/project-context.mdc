@@ -1,0 +1,41 @@
+---
+description: Контекст проекта - 2D симулятор баланса человека на Unity
+alwaysApply: true
+---
+
+# Проект
+
+2D физический симулятор человека на Unity 6000.5.8f1. Это не платформер:
+цель — заставить ragdoll стоять и удерживать равновесие за счёт мышц.
+
+Физическая сцена строится программно из `GameProcess.Start()`. Префабов
+нет; в сохранённой сцене остаются камера и `GameManager` со скриптами
+`GameProcess` и `GroundBuilder`.
+
+## Слои (не смешивать)
+
+| Слой | Файлы |
+|------|-------|
+| Запуск | `GameProcess`, `GroundBuilder` |
+| Тело | `Human`, `HumanSegment` |
+| Актюаторы | `Muscle`, `JointFriction` |
+| Сенсоры | `VestibularSystem`, `CenterOfMassCalculator`, `BodyStateEstimator` |
+| Управление | `BalanceController` |
+| Эксперимент | `HeadlessTrial`, `TrialRecorder`, `HeadlessBuild`, `GlobalHumanLogger` |
+
+Сенсоры только читают состояние и никогда не прикладывают силы.
+Моменты создают исключительно `Muscle` и `JointFriction`.
+
+## Общение
+
+Отвечать только по-русски, даже если вопрос задан на другом языке.
+Названия классов, методов и API Unity не переводить: `FixedUpdate`,
+`Rigidbody2D`, `HingeJoint2D`.
+
+Пользователь — новичок в Unity, поэтому объяснять физический смысл
+правки, а не только код.
+
+## Отладка
+
+Отлаживать баланс на одном человеке (`humanCount = 1`), а не на 50 —
+800 Rigidbody2D делают поведение шумным и медленным.
