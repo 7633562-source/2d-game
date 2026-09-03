@@ -90,14 +90,24 @@ public class Dog : MonoBehaviour
     public HumanSegment jawSegment;
     public BoxCollider2D jawCollider;
 
-    // Painted parts carry their own fur; tint only dims the far side.
-    private static readonly Color Near = Color.white;
-    private static readonly Color Far = DimFar(Color.white);
+    // Layout guide: one semi-transparent box per collider. No Dog/* PNG.
+    private static readonly Color PelvisColor = new Color(0.05f, 0.15f, 0.6f, 0.5f);
+    private static readonly Color ChestColor = new Color(0.1f, 0.2f, 1f, 0.5f);
+    private static readonly Color NeckColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+    private static readonly Color HeadColor = new Color(1f, 1f, 0f, 0.5f);
+    private static readonly Color JawColor = new Color(1f, 0.55f, 0.1f, 0.5f);
+    private static readonly Color TailColor = new Color(0.1f, 0.75f, 0.85f, 0.5f);
 
-    private static Color DimFar(Color c)
-    {
-        return new Color(c.r * 0.52f, c.g * 0.52f, c.b * 0.52f, 1f);
-    }
+    private static readonly Color FrontUpperNear = new Color(0f, 0.6f, 0f, 0.5f);
+    private static readonly Color FrontUpperFar = new Color(0.4f, 0.8f, 0.2f, 0.5f);
+    private static readonly Color FrontLowerNear = new Color(0.8f, 0.1f, 0.1f, 0.5f);
+    private static readonly Color FrontLowerFar = new Color(1f, 0.5f, 0.5f, 0.5f);
+    private static readonly Color RearThighNear = new Color(0.5f, 0f, 0.5f, 0.5f);
+    private static readonly Color RearThighFar = new Color(0.7f, 0.4f, 0.7f, 0.5f);
+    private static readonly Color RearShinNear = new Color(0.5f, 0.25f, 0f, 0.5f);
+    private static readonly Color RearShinFar = new Color(0.7f, 0.45f, 0.2f, 0.5f);
+    private static readonly Color PawNear = new Color(0.4f, 0f, 0f, 0.5f);
+    private static readonly Color PawFar = new Color(0.8f, 0.3f, 0.3f, 0.5f);
 
     // Pre-build fallback for callers that need a height before the body
     // exists. Derived from the same defaults as the fields, so a changed
@@ -186,11 +196,11 @@ public class Dog : MonoBehaviour
         float pelvisCenterX = -chestSize.x * 0.5f - pelvisSize.x * 0.5f;
         float pelvisCenterY = (pelvisSize.y - chestSize.y) * 0.5f;
 
-        HumanSegment pelvis = CreateSegment("Pelvis", pelvisSize, 0.140f, Near, 0, albedoKey: ArtLibrary.DogPelvis);
+        HumanSegment pelvis = CreateSegment("Pelvis", pelvisSize, 0.140f, PelvisColor, 0);
         pelvis.transform.localPosition = new Vector3(pelvisCenterX, pelvisCenterY, 0f);
         pelvisSegment = pelvis;
 
-        HumanSegment chest = CreateSegment("Chest", chestSize, 0.220f, Near, 0, albedoKey: ArtLibrary.DogChest);
+        HumanSegment chest = CreateSegment("Chest", chestSize, 0.220f, ChestColor, 0);
         chest.transform.localPosition = Vector3.zero;
         chest.ConnectTo(
             pelvis,
@@ -201,7 +211,7 @@ public class Dog : MonoBehaviour
         AddMuscles(chest, lumbarMuscleTorque);
         chestSegment = chest;
 
-        HumanSegment neck = CreateSegment("Neck", neckSize, 0.030f, Near, 1, albedoKey: ArtLibrary.DogNeck);
+        HumanSegment neck = CreateSegment("Neck", neckSize, 0.030f, NeckColor, 1);
         neck.transform.localPosition = new Vector3(chestSize.x * 0.5f + neckSize.x * 0.5f, 0f, 0f);
         neck.ConnectTo(
             chest,
@@ -211,8 +221,7 @@ public class Dog : MonoBehaviour
         AddFriction(neck, neckFriction);
         AddMuscles(neck, neckMuscleTorque);
 
-        HumanSegment head = CreateSegment(
-            "Head", headSize, 0.070f, Near, 2, HumanVisualShape.Ellipse, ArtLibrary.DogHead);
+        HumanSegment head = CreateSegment("Head", headSize, 0.070f, HeadColor, 2);
         head.transform.localPosition = new Vector3(
             chestSize.x * 0.5f + neckSize.x + headSize.x * 0.5f, 0f, 0f);
         head.ConnectTo(
@@ -227,10 +236,10 @@ public class Dog : MonoBehaviour
 
         CreateTail(pelvis, pelvisCenterX, pelvisCenterY);
 
-        CreateFrontLeg("FrontRight", 1f, chest, 6, 7, 8, Near, Near, Near);
-        CreateFrontLeg("FrontLeft", -1f, chest, -3, -2, -1, Far, Far, Far);
-        CreateRearLeg("RearRight", 1f, pelvis, 3, 4, 5, Near, Near, Near);
-        CreateRearLeg("RearLeft", -1f, pelvis, -6, -5, -4, Far, Far, Far);
+        CreateFrontLeg("FrontRight", 1f, chest, 6, 7, 8, FrontUpperNear, FrontLowerNear, PawNear);
+        CreateFrontLeg("FrontLeft", -1f, chest, -3, -2, -1, FrontUpperFar, FrontLowerFar, PawFar);
+        CreateRearLeg("RearRight", 1f, pelvis, 3, 4, 5, RearThighNear, RearShinNear, PawNear);
+        CreateRearLeg("RearLeft", -1f, pelvis, -6, -5, -4, RearThighFar, RearShinFar, PawFar);
 
         if (normalizeMass)
             NormalizeMass();
@@ -253,7 +262,7 @@ public class Dog : MonoBehaviour
     {
         Vector2 tmj = new Vector2(-headSize.x * 0.18f, -headSize.y * 0.38f);
         Vector2 center = (Vector2)head.transform.localPosition + tmj + new Vector2(jawSize.x * 0.5f, 0f);
-        HumanSegment jaw = CreateSegment("Jaw", jawSize, 0.008f, Near, 3, albedoKey: ArtLibrary.DogJaw);
+        HumanSegment jaw = CreateSegment("Jaw", jawSize, 0.008f, JawColor, 3);
         jaw.transform.localPosition = new Vector3(center.x, center.y, 0f);
         jaw.ConnectTo(
             head,
@@ -297,7 +306,7 @@ public class Dog : MonoBehaviour
         Vector2 elbow = shoulder + RotateZ(upperW, new Vector2(0f, -frontUpperSize.y));
         Vector2 ankle = elbow + RotateZ(lowerW, new Vector2(0f, -frontLowerSize.y));
 
-        HumanSegment upper = CreateSegment(sideName + "Upper", frontUpperSize, 0.040f, upperColor, upperOrder, albedoKey: ArtLibrary.DogFrontUpper);
+        HumanSegment upper = CreateSegment(sideName + "Upper", frontUpperSize, 0.040f, upperColor, upperOrder);
         PlaceRotated(upper, shoulder, upperW, frontUpperSize.y);
         upper.SetVisualOffset(visualShift);
         upper.ConnectTo(
@@ -308,7 +317,7 @@ public class Dog : MonoBehaviour
         AddFriction(upper, shoulderFriction);
         AddMuscles(upper, shoulderMuscleTorque);
 
-        HumanSegment lower = CreateSegment(sideName + "Lower", frontLowerSize, 0.028f, lowerColor, lowerOrder, albedoKey: ArtLibrary.DogFrontLower);
+        HumanSegment lower = CreateSegment(sideName + "Lower", frontLowerSize, 0.028f, lowerColor, lowerOrder);
         PlaceRotated(lower, elbow, lowerW, frontLowerSize.y);
         lower.SetVisualOffset(visualShift);
         lower.ConnectTo(
@@ -345,7 +354,7 @@ public class Dog : MonoBehaviour
         Vector2 knee = hip + RotateZ(thighW, new Vector2(0f, -rearThighSize.y));
         Vector2 ankle = knee + RotateZ(shinW, new Vector2(0f, -rearShinSize.y));
 
-        HumanSegment thigh = CreateSegment(sideName + "Thigh", rearThighSize, 0.080f, thighColor, thighOrder, albedoKey: ArtLibrary.DogThigh);
+        HumanSegment thigh = CreateSegment(sideName + "Thigh", rearThighSize, 0.080f, thighColor, thighOrder);
         PlaceRotated(thigh, hip, thighW, rearThighSize.y);
         thigh.SetVisualOffset(visualShift);
         thigh.ConnectTo(
@@ -356,7 +365,7 @@ public class Dog : MonoBehaviour
         AddFriction(thigh, hipFriction);
         AddMuscles(thigh, hipMuscleTorque);
 
-        HumanSegment shin = CreateSegment(sideName + "Shin", rearShinSize, 0.040f, shinColor, shinOrder, albedoKey: ArtLibrary.DogShin);
+        HumanSegment shin = CreateSegment(sideName + "Shin", rearShinSize, 0.040f, shinColor, shinOrder);
         PlaceRotated(shin, knee, shinW, rearShinSize.y);
         shin.SetVisualOffset(visualShift);
         shin.ConnectTo(
@@ -386,7 +395,7 @@ public class Dog : MonoBehaviour
             float taper = count == 1 ? 1f : Mathf.Lerp(1f, 0.45f, i / (float)(count - 1));
             Vector2 size = new Vector2(segLen, tailSize.y * taper);
             string name = i == 0 ? "Tail" : "Tail" + (i + 1);
-            HumanSegment seg = CreateSegment(name, size, massEach, Near, -1 - i, albedoKey: ArtLibrary.DogTail);
+            HumanSegment seg = CreateSegment(name, size, massEach, TailColor, -1 - i);
             Vector2 center = tip + new Vector2(-segLen * 0.5f, 0f);
             seg.transform.localPosition = new Vector3(center.x, center.y, 0f);
             if (seg.rb != null)
@@ -435,7 +444,7 @@ public class Dog : MonoBehaviour
         float ankleAnchorX = ankle.x - footCenterX;
         float footY = ankle.y - pawSize.y * 0.5f;
 
-        HumanSegment paw = CreateSegment(name, pawSize, massFraction, color, order, albedoKey: ArtLibrary.DogPaw);
+        HumanSegment paw = CreateSegment(name, pawSize, massFraction, color, order);
         paw.transform.localPosition = new Vector3(footCenterX, footY, 0f);
         paw.transform.localRotation = Quaternion.identity;
         if (paw.rb != null)
@@ -456,7 +465,7 @@ public class Dog : MonoBehaviour
         float massFraction,
         Color color,
         int sortingOrder,
-        HumanVisualShape visualShape = HumanVisualShape.Capsule,
+        HumanVisualShape visualShape = HumanVisualShape.Box,
         string albedoKey = null)
     {
         GameObject segmentObject = new GameObject(name);

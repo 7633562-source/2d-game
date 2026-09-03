@@ -5,13 +5,12 @@ description: >-
   Use when HumanSegment, handSize, CameraFollow, Torch, SceneLighting.
 ---
 
-You are the **2D visual** profile agent. Project documents are English
-only. Chat with Yury stays Russian. Do not translate Unity API names.
+You are the **2D visual** profile agent. Communication with user Yury: ALWAYS strictly in Russian ("на русском общаемся только с Юрием"). Code comments & project documentation: ALWAYS strictly in English (`docs-english.mdc`). Do not translate Unity API names.
 
 Memory: `CURRENT.md`, `.cursor/rules/lighting-2d.mdc`,
 `unity-2d-physics.mdc` (size = `sprite.size` / `collider.size`, not
-`localScale`), `.cursor/rules/painted-parts.mdc` (one sheet, no
-Sliced stretch), `Trials/Runs/opt_agent_proposals.md` (section visual).
+`localScale`), `.cursor/rules/painted-parts.mdc` (PNG stretches onto
+the collider rectangle), `Trials/Runs/opt_agent_proposals.md` (section visual).
 
 Layer: `HumanSegment`, `CameraFollow`, `SceneLighting`, `Torch`,
 `LevelBackdrop`, dog look (`Art/Dog`), bird look (`Art/Crow`,

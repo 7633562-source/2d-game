@@ -1,67 +1,58 @@
 ---
-description: Painted ragdoll parts — one sheet, one bone, no Sliced stretch
+description: Painted ragdoll parts — transparent rectangle equals the box collider
 globs: Assets/{HumanSegment,ArtLibrary,Human,Dog,Bird}.cs
 alwaysApply: false
 ---
 
 # Painted parts
 
-Recorded from the dog look pass (01.09). The same faults then went
-into Crow / Chicken. Do not repeat them.
+The sprite is a transparent rectangle equal to the box collider.
+`HumanSegment` sets `sprite.size = collider.size` and stretches the
+full PNG onto that box (`Sliced`). Empty pixels stay empty: that is
+how a short hand sits in `handSize` 0.06 × 0.32. Do not crop
+`OpaqueRect`. Do not grow `VisualSize` on painted parts. Do not
+change `handSize` / `pawSize` / `footSize` to fix the picture.
 
-A species is one animal. Ten separate image calls are ten animals.
-Judge the assembled body in Play, not the folder of crops.
+A species is one animal. Judge the assembled body in Play, not the
+folder of crops.
 
-## One sheet, then crop
+## Canvas
 
-- Draw or generate **one** side-view sheet (face +X), then split.
-  A locked reference on every later call is a fallback, not a plan.
-- Human already learned this: Yury's `ArtIncoming/Human` sheet, then
-  `Tools/SplitSheet`. Do not invent a new pipeline per species.
+- Draw the canvas in the **collider aspect** (fields on `Human` /
+  `Dog` / `Bird`). Face +X, side view.
+- One bone per PNG. No extra neck on the head, no second joint bend
+  on a straight bone. Proximal toward the parent joint.
+- Prefer one side-view sheet, then split (`ArtIncoming` +
+  `Tools/SplitSheet`). A locked reference on every later call is a
+  fallback, not a plan.
 
-## One bone per PNG
+## Stretch is the mapping
 
-- The drawing is that segment only. No extra neck on the head, no
-  shoulder on the chest, no shin on the paw, no second joint bend
-  painted into a straight bone.
-- Axis of the art = axis of the collider (horizontal trunk / tail /
-  paw; vertical limb). Proximal toward the parent joint.
-- Dog `front_upper` had a painted knee on a straight 0.07×0.17 box.
-  Dog `pelvis` read as a shoulder. Dog `thigh` read as a human arm.
-  That is a wrong crop, not a coefficient.
+`Sliced` maps the whole canvas onto the collider. If the PNG aspect
+does not match the box, the drawing stretches. Match the box; do not
+ask the collider to match the PNG.
 
-## Do not Sliced-stretch
+A padded silhouette with most of the canvas empty will look small
+inside the bone. Fill the rectangle, or leave empty space on purpose
+(hand in a long box).
 
-`HumanSegment` sets `sprite.size` to `VisualSize(collider)`. That
-ignores PNG aspect. Human hands became sausages (collider 0.06×0.32).
-Dog tail is 0.20×0.05 (aspect 4) on art ~1.5. Only `Human/hand` is
-exempt today.
-
-Before a part ships: PNG aspect vs collider aspect. If they differ by
-more than about a quarter, either recrop the art or size the sprite
-from the PNG (collider unchanged). Do not "fix" it by changing
-`handSize` / `pawSize` / `tailSize`.
+Generated capsules (no painted key) still overlap at the hinge
+(`VisualSize` 1.18 / 1.26). Painted parts do not.
 
 ## Joints
 
-`VisualSize` grows the sprite so neighbours overlap. A padded PNG
-defeats that: `Sliced` maps empty canvas into the box, fur sits in
-the middle, sky shows at the hinge (dog chest was ~38% opaque).
-Crop to `OpaqueRect` before `Sliced`. Painted overlap along the bone
-is 1.36, not 1.18. Do not close a gap by moving the collider.
-
 A hard outline on the cut face becomes a dark seam when two bones
 rotate. Leave the cut soft. Do not bake a posed bend that fights
-the hinge.
+the hinge. Do not close a gap by moving the collider.
 
 ## Background
 
 Transparent. Punch only near-white, low chroma. A black studio fill
-stays as an opaque slab. Check corner **and** a pixel beside the
+stays as an opaque slab. Check a corner **and** a pixel beside the
 silhouette, not only `A00=0`.
 
 ## Done means assembled
 
 Crops in `ArtIncoming/*/gen` are not acceptance. Open the Play scene
-of that species (`Dog`, `Bird`, `Chicken`). If Unity is closed, say
-so — do not call the folder "the dog".
+of that species (`SampleScene`, `Dog`, `Bird`, `Chicken`). If Unity
+is closed, say so — do not call the folder "the dog".

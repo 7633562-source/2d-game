@@ -4,6 +4,7 @@ using UnityEngine;
 // Форма только картинки. Коллайдер всегда прямоугольник того же size.
 public enum HumanVisualShape
 {
+    Box,
     Capsule,
     Ellipse
 }
@@ -59,10 +60,12 @@ public class HumanSegment : MonoBehaviour
         visual = visualObject.transform;
 
         sprite = visualObject.AddComponent<SpriteRenderer>();
-        // Картинка больше коллайдера: соседние капсулы нахлёстываются
-        // в суставе. Rigidbody2D и BoxCollider2D остаются на size.
-        // Стенд -nographics спрайт не видит: печь капсулу не из чего.
-        AssignBodySprite(VisualSize(size, albedoKey), visualShape, albedoKey, color);
+        // Box = exact collider fill (human debug colors). Capsule/ellipse
+        // grow past the box for hinge overlap. Painted PNG uses collider size.
+        Vector2 draw = visualShape == HumanVisualShape.Box
+            ? size
+            : PictureSize(size, albedoKey);
+        AssignBodySprite(draw, visualShape, albedoKey, color);
         sprite.sortingOrder = sortingOrder;
         SpriteLighting.ApplyLit(sprite);
 
@@ -109,9 +112,40 @@ public class HumanSegment : MonoBehaviour
         visual = visualObject.transform;
 
         sprite = visualObject.AddComponent<SpriteRenderer>();
-        AssignBodySprite(VisualSize(size, albedoKey), visualShape, albedoKey, color);
+        Vector2 draw = visualShape == HumanVisualShape.Box
+            ? size
+            : PictureSize(size, albedoKey);
+        AssignBodySprite(draw, visualShape, albedoKey, color);
         sprite.sortingOrder = sortingOrder;
         SpriteLighting.ApplyLit(sprite);
+    }
+
+    // Picture on an existing renderer. Tree leaves do not need a
+    // HumanSegment or a Visual child — only the sprite.
+    public static void ApplyPicture(
+        SpriteRenderer target,
+        Vector2 colliderSize,
+        HumanVisualShape visualShape,
+        string albedoKey,
+        Color color,
+        int sortingOrder)
+    {
+        if (target == null)
+            return;
+        Vector2 draw = PictureSize(colliderSize, albedoKey);
+        target.sprite = HeadlessTrial.Active
+            ? GetPlaceholderSprite()
+            : GetBodySprite(draw, visualShape, albedoKey);
+        target.color = color;
+        target.sortingOrder = sortingOrder;
+        if (!HeadlessTrial.Active && ArtLibrary.IsPaintedPart(albedoKey))
+        {
+            target.drawMode = SpriteDrawMode.Sliced;
+            target.size = draw;
+        }
+        else
+            target.drawMode = SpriteDrawMode.Simple;
+        SpriteLighting.ApplyLit(target);
     }
 
     // Сдвиг картинки вбок. Физика его не видит: Rigidbody2D и коллайдер
@@ -211,15 +245,7 @@ public class HumanSegment : MonoBehaviour
         if (!HeadlessTrial.Active && ArtLibrary.IsPaintedPart(albedoKey))
         {
             sprite.drawMode = SpriteDrawMode.Sliced;
-            // Hand collider is 0.06 x 0.32; Sliced to that box turns a
-            // square palm into sausages. Keep the PNG aspect; collider stays.
-            sprite.size = PartDrawSize(draw, albedoKey);
-            if (albedoKey == ArtLibrary.HumanHand)
-            {
-                visualOffsetY = (size.y - sprite.size.y) * 0.5f;
-                if (visual != null)
-                    visual.localPosition = new Vector3(visualOffsetX, visualOffsetY, 0f);
-            }
+            sprite.size = draw;
         }
         else
             sprite.drawMode = SpriteDrawMode.Simple;
@@ -239,19 +265,16 @@ public class HumanSegment : MonoBehaviour
         return created;
     }
 
-    // Авторский сегмент: силуэт уже в PNG. PPU по ширине; высоту
-    // обычно дожимает Sliced на VisualSize. Кисть — исключение:
-    // рисуем в пропорции PNG, иначе пальцы становятся колбасой.
+    // Full PNG, including empty pixels, mapped onto the collider box.
+    // Do not crop alpha: that threw away the layout and Sliced then
+    // stretched the leftover silhouette into the whole bone.
     private static Sprite CreatePartSprite(Vector2 size, string key)
     {
         Texture2D src = Resources.Load<Texture2D>("Art/" + key);
         if (src == null)
             return null;
-        // Generated parts sit in a padded canvas. Sliced on the full
-        // frame leaves sky between bones (dog chest ~38% opaque).
-        Rect rect = OpaqueRect(src);
-        Vector2 draw = PartDrawSize(size, key, rect);
-        float ppu = rect.width / Mathf.Max(0.01f, draw.x);
+        Rect rect = new Rect(0f, 0f, src.width, src.height);
+        float ppu = rect.width / Mathf.Max(0.01f, size.x);
         return Sprite.Create(
             src,
             rect,
@@ -261,73 +284,19 @@ public class HumanSegment : MonoBehaviour
             SpriteMeshType.FullRect);
     }
 
-    private static Vector2 PartDrawSize(Vector2 box, string key)
+    // Painted art is a transparent rectangle equal to the box collider.
+    // Generated capsules still grow so neighbours overlap at the hinge.
+    private static Vector2 PictureSize(Vector2 colliderSize, string albedoKey)
     {
-        if (key != ArtLibrary.HumanHand)
-            return box;
-        Texture2D src = Resources.Load<Texture2D>("Art/" + key);
-        if (src == null)
-            return box;
-        return PartDrawSize(box, key, OpaqueRect(src));
+        if (ArtLibrary.IsPaintedPart(albedoKey))
+            return colliderSize;
+        return VisualSize(colliderSize);
     }
 
-    private static Vector2 PartDrawSize(Vector2 box, string key, Rect rect)
+    private static Vector2 VisualSize(Vector2 colliderSize)
     {
-        if (key != ArtLibrary.HumanHand || rect.width < 1f || rect.height < 1f)
-            return box;
-        float aspect = rect.width / rect.height;
-        // Collider is 32 cm for reach; a painted hand is ~20 cm. Do not
-        // scale the art up to the box — that is the stretch the player sees.
-        const float handArtLength = 0.20f;
-        float bone = box.y >= box.x ? box.y : box.x;
-        float length = Mathf.Min(bone, handArtLength);
-        if (box.y >= box.x)
-            return new Vector2(length * aspect, length);
-        return new Vector2(length, length / aspect);
-    }
-
-    private static Rect OpaqueRect(Texture2D src)
-    {
-        if (src == null || !src.isReadable)
-            return new Rect(0f, 0f, src != null ? src.width : 1, src != null ? src.height : 1);
-
-        Color32[] px = src.GetPixels32();
-        int w = src.width;
-        int h = src.height;
-        int minX = w;
-        int minY = h;
-        int maxX = -1;
-        int maxY = -1;
-        for (int i = 0; i < px.Length; i++)
-        {
-            if (px[i].a < 40)
-                continue;
-            int x = i % w;
-            int y = i / w;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-        }
-
-        if (maxX < minX)
-            return new Rect(0f, 0f, w, h);
-
-        minX = Mathf.Max(0, minX - 1);
-        minY = Mathf.Max(0, minY - 1);
-        maxX = Mathf.Min(w - 1, maxX + 1);
-        maxY = Mathf.Min(h - 1, maxY + 1);
-        return new Rect(minX, minY, maxX - minX + 1, maxY - minY + 1);
-    }
-
-    // Sprite larger than the collider so neighbours overlap at the
-    // joint. Painted art needs more along the bone: generated silhouettes
-    // stop short of the canvas edge even after OpaqueRect.
-    private static Vector2 VisualSize(Vector2 colliderSize, string albedoKey = null)
-    {
-        bool painted = ArtLibrary.IsPaintedPart(albedoKey);
-        float along = painted ? 1.36f : (colliderSize.x >= colliderSize.y ? 1.18f : 1.26f);
-        float across = painted ? 1.22f : (colliderSize.x >= colliderSize.y ? 1.16f : 1.18f);
+        float along = colliderSize.x >= colliderSize.y ? 1.18f : 1.26f;
+        float across = colliderSize.x >= colliderSize.y ? 1.16f : 1.18f;
         if (colliderSize.x >= colliderSize.y)
             return new Vector2(colliderSize.x * along, colliderSize.y * across);
         return new Vector2(colliderSize.x * across, colliderSize.y * along);
@@ -359,6 +328,13 @@ public class HumanSegment : MonoBehaviour
         tex.wrapMode = TextureWrapMode.Clamp;
 
         Color[] pixels = new Color[w * h];
+        if (shape == HumanVisualShape.Box)
+        {
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = Color.white;
+        }
+        else
+        {
         float cx = (w - 1) * 0.5f;
         float cy = (h - 1) * 0.5f;
         float rx = w * 0.5f - 0.5f;
@@ -393,6 +369,7 @@ public class HumanSegment : MonoBehaviour
                     edge.b * mix.b,
                     edge.a);
             }
+        }
         }
 
         tex.SetPixels(pixels);

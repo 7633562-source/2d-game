@@ -39,7 +39,7 @@ public static class ArtLibrary
         return !string.IsNullOrEmpty(key) && key.StartsWith("Human/");
     }
 
-    // Painted segment sprite (silhouette in the PNG). Human, dog, birds.
+    // Painted segment sprite: full PNG stretched onto the collider box.
     public static bool IsPaintedPart(string key)
     {
         if (string.IsNullOrEmpty(key))

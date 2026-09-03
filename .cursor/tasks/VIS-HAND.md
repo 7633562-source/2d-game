@@ -37,6 +37,9 @@ Do not scale `transform`. Do not amputate arms. Do not retune PD.
 
 In `Human.cs` now `handSize.y = 0.32`. Stance `vis_hand` at **0.19** was
 accepted (`Trials/Runs/vis_hand_accept.md`). `current-front.mdc`: **0.19**
-folded walk at ~25 s — physical length restored to 0.32; draw it shorter
-only on `Visual`. Do not close this card until the dispatcher drops the
-0.19 requirement or moves it to "picture only".
+folded walk at ~25 s — physical length stays 0.32.
+
+**03.09:** `PartDrawSize` / `handArtLength` are gone. The hand PNG is
+stretched onto the 0.06 × 0.32 collider rectangle; a short palm is
+empty pixels in that canvas, not a smaller `sprite.size`. Do not
+close this card until the dispatcher drops the 0.19 requirement.

@@ -47,29 +47,26 @@ public class Bird : MonoBehaviour
     // Только картинка. Scale.x = facing; Rigidbody2D и perch на корпусе не трогаем.
     public Transform lookRoot;
 
-    private Color plumage = new Color(0.14f, 0.14f, 0.16f, 1f);
-    private Color plumageWing = new Color(0.18f, 0.18f, 0.20f, 1f);
-    private Color beakHead = new Color(0.14f, 0.14f, 0.16f, 1f);
-    private Color beakColor = new Color(0.11f, 0.11f, 0.12f, 1f);
-    private Color scaleLeg = new Color(0.46f, 0.30f, 0.14f, 1f);
-    private Color scaleFoot = new Color(0.50f, 0.32f, 0.12f, 1f);
-    private Color tailColor = new Color(0.12f, 0.12f, 0.14f, 1f);
+    // Layout guide: one semi-transparent box per collider. No Crow/Chicken PNG.
+    private static readonly Color BodyColor = new Color(0.1f, 0.2f, 1f, 0.5f);
+    private static readonly Color NeckColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+    private static readonly Color HeadColor = new Color(1f, 1f, 0f, 0.5f);
+    private static readonly Color BeakColor = new Color(1f, 0.55f, 0.1f, 0.5f);
+    private static readonly Color TailColor = new Color(0.1f, 0.75f, 0.85f, 0.5f);
+    private static readonly Color HumerusNear = new Color(0f, 0.6f, 0f, 0.5f);
+    private static readonly Color HumerusFar = new Color(0.4f, 0.8f, 0.2f, 0.5f);
+    private static readonly Color UlnaNear = new Color(0.8f, 0.1f, 0.1f, 0.5f);
+    private static readonly Color UlnaFar = new Color(1f, 0.5f, 0.5f, 0.5f);
+    private static readonly Color HandNear = new Color(1f, 0.5f, 0f, 0.5f);
+    private static readonly Color HandFar = new Color(1f, 0.7f, 0.3f, 0.5f);
+    private static readonly Color ThighNear = new Color(0.5f, 0f, 0.5f, 0.5f);
+    private static readonly Color ThighFar = new Color(0.7f, 0.4f, 0.7f, 0.5f);
+    private static readonly Color ShankNear = new Color(0.5f, 0.25f, 0f, 0.5f);
+    private static readonly Color ShankFar = new Color(0.7f, 0.45f, 0.2f, 0.5f);
+    private static readonly Color FootNear = new Color(0.4f, 0f, 0f, 0.5f);
+    private static readonly Color FootFar = new Color(0.8f, 0.3f, 0.3f, 0.5f);
 
     private static PhysicsMaterial2D flockFootMaterial;
-
-    private static Color DimFar(Color c)
-    {
-        return new Color(c.r * 0.52f, c.g * 0.52f, c.b * 0.52f, 1f);
-    }
-
-    // Painted parts live in Resources/Art/Crow or Art/Chicken.
-    private string Art(string part)
-    {
-        return kind == BirdKind.Chicken ? "Chicken/" + part : "Crow/" + part;
-    }
-
-    private static readonly Color PaintNear = Color.white;
-    private static readonly Color PaintFar = DimFar(Color.white);
 
     private static PhysicsMaterial2D FlockFootMaterial()
     {
@@ -220,13 +217,6 @@ public class Bird : MonoBehaviour
         thighSize = new Vector2(0.022f, 0.040f);
         shankSize = new Vector2(0.018f, 0.055f);
         footSize = new Vector2(0.05f, 0.022f);
-        plumage = new Color(0.14f, 0.14f, 0.16f, 1f);
-        plumageWing = new Color(0.18f, 0.18f, 0.20f, 1f);
-        beakHead = new Color(0.14f, 0.14f, 0.16f, 1f);
-        beakColor = new Color(0.11f, 0.11f, 0.12f, 1f);
-        scaleLeg = new Color(0.46f, 0.30f, 0.14f, 1f);
-        scaleFoot = new Color(0.50f, 0.32f, 0.12f, 1f);
-        tailColor = new Color(0.12f, 0.12f, 0.14f, 1f);
         if (recipe != BirdKind.Chicken) return;
 
         totalMass = 1.8f;
@@ -242,13 +232,6 @@ public class Bird : MonoBehaviour
         shankSize = new Vector2(0.022f, 0.060f);
         footSize = new Vector2(0.055f, 0.024f);
         minBodyInertia = 0.028f;
-        plumage = new Color(0.62f, 0.34f, 0.16f, 1f);
-        plumageWing = new Color(0.48f, 0.24f, 0.12f, 1f);
-        beakHead = new Color(0.62f, 0.34f, 0.16f, 1f);
-        beakColor = new Color(0.90f, 0.72f, 0.18f, 1f);
-        scaleLeg = new Color(0.82f, 0.68f, 0.18f, 1f);
-        scaleFoot = new Color(0.78f, 0.62f, 0.16f, 1f);
-        tailColor = new Color(0.40f, 0.22f, 0.12f, 1f);
     }
 
     private void ApplyFlightKind()
@@ -288,13 +271,13 @@ public class Bird : MonoBehaviour
             return;
         }
 
-        HumanSegment body = CreateSegment("Body", bodySize, BODY_MASS, PaintNear, BODY_ORDER, albedoKey: Art("body"));
+        HumanSegment body = CreateSegment("Body", bodySize, BODY_MASS, BodyColor, BODY_ORDER);
         body.transform.localPosition = Vector3.zero;
         AddBodyAero(body);
         AddBirdFlight(body);
         ApplyFlightKind();
 
-        HumanSegment neck = CreateSegment("Neck", neckSize, NECK_MASS, PaintNear, NECK_ORDER, albedoKey: Art("neck"));
+        HumanSegment neck = CreateSegment("Neck", neckSize, NECK_MASS, NeckColor, NECK_ORDER);
         float bodyTop = bodySize.y * 0.5f;
         neck.transform.localPosition = new Vector3(bodySize.x * 0.22f, bodyTop + neckSize.y * 0.5f, 0f);
         neck.ConnectTo(body,
@@ -304,9 +287,7 @@ public class Bird : MonoBehaviour
         AddFriction(neck, neckFriction, 0.4f);
         AddMuscles(neck, neckMuscleTorque);
 
-        HumanSegment head = CreateSegment(
-            "Head", headSize, HEAD_MASS, PaintNear, HEAD_ORDER,
-            HumanVisualShape.Ellipse, albedoKey: Art("head"));
+        HumanSegment head = CreateSegment("Head", headSize, HEAD_MASS, HeadColor, HEAD_ORDER);
         head.transform.localPosition = new Vector3(
             neck.transform.localPosition.x,
             neck.transform.localPosition.y + neckSize.y * 0.5f + headSize.y * 0.5f,
@@ -320,7 +301,7 @@ public class Bird : MonoBehaviour
         headSegment = head;
         AttachRagdollBeak(head);
 
-        HumanSegment tail = CreateSegment("Tail", tailSize, TAIL_MASS, PaintNear, TAIL_ORDER, albedoKey: Art("tail"));
+        HumanSegment tail = CreateSegment("Tail", tailSize, TAIL_MASS, TailColor, TAIL_ORDER);
         float bodyBack = -bodySize.x * 0.5f;
         tail.transform.localPosition = new Vector3(bodyBack - tailSize.x * 0.5f, 0f, 0f);
         tail.ConnectTo(body,
@@ -332,17 +313,17 @@ public class Bird : MonoBehaviour
 
         CreateWing("RightWing", 1f, body,
             RIGHT_WING_HUMERUS, RIGHT_WING_ULNA, RIGHT_WING_HAND,
-            PaintNear, PaintNear, PaintNear);
+            HumerusNear, UlnaNear, HandNear);
         CreateWing("LeftWing", -1f, body,
             LEFT_WING_HUMERUS, LEFT_WING_ULNA, LEFT_WING_HAND,
-            PaintFar, PaintFar, PaintFar);
+            HumerusFar, UlnaFar, HandFar);
 
         CreateLeg("RightLeg", 1f, body,
             RIGHT_LEG_THIGH, RIGHT_LEG_SHANK, RIGHT_LEG_FOOT,
-            PaintNear, PaintNear, PaintNear);
+            ThighNear, ShankNear, FootNear);
         CreateLeg("LeftLeg", -1f, body,
             LEFT_LEG_THIGH, LEFT_LEG_SHANK, LEFT_LEG_FOOT,
-            PaintFar, PaintFar, PaintFar);
+            ThighFar, ShankFar, FootFar);
 
         DisableCollisionsBetweenSegments();
 
@@ -390,7 +371,7 @@ public class Bird : MonoBehaviour
     // Одно тело: масса и коллайдер на корпусе, остальное — дети без физики.
     private void BuildFlock()
     {
-        HumanSegment body = CreateSegment("Body", bodySize, 1f, PaintNear, BODY_ORDER, albedoKey: Art("body"));
+        HumanSegment body = CreateSegment("Body", bodySize, 1f, BodyColor, BODY_ORDER);
         body.transform.localPosition = Vector3.zero;
         if (body.rb != null)
         {
@@ -422,26 +403,26 @@ public class Bird : MonoBehaviour
         lookRoot.localScale = Vector3.one;
 
         float bodyTop = bodySize.y * 0.5f;
-        Transform neck = CreateVisualPart("Neck", neckSize, PaintNear, NECK_ORDER, lookRoot, albedoKey: Art("neck"));
+        Transform neck = CreateVisualPart("Neck", neckSize, NeckColor, NECK_ORDER, lookRoot);
         neck.localPosition = new Vector3(bodySize.x * 0.22f, bodyTop + neckSize.y * 0.5f, 0f);
 
-        Transform head = CreateVisualPart("Head", headSize, PaintNear, HEAD_ORDER, neck, HumanVisualShape.Ellipse, Art("head"));
+        Transform head = CreateVisualPart("Head", headSize, HeadColor, HEAD_ORDER, neck);
         head.localPosition = new Vector3(0f, neckSize.y * 0.5f + headSize.y * 0.5f, 0f);
         neckVisual = neck;
         headVisual = head;
         headSegment = null;
         AttachFlockBeak(head);
 
-        Transform tail = CreateVisualPart("Tail", tailSize, PaintNear, TAIL_ORDER, lookRoot, albedoKey: Art("tail"));
+        Transform tail = CreateVisualPart("Tail", tailSize, TailColor, TAIL_ORDER, lookRoot);
         tail.localPosition = new Vector3(-bodySize.x * 0.5f - tailSize.x * 0.5f, 0f, 0f);
 
-        rightWingRoot = CreateVisualWing(1f, lookRoot, PaintNear);
-        leftWingRoot = CreateVisualWing(-1f, lookRoot, PaintFar);
+        rightWingRoot = CreateVisualWing(1f, lookRoot);
+        leftWingRoot = CreateVisualWing(-1f, lookRoot);
         rightUlna = rightWingRoot != null ? rightWingRoot.Find("RightWingUlna") : null;
         leftUlna = leftWingRoot != null ? leftWingRoot.Find("LeftWingUlna") : null;
 
-        rightThigh = CreateVisualLeg(1f, lookRoot, PaintNear, PaintNear);
-        leftThigh = CreateVisualLeg(-1f, lookRoot, PaintFar, PaintFar);
+        rightThigh = CreateVisualLeg(1f, lookRoot);
+        leftThigh = CreateVisualLeg(-1f, lookRoot);
 
         sensors = gameObject.AddComponent<BirdSensors>();
         sensors.Initialize();
@@ -461,13 +442,11 @@ public class Bird : MonoBehaviour
 
     // Flock: спрайт как у сегмента, без HumanSegment на каждом пере.
     private Transform CreateVisualPart(
-        string name, Vector2 size, Color color, int order, Transform parent,
-        HumanVisualShape shape = HumanVisualShape.Capsule,
-        string albedoKey = null)
+        string name, Vector2 size, Color color, int order, Transform parent)
     {
         GameObject go = new GameObject(name);
         HumanSegment bake = go.AddComponent<HumanSegment>();
-        bake.InitializeVisualOnly(name, size, color, parent, order, shape, albedoKey);
+        bake.InitializeVisualOnly(name, size, color, parent, order, HumanVisualShape.Box);
         Object.DestroyImmediate(bake);
         return go.transform;
     }
@@ -480,44 +459,46 @@ public class Bird : MonoBehaviour
             visual.localPosition = new Vector3(x, y, 0f);
     }
 
-    private Transform CreateVisualWing(float direction, Transform body, Color color)
+    private Transform CreateVisualWing(float direction, Transform body)
     {
         float visualShift = direction * visualSideOffset;
         float shoulderY = bodySize.y * 0.30f;
         const float foldDeg = -90f;
         string side = direction > 0f ? "RightWing" : "LeftWing";
+        bool near = direction > 0f;
 
-        Transform humerus = CreateVisualPart(side + "Humerus", wingHumerusSize, color, direction > 0f ? RIGHT_WING_HUMERUS : LEFT_WING_HUMERUS, body, albedoKey: Art("wing"));
+        Transform humerus = CreateVisualPart(side + "Humerus", wingHumerusSize, near ? HumerusNear : HumerusFar, direction > 0f ? RIGHT_WING_HUMERUS : LEFT_WING_HUMERUS, body);
         humerus.localPosition = new Vector3(shoulderForward, shoulderY, 0f);
         humerus.localRotation = Quaternion.Euler(0f, 0f, foldDeg);
         OffsetVisual(humerus, visualShift, -wingHumerusSize.y * 0.5f);
 
-        Transform ulna = CreateVisualPart(side + "Ulna", wingUlnaSize, color, direction > 0f ? RIGHT_WING_ULNA : LEFT_WING_ULNA, humerus, albedoKey: Art("wing"));
+        Transform ulna = CreateVisualPart(side + "Ulna", wingUlnaSize, near ? UlnaNear : UlnaFar, direction > 0f ? RIGHT_WING_ULNA : LEFT_WING_ULNA, humerus);
         ulna.localPosition = new Vector3(0f, -wingHumerusSize.y, 0f);
         OffsetVisual(ulna, visualShift, -wingUlnaSize.y * 0.5f);
 
-        Transform hand = CreateVisualPart(side + "Hand", wingHandSize, color, direction > 0f ? RIGHT_WING_HAND : LEFT_WING_HAND, ulna, albedoKey: Art("wing"));
+        Transform hand = CreateVisualPart(side + "Hand", wingHandSize, near ? HandNear : HandFar, direction > 0f ? RIGHT_WING_HAND : LEFT_WING_HAND, ulna);
         hand.localPosition = new Vector3(0f, -wingUlnaSize.y, 0f);
         OffsetVisual(hand, visualShift, -wingHandSize.y * 0.5f);
 
         return humerus;
     }
 
-    private Transform CreateVisualLeg(float direction, Transform body, Color legColor, Color footColor)
+    private Transform CreateVisualLeg(float direction, Transform body)
     {
         float visualShift = direction * visualSideOffset;
         float hipY = -bodySize.y * 0.5f;
         string side = direction > 0f ? "RightLeg" : "LeftLeg";
+        bool near = direction > 0f;
 
-        Transform thigh = CreateVisualPart(side + "Thigh", thighSize, legColor, direction > 0f ? RIGHT_LEG_THIGH : LEFT_LEG_THIGH, body, albedoKey: Art("thigh"));
+        Transform thigh = CreateVisualPart(side + "Thigh", thighSize, near ? ThighNear : ThighFar, direction > 0f ? RIGHT_LEG_THIGH : LEFT_LEG_THIGH, body);
         thigh.localPosition = new Vector3(-hipBack, hipY, 0f);
         OffsetVisual(thigh, visualShift, -thighSize.y * 0.5f);
 
-        Transform shank = CreateVisualPart(side + "Shank", shankSize, legColor, direction > 0f ? RIGHT_LEG_SHANK : LEFT_LEG_SHANK, thigh, albedoKey: Art("shank"));
+        Transform shank = CreateVisualPart(side + "Shank", shankSize, near ? ShankNear : ShankFar, direction > 0f ? RIGHT_LEG_SHANK : LEFT_LEG_SHANK, thigh);
         shank.localPosition = new Vector3(0f, -thighSize.y, 0f);
         OffsetVisual(shank, visualShift, -shankSize.y * 0.5f);
 
-        Transform foot = CreateVisualPart(side + "Foot", footSize, footColor, direction > 0f ? RIGHT_LEG_FOOT : LEFT_LEG_FOOT, shank, albedoKey: Art("foot"));
+        Transform foot = CreateVisualPart(side + "Foot", footSize, near ? FootNear : FootFar, direction > 0f ? RIGHT_LEG_FOOT : LEFT_LEG_FOOT, shank);
         foot.localPosition = new Vector3(-ankleHeelOffset + footSize.x * 0.5f, -shankSize.y, 0f);
         OffsetVisual(foot, visualShift, -footSize.y * 0.5f);
 
@@ -543,7 +524,7 @@ public class Bird : MonoBehaviour
         float ulnaLen = wingUlnaSize.y;
         float handLen = wingHandSize.y;
 
-        HumanSegment humerus = CreateSegment(sideName + "Humerus", wingHumerusSize, HUMERUS_MASS, humerusColor, humerusOrder, HumanVisualShape.Capsule, true, Art("wing"));
+        HumanSegment humerus = CreateSegment(sideName + "Humerus", wingHumerusSize, HUMERUS_MASS, humerusColor, humerusOrder, HumanVisualShape.Box, true);
         humerus.transform.localPosition = shoulderRoot + tipDir * (humerusLen * 0.5f);
         humerus.transform.localRotation = fold;
         humerus.SetVisualOffset(visualShift);
@@ -554,7 +535,7 @@ public class Bird : MonoBehaviour
         AddFriction(humerus, shoulderFriction, 0.5f);
         AddMuscles(humerus, shoulderMuscleTorque);
 
-        HumanSegment ulna = CreateSegment(sideName + "Ulna", wingUlnaSize, ULNA_MASS, ulnaColor, ulnaOrder, HumanVisualShape.Capsule, true, Art("wing"));
+        HumanSegment ulna = CreateSegment(sideName + "Ulna", wingUlnaSize, ULNA_MASS, ulnaColor, ulnaOrder, HumanVisualShape.Box, true);
         ulna.transform.localPosition = shoulderRoot + tipDir * (humerusLen + ulnaLen * 0.5f);
         ulna.transform.localRotation = fold;
         ulna.SetVisualOffset(visualShift);
@@ -565,7 +546,7 @@ public class Bird : MonoBehaviour
         AddFriction(ulna, elbowFriction, 0.4f);
         AddMuscles(ulna, elbowMuscleTorque);
 
-        HumanSegment hand = CreateSegment(sideName + "Hand", wingHandSize, HAND_MASS, handColor, handOrder, HumanVisualShape.Capsule, true, Art("wing"));
+        HumanSegment hand = CreateSegment(sideName + "Hand", wingHandSize, HAND_MASS, handColor, handOrder, HumanVisualShape.Box, true);
         hand.transform.localPosition = shoulderRoot + tipDir * (humerusLen + ulnaLen + handLen * 0.5f);
         hand.transform.localRotation = fold;
         hand.SetVisualOffset(visualShift);
@@ -586,7 +567,7 @@ public class Bird : MonoBehaviour
         // Разнос ног только на Visual: ось X — вперёд, не влево-вправо.
         Vector2 hipRoot = (Vector2)body.transform.localPosition + new Vector2(-hipBack, hipY);
 
-        HumanSegment thigh = CreateSegment(sideName + "Thigh", thighSize, THIGH_MASS, thighColor, thighOrder, HumanVisualShape.Capsule, true, Art("thigh"));
+        HumanSegment thigh = CreateSegment(sideName + "Thigh", thighSize, THIGH_MASS, thighColor, thighOrder, HumanVisualShape.Box, true);
         thigh.transform.localPosition = new Vector3(hipRoot.x, hipRoot.y - thighSize.y * 0.5f, 0f);
         thigh.SetVisualOffset(visualShift);
         thigh.ConnectTo(body,
@@ -596,7 +577,7 @@ public class Bird : MonoBehaviour
         AddFriction(thigh, hipFriction, 0.8f);
         AddMuscles(thigh, hipMuscleTorque);
 
-        HumanSegment shank = CreateSegment(sideName + "Shank", shankSize, SHANK_MASS, shankColor, shankOrder, HumanVisualShape.Capsule, true, Art("shank"));
+        HumanSegment shank = CreateSegment(sideName + "Shank", shankSize, SHANK_MASS, shankColor, shankOrder, HumanVisualShape.Box, true);
         shank.transform.localPosition = new Vector3(hipRoot.x, hipRoot.y - thighSize.y - shankSize.y * 0.5f, 0f);
         shank.SetVisualOffset(visualShift);
         // Плюс уводит низ голени назад — как колено человека после разворота.
@@ -612,7 +593,7 @@ public class Bird : MonoBehaviour
         float ankleAnchorX = hipRoot.x - footCenterX;
         float footY = hipRoot.y - thighSize.y - shankSize.y - footSize.y * 0.5f;
 
-        HumanSegment foot = CreateSegment(sideName + "Foot", footSize, FOOT_MASS, footColor, footOrder, HumanVisualShape.Capsule, true, Art("foot"));
+        HumanSegment foot = CreateSegment(sideName + "Foot", footSize, FOOT_MASS, footColor, footOrder, HumanVisualShape.Box, true);
         foot.transform.localPosition = new Vector3(footCenterX, footY, 0f);
         foot.SetVisualOffset(visualShift);
         foot.ConnectTo(shank,
@@ -629,7 +610,7 @@ public class Bird : MonoBehaviour
         float massFraction,
         Color color,
         int sortingOrder,
-        HumanVisualShape visualShape = HumanVisualShape.Capsule,
+        HumanVisualShape visualShape = HumanVisualShape.Box,
         bool floorInertia = false,
         string albedoKey = null)
     {
@@ -717,7 +698,7 @@ public class Bird : MonoBehaviour
     {
         float beakX = head.transform.localPosition.x + headSize.x * 0.5f + beakSize.x * 0.5f;
         float beakY = head.transform.localPosition.y - headSize.y * 0.12f;
-        HumanSegment beak = CreateSegment("Beak", beakSize, BEAK_MASS, PaintNear, BEAK_ORDER, albedoKey: Art("beak"));
+        HumanSegment beak = CreateSegment("Beak", beakSize, BEAK_MASS, BeakColor, BEAK_ORDER);
         beak.transform.localPosition = new Vector3(beakX, beakY, 0f);
         beak.ConnectTo(head,
             new Vector2(-beakSize.x * 0.5f, 0f),
@@ -735,7 +716,7 @@ public class Bird : MonoBehaviour
     // Flock: no extra Rigidbody2D. Trigger rides on the body via Look.
     private void AttachFlockBeak(Transform head)
     {
-        Transform beak = CreateVisualPart("Beak", beakSize, PaintNear, BEAK_ORDER, head, albedoKey: Art("beak"));
+        Transform beak = CreateVisualPart("Beak", beakSize, BeakColor, BEAK_ORDER, head);
         beak.localPosition = new Vector3(headSize.x * 0.5f + beakSize.x * 0.5f, -headSize.y * 0.12f, 0f);
         BoxCollider2D col = beak.gameObject.AddComponent<BoxCollider2D>();
         col.size = beakSize;
