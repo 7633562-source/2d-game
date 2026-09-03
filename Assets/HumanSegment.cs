@@ -195,18 +195,21 @@ public class HumanSegment : MonoBehaviour
         limits.max = maxAngle;
         joint.limits = limits;
 
-        // Один маркер на сустав, на дочернем сегменте. Второй, на родителе в
-        // connectedAnchor, рисовал ту же самую точку: anchor и connectedAnchor
-        // совпадают в мире, пока сустав цел. При разных визуальных сдвигах
-        // родителя и ребёнка он бы ещё и разъезжался, изображая разрыв.
-        // Стенд не рисует маркеры: лишние SpriteRenderer на 15 суставах.
+        // Circles on both boxes: child's anchor and the parent's
+        // connectedAnchor. In physics they are one world point; on
+        // Visual they sit on each rectangle so the join is readable.
+        // Stand skips markers: extra SpriteRenderer on every hinge.
         if (!HeadlessTrial.Active)
+        {
             CreateJointMarker(anchor);
+            if (parentSegment != null)
+                parentSegment.CreateJointMarker(connectedAnchor);
+        }
     }
 
-    // Тёмный кружок в точке крепления. Родитель — Visual, поэтому маркер
-    // едет вместе с нарисованным сегментом, а не с физическим телом.
-    private void CreateJointMarker(Vector2 localPosition)
+    // Dark circle at a joint local point. Parent is Visual, so the
+    // marker rides the picture, not the Rigidbody2D.
+    public void CreateJointMarker(Vector2 localPosition)
     {
         GameObject marker = new GameObject("JointMarker");
         marker.transform.SetParent(visual != null ? visual : transform, false);
