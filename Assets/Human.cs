@@ -5,7 +5,8 @@ public class Human : MonoBehaviour
     [Header("Общая масса тела (кг)")]
     public float totalMass = 70f;
 
-    [Header("Цвета сегментов (с прозрачностью 50%)")]
+    // Each segment gets its own semi-transparent color on the collider box.
+    // No Human/* PNG — the boxes are a layout guide while art is redrawn.
     private static readonly Color PelvisColor = new Color(0.05f, 0.15f, 0.6f, 0.5f);
     private static readonly Color TorsoColor = new Color(0.1f, 0.2f, 1f, 0.5f);
     private static readonly Color NeckColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
@@ -62,6 +63,15 @@ public class Human : MonoBehaviour
 
     private float LateralProjection => Mathf.Cos(viewAngleDegrees * Mathf.Deg2Rad);
 
+    // Colored boxes sit on the collider. A side shift was for painted
+    // overlap; it slid the rectangle off the BoxCollider2D.
+    [Header("Разнос картинки (только отрисовка)")]
+    public float visualSideOffset = 0f;
+
+    // 0.1 юнита при ширине торса 0.24 давало пятно в пол-туловища на сустав.
+    [Header("Диаметр маркера сустава (м)")]
+    public float jointMarkerDiameter = 0.03f;
+
     // Рост 1.75 м при 70 кг: длины — доли роста по Winter (2009), ширины —
     // переднезадний размер при виде сбоку (у торса это глубина груди, не плечи).
     // Вертикальная цепь pelvis+torso+neck+head+thigh+shin+foot = 1.75.
@@ -71,13 +81,25 @@ public class Human : MonoBehaviour
     public Vector2 headSize = new Vector2(0.20f, 0.23f);
     public Vector2 neckSize = new Vector2(0.12f, 0.09f);
     public Vector2 upperArmSize = new Vector2(0.10f, 0.33f);
-    public Vector2 lowerArmSize = new Vector2(0.08f, 0.26f);
+    public Vector2 lowerArmSize = new Vector2(0.08f, 0.34f);
+    // 0.32 м было почти предплечье: кисть читалась как третье звено.
+    // Winter: кисть ≈ 0.108 × 1.75 м. Ширина — вид сбоку, не ладонь в фас.
+    // Стойка vis_hand (0.19) принята. Откат на 0.32 без сводки walk не держим.
+    // Физическая длина кисти 0.32 (CoM/запястье). 0.19 ломал walk/стойку fold ~25 с
+    // (handfix0). Короче рисовать — только Visual, не это поле.
     public Vector2 handSize = new Vector2(0.06f, 0.16f);
     public Vector2 thighSize = new Vector2(0.16f, 0.43f);
     public Vector2 shinSize = new Vector2(0.11f, 0.43f);
     // Один прямоугольник: длина взрослой стопы, высота ~подошва плюс подъём.
     // Двухзвенная плюсна на сотне существ не окупается — см. баланс-правила.
     public Vector2 footSize = new Vector2(0.26f, 0.07f);
+
+    // Сцепление подошвы с грунтом. 0.4 — прежнее поведение: коллайдер без
+    // материала берёт юнитивский дефолт, то есть гладкую подошву. Выше —
+    // обувь. Пара считается как sqrt(µ_стопы · µ_грунта), поэтому одна
+    // стопа не поднимает сцепление выше корня из трения земли.
+    [Header("Трение подошвы о грунт")]
+    public float footFriction = 0.4f;
 
     // Голеностоп стоит не в середине стопы, а ближе к пятке: 25% длины стопы
     // назад (6.5 см пятки) и 19.5 см носка вперёд. Поэтому наклониться вперёд
@@ -89,7 +111,7 @@ public class Human : MonoBehaviour
     // верх груди 0.25 минус этот отступ. Поднимать к анатомической высоте
     // отдельно — иначе за один шаг меняется и поясница, и рычаг рук.
     [Header("Плечо относительно верха груди (м)")]
-    public float shoulderDropFromNeck = 0.125f;
+    public float shoulderDropFromNeck = 0.09f;
 
     // Масса сегментов та же, размеры меньше — момент инерции торса упал
     // примерно втрое. Прежнее трение не гасило PD, торс болтался на ~30 Гц.
@@ -98,10 +120,18 @@ public class Human : MonoBehaviour
     // 40 Н·м насыщается при 76 °/с. Поднять до 80/160/240 не убрало дрожь,
     // а разогнало её: rmsTorsoAngVel 55 → 74 → 123 → 164 °/с.
     public float lumbarFrictionMaxTorque = 40f;
-    public float neckFriction = 36f;
-    public float shoulderFriction = 12f;
-    public float elbowFriction = 12f;
-    public float wristFriction = 1.2f;
+    // τ = Ieff/K ≈ 0.20 с при Ieff шеи 0.001567. Прежние 36 приваривали
+    // голову к торсу: стоп-момент режет всё выше Ieff/Δt ≈ 0.31, и K=36
+    // неотличим от K=0.31. SPD держит суставы, сварной шов больше не нужен.
+    // Голова делит это же поле.
+    public float neckFriction = 0.00784f;
+    // Руки: τ ≈ 0.10 с. Ieff из arm_stand — плечо 0.0177722, локоть
+    // 0.00509677, кисть 0.00117525. Прежние 12 / 12 / 1.2 варили суставы
+    // (stepRatio 3.4 / 11.8 / 5.1). SPD уже держит позу; τ=0.20 роняет
+    // толчок вперёд 24 Н·с, поэтому остановились на 0.10.
+    public float shoulderFriction = 0.177722f;
+    public float elbowFriction = 0.0509677f;
+    public float wristFriction = 0.0117525f;
     public float hipFriction = 12f;
     public float kneeFriction = 12f;
     public float ankleFriction = 3f;
@@ -119,7 +149,9 @@ public class Human : MonoBehaviour
     public float elbowMuscleTorque = 30f;
     public float wristMuscleTorque = 10f;
     public float hipMuscleTorque = 100f;
-    public float kneeMuscleTorque = 80f;
+    // 130 Н·м: присед складывает колено далеко от −8°, и 80 Н·м
+    // не держат рычаг бедра. Потолок из плана работ, не из de Leva.
+    public float kneeMuscleTorque = 130f;
     // Голеностоп у человека резко асимметричен: подошвенные сгибатели (икра,
     // держат от падения вперёд) втрое сильнее тыльных (передняя поверхность
     // голени, держат от падения назад). В модели это extensor и flexor.
@@ -177,8 +209,6 @@ public class Human : MonoBehaviour
         AddFriction(torso, lumbarFriction, lumbarFrictionMaxTorque);
         AddMuscles(torso, lumbarMuscleTorque);
 
-        vestibularSystem = gameObject.AddComponent<VestibularSystem>();
-
         HumanSegment neck = CreateSegment("Neck", neckSize, NECK_MASS_FRACTION, NeckColor, NECK_ORDER);
         neck.transform.localPosition = new Vector3(0, torsoCenterY + torsoSize.y * 0.5f + neckSize.y * 0.5f, 0);
         neck.ConnectTo(torso,
@@ -198,10 +228,12 @@ public class Human : MonoBehaviour
         AddMuscles(head, neckMuscleTorque);
         headSegment = head;
 
-        CreateArm("RightArm", 1, torso,
+        // Swap shoulder attachment sides: right arm uses the former left anchor,
+        // left arm uses the former right anchor.
+        CreateArm("RightArm", -1, torso,
             RIGHT_ARM_UPPER_ORDER, RIGHT_ARM_LOWER_ORDER, RIGHT_ARM_HAND_ORDER,
             RightUpperArmColor, RightLowerArmColor, RightHandColor);
-        CreateArm("LeftArm", -1, torso,
+        CreateArm("LeftArm", 1, torso,
             LEFT_ARM_UPPER_ORDER, LEFT_ARM_LOWER_ORDER, LEFT_ARM_HAND_ORDER,
             LeftUpperArmColor, LeftLowerArmColor, LeftHandColor);
 
@@ -214,6 +246,13 @@ public class Human : MonoBehaviour
 
         DisableCollisionsBetweenSegments();
 
+        // Сенсоры добавляются только после того, как построены все сегменты:
+        // их Awake ищет тела через transform.Find один раз и больше не
+        // повторяет. VestibularSystem стоял выше по файлу, до создания шеи и
+        // головы, и молча отдавал по ним нули — торс и таз к тому моменту уже
+        // существовали, поэтому наклон торса работал и ошибку ничего не выдало.
+        vestibularSystem = gameObject.AddComponent<VestibularSystem>();
+
         comCalculator = gameObject.AddComponent<CenterOfMassCalculator>();
         comCalculator.Initialize();
 
@@ -221,13 +260,22 @@ public class Human : MonoBehaviour
         bodyStateEstimator = gameObject.AddComponent<BodyStateEstimator>();
 
         SetupBalanceController();
+
+        // Трение, затем мышцы — один FixedUpdate, порядок явный.
+        ActuatorDriver actuators = gameObject.AddComponent<ActuatorDriver>();
+        actuators.RebuildCache();
+
+        Damageable life = gameObject.AddComponent<Damageable>();
+        life.maxHealth = 100f;
+        life.health = 100f;
     }
 
     public void AddNumberLabel(int number)
     {
         if (headSegment == null) return;
         GameObject labelObj = new GameObject("NumberLabel");
-        labelObj.transform.SetParent(headSegment.transform, false);
+        Transform labelParent = headSegment.visual != null ? headSegment.visual : headSegment.transform;
+        labelObj.transform.SetParent(labelParent, false);
         labelObj.transform.localPosition = new Vector3(0, headSegment.size.y * 0.5f + 0.15f, -0.1f);
         TextMesh textMesh = labelObj.AddComponent<TextMesh>();
         textMesh.text = number.ToString();
@@ -239,12 +287,21 @@ public class Human : MonoBehaviour
         renderer.sortingOrder = 100;
     }
 
-    private HumanSegment CreateSegment(string name, Vector2 size, float massFraction, Color color, int sortingOrder)
+    private HumanSegment CreateSegment(
+        string name,
+        Vector2 size,
+        float massFraction,
+        Color color,
+        int sortingOrder,
+        HumanVisualShape visualShape = HumanVisualShape.Box,
+        string albedoKey = null)
     {
         GameObject segmentObject = new GameObject(name);
         HumanSegment segment = segmentObject.AddComponent<HumanSegment>();
         float segmentMass = totalMass * massFraction;
-        segment.Initialize(name, size, segmentMass, color, transform, sortingOrder);
+        segment.Initialize(name, size, segmentMass, color, transform, sortingOrder, visualShape, albedoKey);
+        // До ConnectTo: маркер создаётся там и читает этот размер.
+        segment.jointMarkerDiameter = jointMarkerDiameter;
         return segment;
     }
 
@@ -281,6 +338,7 @@ public class Human : MonoBehaviour
                            Color upperColor, Color lowerColor, Color handColor)
     {
         float shoulderX = direction * shoulderHalfSpacing * LateralProjection;
+        float visualShift = direction * visualSideOffset;
         // Отступ от верха груди, не доля высоты: после разреза торса
         // абсолютная высота плеча должна остаться +0.125 от корня.
         // shoulderY — в локали груди (якорь сустава), shoulderRootY — от корня
@@ -290,6 +348,7 @@ public class Human : MonoBehaviour
 
         HumanSegment upper = CreateSegment(sideName + "Upper", upperArmSize, UPPER_ARM_MASS_FRACTION, upperColor, upperOrder);
         upper.transform.localPosition = new Vector3(shoulderX, shoulderRootY - upperArmSize.y * 0.5f, 0);
+        upper.SetVisualOffset(visualShift);
         upper.ConnectTo(torso,
             new Vector2(0, upperArmSize.y * 0.5f),
             new Vector2(shoulderX, shoulderY),
@@ -299,6 +358,7 @@ public class Human : MonoBehaviour
 
         HumanSegment lower = CreateSegment(sideName + "Lower", lowerArmSize, LOWER_ARM_MASS_FRACTION, lowerColor, lowerOrder);
         lower.transform.localPosition = new Vector3(shoulderX, shoulderRootY - upperArmSize.y - lowerArmSize.y * 0.5f, 0);
+        lower.SetVisualOffset(visualShift);
         lower.ConnectTo(upper,
             new Vector2(0, lowerArmSize.y * 0.5f),
             new Vector2(0, -upperArmSize.y * 0.5f),
@@ -308,6 +368,7 @@ public class Human : MonoBehaviour
 
         HumanSegment hand = CreateSegment(sideName + "Hand", handSize, HAND_MASS_FRACTION, handColor, handOrder);
         hand.transform.localPosition = new Vector3(shoulderX, shoulderRootY - upperArmSize.y - lowerArmSize.y - handSize.y * 0.5f, 0);
+        hand.SetVisualOffset(visualShift);
         hand.ConnectTo(lower,
             new Vector2(0, handSize.y * 0.5f),
             new Vector2(0, -lowerArmSize.y * 0.5f),
@@ -316,11 +377,30 @@ public class Human : MonoBehaviour
         AddMuscles(hand, wristMuscleTorque);
     }
 
+    // Один материал на обе стопы: Box2D комбинирует трение пары как
+    // sqrt(µ1 · µ2), поэтому величина имеет смысл только вместе с грунтом.
+    private PhysicsMaterial2D soleMaterial;
+
+    private PhysicsMaterial2D SoleMaterial()
+    {
+        if (soleMaterial == null)
+        {
+            soleMaterial = new PhysicsMaterial2D("HumanSole");
+            soleMaterial.friction = Mathf.Max(0f, footFriction);
+            soleMaterial.bounciness = 0f;
+        }
+
+        return soleMaterial;
+    }
+
     private void CreateLeg(string sideName, float direction, HumanSegment pelvis,
                            int thighOrder, int shinOrder, int footOrder,
                            Color thighColor, Color shinColor, Color footColor)
     {
         float hipX = direction * hipHalfSpacing * LateralProjection;
+        // Visual-only side swap for legs: keep physics anchors/segments in place,
+        // only mirror which leg is drawn closer to the camera.
+        float visualShift = -direction * visualSideOffset;
         // hipY — в локали таза (якорь бедра). Сегменты ноги — дети корня,
         // поэтому их расставляем от hipRootY = −0.25, как до разреза торса.
         float hipY = -pelvisSize.y * 0.5f;
@@ -328,19 +408,26 @@ public class Human : MonoBehaviour
 
         HumanSegment thigh = CreateSegment(sideName + "Thigh", thighSize, THIGH_MASS_FRACTION, thighColor, thighOrder);
         thigh.transform.localPosition = new Vector3(hipX, hipRootY - thighSize.y * 0.5f, 0);
+        thigh.SetVisualOffset(visualShift);
+        // ±90°: присед уводит таз назад дальше прежнего упора ±60°.
         thigh.ConnectTo(pelvis,
             new Vector2(0, thighSize.y * 0.5f),
             new Vector2(hipX, hipY),
-            -60f, 60f);
+            -90f, 90f);
         AddFriction(thigh, hipFriction);
         AddMuscles(thigh, hipMuscleTorque);
 
         HumanSegment shin = CreateSegment(sideName + "Shin", shinSize, SHIN_MASS_FRACTION, shinColor, shinOrder);
         shin.transform.localPosition = new Vector3(hipX, hipRootY - thighSize.y - shinSize.y * 0.5f, 0);
+        shin.SetVisualOffset(visualShift);
+        // 0…+120, а не −120…0. jointAngle = угол родителя минус свой, поэтому
+        // положительный угол колена уводит низ голени назад — это человеческое
+        // сгибание при взгляде вправо. Прежний диапазон разрешал только
+        // обратное, страусиное: колено уходило за линию бедро–голеностоп.
         shin.ConnectTo(thigh,
             new Vector2(0, shinSize.y * 0.5f),
             new Vector2(0, -thighSize.y * 0.5f),
-            -120f, 0f);
+            0f, 120f);
         AddFriction(shin, kneeFriction);
         AddMuscles(shin, kneeMuscleTorque);
 
@@ -352,7 +439,10 @@ public class Human : MonoBehaviour
         float footY = hipRootY - thighSize.y - shinSize.y - footSize.y * 0.5f;
 
         HumanSegment foot = CreateSegment(sideName + "Foot", footSize, FOOT_MASS_FRACTION, footColor, footOrder);
+        if (foot.collider != null)
+            foot.collider.sharedMaterial = SoleMaterial();
         foot.transform.localPosition = new Vector3(footCenterX, footY, 0);
+        foot.SetVisualOffset(visualShift);
         foot.ConnectTo(shin,
             new Vector2(ankleAnchorX, footSize.y * 0.5f),
             new Vector2(0, -shinSize.y * 0.5f),
@@ -417,6 +507,35 @@ public class Human : MonoBehaviour
             bc.headFlexor = System.Array.Find(headMuscles, m => m.direction == 1f);
             bc.headExtensor = System.Array.Find(headMuscles, m => m.direction == -1f);
         }
+
+        BindArmMuscles("RightArm",
+            out bc.rightShoulderFlexor, out bc.rightShoulderExtensor,
+            out bc.rightElbowFlexor, out bc.rightElbowExtensor,
+            out bc.rightWristFlexor, out bc.rightWristExtensor);
+        BindArmMuscles("LeftArm",
+            out bc.leftShoulderFlexor, out bc.leftShoulderExtensor,
+            out bc.leftElbowFlexor, out bc.leftElbowExtensor,
+            out bc.leftWristFlexor, out bc.leftWristExtensor);
+    }
+
+    private void BindArmMuscles(string sideName,
+                                out Muscle shoulderFlex, out Muscle shoulderExt,
+                                out Muscle elbowFlex, out Muscle elbowExt,
+                                out Muscle wristFlex, out Muscle wristExt)
+    {
+        BindMusclePair(transform.Find(sideName + "Upper"), out shoulderFlex, out shoulderExt);
+        BindMusclePair(transform.Find(sideName + "Lower"), out elbowFlex, out elbowExt);
+        BindMusclePair(transform.Find(sideName + "Hand"), out wristFlex, out wristExt);
+    }
+
+    private static void BindMusclePair(Transform t, out Muscle flexor, out Muscle extensor)
+    {
+        flexor = null;
+        extensor = null;
+        if (t == null) return;
+        Muscle[] muscles = t.GetComponents<Muscle>();
+        flexor = System.Array.Find(muscles, m => m.direction == 1f);
+        extensor = System.Array.Find(muscles, m => m.direction == -1f);
     }
 
     private void DisableCollisionsBetweenSegments()
