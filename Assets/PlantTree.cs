@@ -5,7 +5,7 @@ public enum TreeRig
 {
     // Recursive hinges: trunk and forks sway. Scene Tree, not a grove.
     Sway = 0,
-    // Same recursion, every body Static, no springs, no wind. Cheap yard.
+    // Picture only: no Rigidbody2D, no wood collider. Sit pads stay.
     Static = 1
 }
 
@@ -84,6 +84,9 @@ public class PlantTree : MonoBehaviour
 
     public int SegmentCount { get; private set; }
     public int DynamicBodyCount { get; private set; }
+    public int RigidbodyCount { get; private set; }
+    public int WoodColliderCount { get; private set; }
+    public int PerchPadCount { get; private set; }
     public TreeKind ResolvedKind { get; private set; }
 
     private Color barkStump = new Color(0.36f, 0.24f, 0.14f, 1f);
@@ -162,8 +165,11 @@ public class PlantTree : MonoBehaviour
             ResolvedKind = TreeKind.Oak;
         ApplyKind(ResolvedKind);
         rng = new System.Random(seed);
-        growDepthCap = Mathf.Clamp(maxDepth, 1, 5);
-        int cap = Mathf.Clamp(maxSegments, 3, 31);
+        bool live = rig == TreeRig.Sway;
+        // Sway is one Human of bodies. Static is a picture: hundreds of
+        // twigs must not become Box2D fixtures.
+        growDepthCap = Mathf.Clamp(maxDepth, 1, live ? 5 : 8);
+        int cap = Mathf.Clamp(maxSegments, 3, live ? 31 : 255);
 
         HumanSegment stump = CreateWood(
             "Stump",
@@ -171,6 +177,7 @@ public class PlantTree : MonoBehaviour
             woodDensity * stumpWidth * stumpWidth * stumpHeight,
             barkStump,
             0,
+            live,
             false);
         stump.transform.localPosition = new Vector3(0f, stumpHeight * 0.5f, 0f);
         stump.transform.localRotation = Quaternion.identity;
@@ -183,11 +190,15 @@ public class PlantTree : MonoBehaviour
         if (normalizeMass)
             NormalizeDynamicMass();
 
-        DisableCollisionsBetweenSegments();
-        MarkWoodAsPerch();
+        if (live)
+        {
+            DisableCollisionsBetweenSegments();
+            MarkWoodAsPerch();
+        }
         Physics2D.SyncTransforms();
         BindGravityHold();
         RebuildPerchBounds();
+        RecountBodies();
         RegisterLive();
 
         if (rig == TreeRig.Sway)
@@ -224,10 +235,10 @@ public class PlantTree : MonoBehaviour
         for (int i = 0; i < nodes.Count; i++)
         {
             Node n = nodes[i];
-            if (n.segment == null || n.segment.collider == null || n.depth < 0)
+            if (n.segment == null || n.depth < 0)
                 continue;
             // Trunk is a sit, but a flock of 50 must fill twigs first.
-            Bounds b = n.segment.collider.bounds;
+            Bounds b = SegmentWorldBounds(n.segment);
             int points = n.depth >= 2 ? 3 : n.depth >= 1 ? 2 : 1;
             for (int k = 0; k < points; k++)
             {
@@ -261,9 +272,9 @@ public class PlantTree : MonoBehaviour
         for (int i = 0; i < nodes.Count; i++)
         {
             Node n = nodes[i];
-            if (n.segment == null || n.segment.collider == null || n.depth < 0)
+            if (n.segment == null || n.depth < 0)
                 continue;
-            Bounds b = n.segment.collider.bounds;
+            Bounds b = SegmentWorldBounds(n.segment);
             int points = n.depth >= 2 ? 3 : n.depth >= 1 ? 2 : 1;
             for (int k = 0; k < points; k++)
             {
@@ -295,6 +306,8 @@ public class PlantTree : MonoBehaviour
             col.size = new Vector2(0.12f, 0.024f);
             GroundLayers.Apply(pad);
         }
+
+        RecountBodies();
     }
 
     public float GetMaxAbsJointAngle()
@@ -564,6 +577,7 @@ public class PlantTree : MonoBehaviour
             woodDensity * width * width * length,
             bark,
             depth,
+            isDynamic,
             isDynamic);
 
         Vector2 parentTip = TipLocal(parent, parentHeading);
@@ -659,19 +673,35 @@ public class PlantTree : MonoBehaviour
         float mass,
         Color color,
         int sortingOrder,
+        bool livePhysics,
         bool floorInertia)
     {
         GameObject segmentObject = new GameObject(name);
         HumanSegment segment = segmentObject.AddComponent<HumanSegment>();
-        segment.Initialize(
-            name,
-            size,
-            Mathf.Max(0.02f, mass),
-            color,
-            transform,
-            sortingOrder,
-            HumanVisualShape.Capsule,
-            ArtLibrary.Bark);
+        if (livePhysics)
+        {
+            segment.Initialize(
+                name,
+                size,
+                Mathf.Max(0.02f, mass),
+                color,
+                transform,
+                sortingOrder,
+                HumanVisualShape.Capsule,
+                ArtLibrary.Bark);
+        }
+        else
+        {
+            // Grove / Static: sprite only. Sit contact is BirdPerch.
+            segment.InitializeVisualOnly(
+                name,
+                size,
+                color,
+                transform,
+                sortingOrder,
+                HumanVisualShape.Capsule,
+                ArtLibrary.Bark);
+        }
         segment.jointMarkerDiameter = jointMarkerDiameter;
         if (segment.rb != null && floorInertia && minSegmentInertia > 0f
             && segment.rb.inertia < minSegmentInertia)
@@ -832,20 +862,59 @@ public class PlantTree : MonoBehaviour
         return false;
     }
 
+    private static Bounds SegmentWorldBounds(HumanSegment segment)
+    {
+        if (segment == null)
+            return new Bounds();
+        if (segment.collider != null)
+            return segment.collider.bounds;
+
+        // Same AABB BoxCollider2D would report for an unscaled box.
+        Vector2 size = segment.size;
+        Vector3 hx = segment.transform.TransformVector(new Vector3(size.x * 0.5f, 0f, 0f));
+        Vector3 hy = segment.transform.TransformVector(new Vector3(0f, size.y * 0.5f, 0f));
+        Vector3 extents = new Vector3(
+            Mathf.Abs(hx.x) + Mathf.Abs(hy.x),
+            Mathf.Abs(hx.y) + Mathf.Abs(hy.y),
+            0f);
+        return new Bounds(segment.transform.position, extents * 2f);
+    }
+
     private void RebuildPerchBounds()
     {
         perchBoundsValid = false;
         for (int i = 0; i < nodes.Count; i++)
         {
-            if (nodes[i].segment == null || nodes[i].segment.collider == null)
+            if (nodes[i].segment == null)
                 continue;
+            Bounds b = SegmentWorldBounds(nodes[i].segment);
             if (!perchBoundsValid)
             {
-                perchBounds = nodes[i].segment.collider.bounds;
+                perchBounds = b;
                 perchBoundsValid = true;
             }
             else
-                perchBounds.Encapsulate(nodes[i].segment.collider.bounds);
+                perchBounds.Encapsulate(b);
+        }
+    }
+
+    private void RecountBodies()
+    {
+        Rigidbody2D[] bodies = GetComponentsInChildren<Rigidbody2D>(true);
+        RigidbodyCount = bodies != null ? bodies.Length : 0;
+        WoodColliderCount = 0;
+        PerchPadCount = 0;
+        Collider2D[] cols = GetComponentsInChildren<Collider2D>(true);
+        if (cols == null)
+            return;
+        for (int i = 0; i < cols.Length; i++)
+        {
+            if (cols[i] == null)
+                continue;
+            if (cols[i].GetComponent<BirdPerch>() != null)
+                PerchPadCount++;
+            else
+                WoodColliderCount++;
         }
     }
 

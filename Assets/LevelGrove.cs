@@ -1,9 +1,7 @@
 using UnityEngine;
 
-// Роща на «Дворе». PlantTree коллег не меняем — только посадка.
-// Дерево из HumanSegment: у каждого куска свой Rigidbody2D. Если оставить
-// Dynamic хоть на один FixedUpdate, 2 м земли выбивает пень импульсом —
-// «улетели». Sway в World по-прежнему нельзя.
+// Yard grove. Static trees are picture + optional BirdPerch pads.
+// No wood Rigidbody2D. Sway in World is still forbidden.
 public static class LevelGrove
 {
     public static readonly float[] Xs = { -22f, -11f, 14f, 31f, 54f, 68f };
@@ -34,12 +32,10 @@ public static class LevelGrove
 
             PinToYard(tree);
             IgnoreHuman(tree, human);
-            // Tree and level colliders are both Static here; Box2D creates no static-static contacts.
         }
     }
 
-    // Пока сегмент Dynamic, гравитация и контакт с площадкой дают разлёт.
-    // Заморозка — посадка двора, не смена рига в PlantTree.
+    // Leftover if a Sway body is planted by mistake. Static has no RB.
     private static void PinToYard(PlantTree tree)
     {
         Rigidbody2D[] bodies = tree.GetComponentsInChildren<Rigidbody2D>(true);

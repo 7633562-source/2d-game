@@ -85,6 +85,10 @@ public class PlantTrialRecorder
         {
             json.Append(",\"treeSegmentCount\":").Append(tree.SegmentCount.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"treeDynamicCount\":").Append(tree.DynamicBodyCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"treeRigidbodyCount\":").Append(tree.RigidbodyCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"treeWoodColliderCount\":").Append(tree.WoodColliderCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"treePerchPadCount\":").Append(tree.PerchPadCount.ToString(CultureInfo.InvariantCulture));
+            AppendStr(json, "treeRig", tree.rig.ToString());
             AppendStr(json, "treeKind", tree.ResolvedKind.ToString());
             json.Append(",\"treeSeed\":").Append(tree.seed.ToString(CultureInfo.InvariantCulture));
             AppendNum(json, "treeWindScale", tree.windScale);

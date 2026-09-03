@@ -19,11 +19,18 @@ the bird. Size is `collider.size`, not `localScale`. Leaves are
 
 | `TreeRig` | Where | Bodies |
 |---|---|---|
-| `Sway` | scene `Tree` | static stump + up to 15 dynamic hinges |
-| `Static` | future grove | same recursion, every body Static, no spring, no wind |
+| `Sway` | scene `Tree`, headless `-tree 1` | static stump + up to 15 dynamic hinges |
+| `Static` | yard grove, Tree-scene extras | **picture only**: no `Rigidbody2D`, no wood collider |
 
 One `Sway` tree costs about one `Human` in body count. Do not plant a
 `Sway` grove in `World`.
+
+Static is for hundreds of plants. A segment is still a box sprite
+(`HumanSegment.size`, not `localScale`). It does not enter Box2D.
+Sit contact is only `BirdPerch` pads (Ground, no extra RB, cap 20,
+twigs first). Wood vs world / human / bird is off because there is
+no wood fixture. `GetPerchSlots` / `SeatBirds` / `NearPerch` stay.
+Sway keep the old 31-body clamp; Static may grow to 255 segments.
 
 ## Recursion
 
@@ -50,18 +57,23 @@ Human hinges: `+AddTorque` (CCW) **decreases** `jointAngle`. Wood spring
 is `+k·(θ−θ_rest)`, not textbook `−k·θ`. Cap by `maxTorque` only —
 a one-step `springStop` is < 1 N·m on wood inertia and kills the pose.
 
-Wood colliders use the `Ground` layer. A bird does not collide with
-wood (`Bird.GhostTreeWood`) — it flies through the crown. Sit points
-are `BirdPerch` pads from `EnsureBirdPerches` (top of twigs, cap 20).
-`GetPerchSlots` / `SeatBirds` / `NearPerch` stay the handshake with
-agent `ai`. Play flock: `BirdFlock50` has `treeCount = 1`. Headless:
-`-tree 1`, with birds `-bird 1 -tree 1`. Do not plant pads in World
-unless a bird is there.
+Sway wood colliders use the `Ground` layer; a bird does not collide
+with them (`Bird.GhostTreeWood`). Static wood has no collider.
+Sit points are `BirdPerch` pads from `EnsureBirdPerches` (top of twigs,
+cap 20). `GetPerchSlots` / `SeatBirds` / `NearPerch` stay the handshake
+with agent `ai`. Play flock: `BirdFlock50` has `treeCount = 1` (Sway).
+Headless: `-tree 1`, Static grove `-treeRig static`. With birds
+`-bird 1 -tree 1`. Do not plant pads in World unless a bird is there.
+
+Accepted 02.09 (`plant_static_cheap_02.md`): Static oak is 0 RB / 0
+wood collider. Sway hold still ≈ 0.002°. One flock bird on Static
+pads: `perchLandCount` 7, `fell` false.
 
 ## Do not
 
 - No muscles and no `HingeJoint2D.useMotor`. Wood is `TreeSpring` +
   `JointFriction`.
+- Do not put a wood `Rigidbody2D` or wood collider back on Static.
 - Forces only in `FixedUpdate` through `TreeDriver` (spring → damping →
   wind).
 - Wind is `½ ρ v² S` on the segment, not an "up" force.
