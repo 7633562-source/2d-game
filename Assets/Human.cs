@@ -72,7 +72,7 @@ public class Human : MonoBehaviour
     public Vector2 neckSize = new Vector2(0.12f, 0.09f);
     public Vector2 upperArmSize = new Vector2(0.10f, 0.33f);
     public Vector2 lowerArmSize = new Vector2(0.08f, 0.26f);
-    public Vector2 handSize = new Vector2(0.06f, 0.19f);
+    public Vector2 handSize = new Vector2(0.06f, 0.16f);
     public Vector2 thighSize = new Vector2(0.16f, 0.43f);
     public Vector2 shinSize = new Vector2(0.11f, 0.43f);
     // Один прямоугольник: длина взрослой стопы, высота ~подошва плюс подъём.
