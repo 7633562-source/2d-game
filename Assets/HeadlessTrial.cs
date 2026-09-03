@@ -15,6 +15,7 @@ using UnityEngine;
 //   -lean 1|-1 -leanTime 5 -leanHold 10 — наклон корпуса (+ вперёд, − назад)
 //   -standLeg left|right|0 -standLegTime 5 -standLegHold 10 — одноногая стойка
 //   -dog 1 — прогон собаки вместо человека (humanCount = 0, плоская земля)
+//   -dogLeap 1 -dogLeapTime 2 -dogPreyX 1.4 — leap attack after settle, prey mark
 //   -tree 1 — дерево (можно вместе с -bird: птицы на ветках)
 //   -treeKind oak|pine|willow|bush|poplar — рецепт кроны (по умолчанию oak)
 //   -treeSeed 1 — локальный Random вилки
@@ -117,6 +118,9 @@ public class HeadlessTrial : MonoBehaviour
     private bool spawnDog;
     private Dog dog;
     private DogTrialRecorder dogRecorder;
+    private bool dogLeap;
+    private float dogLeapTime = 2f;
+    private float dogPreyX = 1.4f;
     private Bird bird;
     private Bird[] trialBirds;
     private BirdTrialRecorder birdRecorder;
@@ -199,6 +203,9 @@ public class HeadlessTrial : MonoBehaviour
         birdDriveCount = Mathf.Max(1, Mathf.RoundToInt(GetFloatArg("-birdCount", 1f)));
         birdDriveSeed = Mathf.RoundToInt(GetFloatArg("-birdDriveSeed", 1f));
         spawnDog = GetFloatArg("-dog", 0f) > 0.5f;
+        dogLeap = GetFloatArg("-dogLeap", 0f) > 0.5f;
+        dogLeapTime = GetFloatArg("-dogLeapTime", 2f);
+        dogPreyX = GetFloatArg("-dogPreyX", 1.4f);
         if (spawnDog && spawnBird)
         {
             Debug.LogWarning("HeadlessTrial: -dog and -bird both set; running dog.");
@@ -273,6 +280,7 @@ public class HeadlessTrial : MonoBehaviour
         float birdGroundWidth = Mathf.Max(48f, packSpan + 16f);
         ground.groundSize = new Vector2(wideBird ? birdGroundWidth : 20f, 2f);
         ground.groundPosition = new Vector2(0f, -3f);
+        ground.groundFriction = GetFloatArg("-groundFriction", ground.groundFriction);
         ground.BuildGround();
 
         if (spawnDog)
@@ -309,6 +317,7 @@ public class HeadlessTrial : MonoBehaviour
         humanObject.transform.position = new Vector2(0f, startY);
 
         human = humanObject.AddComponent<Human>();
+        human.footFriction = GetFloatArg("-footFriction", human.footFriction);
         // MotionIntent и StepPhaseDriver до PlayerInputSource: у того
         // RequireComponent(StepPhaseDriver), иначе Unity создаст второй
         // экземпляр, а стенд будет Tick-ать «наш», метрики — чужой.
@@ -372,6 +381,13 @@ public class HeadlessTrial : MonoBehaviour
         dogObject.transform.position = new Vector2(0f, startY);
         dog.BuildDog();
         ApplyDogGains(dog.stance);
+
+        if (dogLeap || HasArg("-dogPreyX"))
+        {
+            DogPrey prey = DogPrey.Spawn(new Vector2(dogPreyX, -2f + DogPrey.DefaultHeightAboveGround));
+            if (dog.stance != null && prey != null)
+                dog.stance.leapTarget = prey.transform;
+        }
 
         Transform chest = dog.transform.Find("Chest");
         torsoBody = chest != null ? chest.GetComponent<Rigidbody2D>() : null;
@@ -465,6 +481,11 @@ public class HeadlessTrial : MonoBehaviour
         c.heightMaxDeg = GetFloatArg("-heightMax", c.heightMaxDeg);
         c.heightHipMaxDeg = GetFloatArg("-heightHipMax", c.heightHipMaxDeg);
         c.startupHoldSeconds = GetFloatArg("-startupHold", c.startupHoldSeconds);
+        c.jawOpen = Mathf.Clamp01(GetFloatArg("-jawOpen", c.jawOpen));
+        if (GetFloatArg("-dogBark", 0f) > 0.5f)
+            c.Bark();
+        if (GetFloatArg("-dogBite", 0f) > 0.5f)
+            c.Bite();
     }
 
     private void BuildBirdScene()
@@ -931,6 +952,7 @@ public class HeadlessTrial : MonoBehaviour
         float simulated = 0f;
         float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
         bool pushed = false;
+        bool leaped = false;
 
         while (simulated < duration)
         {
@@ -941,6 +963,13 @@ public class HeadlessTrial : MonoBehaviour
             {
                 ApplyPush(simulated);
                 pushed = true;
+            }
+
+            if (!leaped && dogLeap && simulated >= dogLeapTime)
+            {
+                if (dog != null && dog.stance != null)
+                    dog.stance.LeapAttack(dog.stance.leapTarget);
+                leaped = true;
             }
 
             dogRecorder.Sample(simulated);

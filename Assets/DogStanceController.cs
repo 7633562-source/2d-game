@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 // Quadruped stance. Not BalanceController. Forces only via Muscle activations.
 [DefaultExecutionOrder(0)]
@@ -8,7 +9,11 @@ public class DogStanceController : MonoBehaviour
     {
         Balancing,
         Recovery,
-        Falling
+        Falling,
+        LeapCrouch,
+        LeapPush,
+        LeapAir,
+        LeapBite
     }
 
     [Header("State")]
@@ -70,15 +75,13 @@ public class DogStanceController : MonoBehaviour
     [Header("Limb joint pose")]
     public float hipPGain = 2f;
     public float hipDGain = 0.3f;
-    // c20 full-time hipP 4 lost plant. Boost only through the 0.25 s slam.
-    public float startupHipP = 0f;
-    public float startupHipSeconds = 0f;
-    // Must match Dog.spawnHipAngle / spawnShoulderAngle. A pose target
-    // that disagrees with the build pose drags the limbs back into the
-    // raked stance the moment the first step runs (that is what c15 hit:
-    // hip target 0 against a −25 build). c41 tried 0/0 to match a
-    // columnar build and lost the plant on the build side, not this
-    // mismatch — see Dog.cs. Reverted to c39's −25 / +25 together.
+    // c20 full-time hipP 4 lost plant. c59: P 8 for 0.25 s holds the
+    // rake through the slam (drop 0.237 → 0.193, plant 0.992). P 12
+    // and a 0.50 s window both lost plant.
+    public float startupHipP = 8f;
+    public float startupHipSeconds = 0.25f;
+    // Must match Dog.spawnHipAngle / spawnShoulderAngle. Planted leftover
+    // is −25 / +25 (c39). Columns 0/0 lost the plant (c41, c52).
     public float hipBaseAngle = -25f;
     public float shoulderBaseAngle = 25f;
     public float kneePGain = 3f;
@@ -88,6 +91,32 @@ public class DogStanceController : MonoBehaviour
     public float tailPGain = 0.8f;
     public float tailDGain = 0.3f;
     public float tailBaseAngle = 0f;
+
+    [Header("Jaw (deg). Plus opens, 0 is closed.")]
+    public float jawPGain = 2.5f;
+    public float jawDGain = 0.4f;
+    public float jawClosedAngle = 0f;
+    public float jawOpenAngle = 35f;
+    [Range(0f, 1f)]
+    public float jawOpen;
+    public bool jawStrikeArmed;
+    public float jawAngle;
+
+    [Header("Leap attack (muscles only, no AddForce)")]
+    public float leapCrouchSeconds = 0.35f;
+    public float leapPushSeconds = 0.18f;
+    public float leapAirSeconds = 0.70f;
+    public float leapBiteSeconds = 0.40f;
+    public float leapCrouchKnee = 55f;
+    public float leapCrouchHip = -20f;
+    public float leapCrouchShoulder = 20f;
+    public float leapChestCoil = -14f;
+    public float leapChestLaunch = 10f;
+    public float leapActivationSpeed = 70f;
+    public float leapBiteRange = 0.45f;
+    public float leapPawPlant = 0.85f;
+    public Transform leapTarget;
+    public int leapCount;
 
     [Header("Neck / head Stable PD")]
     public float neckPGain = 1.5f;
@@ -126,6 +155,7 @@ public class DogStanceController : MonoBehaviour
     public Muscle neckFlexor, neckExtensor;
     public Muscle headFlexor, headExtensor;
     public Muscle tailFlexor, tailExtensor;
+    public Muscle jawFlexor, jawExtensor;
     public Muscle frontRightShoulderFlexor, frontRightShoulderExtensor;
     public Muscle frontLeftShoulderFlexor, frontLeftShoulderExtensor;
     public Muscle frontRightElbowFlexor, frontRightElbowExtensor;
@@ -145,6 +175,7 @@ public class DogStanceController : MonoBehaviour
     public HingeJoint2D neckJoint;
     public HingeJoint2D headJoint;
     public HingeJoint2D tailJoint;
+    public HingeJoint2D jawJoint;
     public HingeJoint2D frontRightShoulderJoint, frontLeftShoulderJoint;
     public HingeJoint2D frontRightElbowJoint, frontLeftElbowJoint;
     public HingeJoint2D rearRightHipJoint, rearLeftHipJoint;
@@ -155,6 +186,8 @@ public class DogStanceController : MonoBehaviour
     private VestibularSystem vestibular;
     private Transform chestTf;
     private Transform pelvisTf;
+    private Transform headTf;
+    private Transform jawTf;
     private Rigidbody2D[] bodies = System.Array.Empty<Rigidbody2D>();
     private Collider2D frontRightPawCol, frontLeftPawCol, rearRightPawCol, rearLeftPawCol;
     private readonly ContactPoint2D[] groundContacts = new ContactPoint2D[8];
@@ -174,18 +207,33 @@ public class DogStanceController : MonoBehaviour
     private float rearRightHipInertia, rearLeftHipInertia;
     private float frontRightShoulderInertia, frontLeftShoulderInertia;
     private float tailInertia;
+    private float jawInertia;
     private float lumbarInertia;
     private float prevPelvisY;
     private bool hasPrevPelvisY;
     private float spawnedFixedTime = -1f;
+    private OrganismVoice voice;
+    private float barkUntil = -1f;
+    private float biteOpenUntil = -1f;
+    private float biteCloseUntil = -1f;
+    private bool spaceWasDown;
+    private bool fWasDown;
+    private bool rWasDown;
+    private float leapPhaseStart = -1f;
+    private bool leapBiteStarted;
+    private float activationSpeedThisStep;
+    private Vector2 leapAimPoint;
 
     public void Bind(Dog dog)
     {
         vestibular = dog != null ? dog.vestibularSystem : GetComponent<VestibularSystem>();
         chestTf = dog != null && dog.chestSegment != null ? dog.chestSegment.transform : transform.Find("Chest");
         pelvisTf = dog != null && dog.pelvisSegment != null ? dog.pelvisSegment.transform : transform.Find("Pelvis");
+        headTf = dog != null && dog.headSegment != null ? dog.headSegment.transform : transform.Find("Head");
+        jawTf = dog != null && dog.jawSegment != null ? dog.jawSegment.transform : transform.Find("Jaw");
         CacheBodies();
         BindJointsAndMuscles();
+        voice = GetComponent<OrganismVoice>();
         spawnedFixedTime = Time.fixedTime;
     }
 
@@ -238,6 +286,7 @@ public class DogStanceController : MonoBehaviour
         BindPair("Neck", out neckJoint, out neckFlexor, out neckExtensor);
         BindPair("Head", out headJoint, out headFlexor, out headExtensor);
         BindPair("Tail", out tailJoint, out tailFlexor, out tailExtensor);
+        BindPair("Jaw", out jawJoint, out jawFlexor, out jawExtensor);
         BindPair("FrontRightUpper", out frontRightShoulderJoint, out frontRightShoulderFlexor, out frontRightShoulderExtensor);
         BindPair("FrontLeftUpper", out frontLeftShoulderJoint, out frontLeftShoulderFlexor, out frontLeftShoulderExtensor);
         BindPair("FrontRightLower", out frontRightElbowJoint, out frontRightElbowFlexor, out frontRightElbowExtensor);
@@ -306,6 +355,7 @@ public class DogStanceController : MonoBehaviour
             pelvisTilt = vestibular.GetPelvisTilt();
         }
         lumbarAngle = lumbarJoint != null ? lumbarJoint.jointAngle : 0f;
+        jawAngle = jawJoint != null ? jawJoint.jointAngle : 0f;
 
         chestY = chestTf != null ? chestTf.position.y : transform.position.y;
         pelvisY = pelvisTf != null ? pelvisTf.position.y : transform.position.y;
@@ -321,20 +371,33 @@ public class DogStanceController : MonoBehaviour
             hasHeightTarget = true;
         }
 
-        float absOff = Mathf.Abs(comOffsetX);
-        if (absOff > fallCoMOffset)
-            currentState = StanceState.Falling;
-        else if (absOff > recoveryCoMOffset)
-            currentState = StanceState.Recovery;
+        if (IsLeap())
+            AdvanceLeap();
         else
-            currentState = StanceState.Balancing;
+        {
+            float absOff = Mathf.Abs(comOffsetX);
+            if (absOff > fallCoMOffset)
+                currentState = StanceState.Falling;
+            else if (absOff > recoveryCoMOffset)
+                currentState = StanceState.Recovery;
+            else
+                currentState = StanceState.Balancing;
+        }
     }
 
     private void Drive()
     {
+        activationSpeedThisStep = muscleActivationSpeed;
+
         if (currentState == StanceState.Falling)
         {
             RelaxAll();
+            return;
+        }
+
+        if (IsLeap())
+        {
+            DriveLeap();
             return;
         }
 
@@ -395,15 +458,305 @@ public class DogStanceController : MonoBehaviour
         ControlJointStable(tailJoint, tailBaseAngle, tailPGain, tailDGain,
             tailFlexor, tailExtensor, ref tailInertia);
 
+        DriveJaw();
+
         if (vestibular != null)
         {
             ControlSegmentToWorldUpright(
                 vestibular.GetNeckTilt(), vestibular.GetNeckAngularVelocity(),
-                neckJoint, neckFlexor, neckExtensor, ref neckEffectiveInertia);
+                neckJoint, neckFlexor, neckExtensor, ref neckEffectiveInertia, neckTargetTilt);
             ControlSegmentToWorldUpright(
                 vestibular.GetHeadTilt(), vestibular.GetHeadAngularVelocity(),
-                headJoint, headFlexor, headExtensor, ref headEffectiveInertia);
+                headJoint, headFlexor, headExtensor, ref headEffectiveInertia, neckTargetTilt);
         }
+    }
+
+    void Update()
+    {
+        Keyboard kb = Keyboard.current;
+        if (kb == null)
+            return;
+
+        bool space = kb.spaceKey.isPressed;
+        if (space && !spaceWasDown)
+            Bark();
+        spaceWasDown = space;
+
+        bool f = kb.fKey.isPressed;
+        if (f && !fWasDown)
+            Bite();
+        fWasDown = f;
+
+        bool r = kb.rKey.isPressed;
+        if (r && !rWasDown)
+            LeapAttack(leapTarget);
+        rWasDown = r;
+    }
+
+    // Open a crack and cry. Not a brain: Play / CLI / Inspector call this.
+    public void Bark()
+    {
+        barkUntil = Time.fixedTime + 0.16f;
+        if (voice != null)
+            voice.Cry(VoiceKind.Call);
+    }
+
+    // Open then slam shut and arm JawStrike. Closing is minus jointAngle.
+    public void Bite()
+    {
+        biteOpenUntil = Time.fixedTime + 0.10f;
+        biteCloseUntil = Time.fixedTime + 0.36f;
+    }
+
+    // Crouch, push with the planted paws, fly at the mark, bite.
+    // Not a brain and not AddForce: the launch is knee/elbow extension
+    // while the feet are still on the ground.
+    public void LeapAttack(Transform target = null)
+    {
+        // Sit on this body often trips Falling from CoM offset. R / CLI
+        // must still start the leap; DriveLeap, not RelaxAll, owns the jump.
+        if (IsLeap())
+            return;
+        if (target != null)
+            leapTarget = target;
+        ResolveLeapAim();
+        currentState = StanceState.LeapCrouch;
+        leapPhaseStart = Time.fixedTime;
+        leapBiteStarted = false;
+        leapCount++;
+    }
+
+    public bool IsLeap()
+    {
+        return currentState == StanceState.LeapCrouch
+               || currentState == StanceState.LeapPush
+               || currentState == StanceState.LeapAir
+               || currentState == StanceState.LeapBite;
+    }
+
+    public Vector2 LeapAim => leapAimPoint;
+
+    private void ResolveLeapAim()
+    {
+        if (leapTarget != null)
+        {
+            leapAimPoint = leapTarget.position;
+            return;
+        }
+
+        DogPrey mark = FindFirstObjectByType<DogPrey>();
+        if (mark != null)
+        {
+            leapTarget = mark.transform;
+            leapAimPoint = leapTarget.position;
+            return;
+        }
+
+        Vector2 chest = chestTf != null ? (Vector2)chestTf.position : (Vector2)transform.position;
+        leapAimPoint = chest + new Vector2(1.2f, 0f);
+    }
+
+    private void AdvanceLeap()
+    {
+        ResolveLeapAim();
+        float age = leapPhaseStart >= 0f ? Time.fixedTime - leapPhaseStart : 0f;
+
+        switch (currentState)
+        {
+            case StanceState.LeapCrouch:
+                if (age >= leapCrouchSeconds)
+                    EnterLeapPhase(StanceState.LeapPush);
+                break;
+            case StanceState.LeapPush:
+                if (AllPawsAirborne() || age >= leapPushSeconds)
+                    EnterLeapPhase(StanceState.LeapAir);
+                break;
+            case StanceState.LeapAir:
+                if (InLeapBiteRange() || age >= leapAirSeconds)
+                {
+                    EnterLeapPhase(StanceState.LeapBite);
+                    TryStartLeapBite();
+                }
+                break;
+            case StanceState.LeapBite:
+                TryStartLeapBite();
+                if (age >= leapBiteSeconds)
+                    EndLeap();
+                break;
+        }
+    }
+
+    private void EnterLeapPhase(StanceState next)
+    {
+        currentState = next;
+        leapPhaseStart = Time.fixedTime;
+    }
+
+    private void TryStartLeapBite()
+    {
+        if (leapBiteStarted)
+            return;
+        leapBiteStarted = true;
+        Bite();
+    }
+
+    private void EndLeap()
+    {
+        float drop = hasHeightTarget ? Mathf.Max(0f, targetPelvisY - pelvisY) : 0f;
+        // CoM leaving the paws is not a fall during the jump. Fold only
+        // when the trunk has really settled onto the dirt.
+        currentState = drop > 0.60f ? StanceState.Falling : StanceState.Balancing;
+        leapPhaseStart = -1f;
+    }
+
+    private bool AllPawsAirborne()
+    {
+        return !frontRightGrounded && !frontLeftGrounded
+               && !rearRightGrounded && !rearLeftGrounded;
+    }
+
+    private bool InLeapBiteRange()
+    {
+        return Vector2.Distance(MouthPoint(), leapAimPoint) < leapBiteRange;
+    }
+
+    private Vector2 MouthPoint()
+    {
+        if (jawTf != null)
+            return jawTf.position;
+        if (headTf != null)
+            return headTf.position;
+        if (chestTf != null)
+            return (Vector2)chestTf.position + new Vector2(0.25f, 0f);
+        return transform.position;
+    }
+
+    // Crouch → plant extension → stretch in the air → bite. No AddForce:
+    // the launch is knee/elbow opening while paws still push the ground.
+    private void DriveLeap()
+    {
+        ResolveLeapAim();
+
+        float kneeTarget = 0f;
+        float elbowTarget = 0f;
+        float hipTarget = hipBaseAngle;
+        float shoulderTarget = shoulderBaseAngle;
+        float chestTarget = chestTargetTilt;
+        float pawCommand = 0f;
+        bool plantPush = false;
+        bool lookAtPrey = false;
+
+        switch (currentState)
+        {
+            case StanceState.LeapCrouch:
+                kneeTarget = leapCrouchKnee;
+                elbowTarget = leapCrouchKnee;
+                hipTarget = leapCrouchHip;
+                shoulderTarget = leapCrouchShoulder;
+                chestTarget = leapChestCoil;
+                break;
+            case StanceState.LeapPush:
+                activationSpeedThisStep = leapActivationSpeed;
+                kneeTarget = 0f;
+                elbowTarget = 0f;
+                // Extension past the coil: hip plus throws the pelvis
+                // cranial, shoulder minus is the front-column mirror.
+                hipTarget = 12f;
+                shoulderTarget = -12f;
+                chestTarget = leapChestLaunch;
+                pawCommand = leapPawPlant;
+                plantPush = true;
+                break;
+            case StanceState.LeapAir:
+            case StanceState.LeapBite:
+                kneeTarget = 0f;
+                elbowTarget = 0f;
+                hipTarget = 12f;
+                shoulderTarget = -12f;
+                chestTarget = leapChestLaunch;
+                lookAtPrey = true;
+                break;
+        }
+
+        if (plantPush)
+        {
+            DrivePaw(frontRightPawJoint, frontRightPawFlexor, frontRightPawExtensor, frontRightGrounded, pawCommand);
+            DrivePaw(frontLeftPawJoint, frontLeftPawFlexor, frontLeftPawExtensor, frontLeftGrounded, pawCommand);
+            DrivePaw(rearRightPawJoint, rearRightPawFlexor, rearRightPawExtensor, rearRightGrounded, pawCommand);
+            DrivePaw(rearLeftPawJoint, rearLeftPawFlexor, rearLeftPawExtensor, rearLeftGrounded, pawCommand);
+        }
+        else
+        {
+            float offsetN = comOffsetX / Mathf.Max(0.01f, comOffsetReference);
+            float velN = comVelocity.x / Mathf.Max(0.05f, comVelocityReference);
+            float pawBalance = Mathf.Clamp(pawComP * offsetN + pawComD * velN, -1f, 1f);
+            DrivePaw(frontRightPawJoint, frontRightPawFlexor, frontRightPawExtensor, frontRightGrounded, pawBalance);
+            DrivePaw(frontLeftPawJoint, frontLeftPawFlexor, frontLeftPawExtensor, frontLeftGrounded, pawBalance);
+            DrivePaw(rearRightPawJoint, rearRightPawFlexor, rearRightPawExtensor, rearRightGrounded, pawBalance);
+            DrivePaw(rearLeftPawJoint, rearLeftPawFlexor, rearLeftPawExtensor, rearLeftGrounded, pawBalance);
+        }
+
+        ControlJointStable(rearLeftHipJoint, hipTarget, hipPGain, hipDGain,
+            rearLeftHipFlexor, rearLeftHipExtensor, ref rearLeftHipInertia);
+        ControlJointStable(rearRightHipJoint, hipTarget, hipPGain, hipDGain,
+            rearRightHipFlexor, rearRightHipExtensor, ref rearRightHipInertia);
+        ControlJointStable(frontLeftShoulderJoint, shoulderTarget, hipPGain, hipDGain,
+            frontLeftShoulderFlexor, frontLeftShoulderExtensor, ref frontLeftShoulderInertia);
+        ControlJointStable(frontRightShoulderJoint, shoulderTarget, hipPGain, hipDGain,
+            frontRightShoulderFlexor, frontRightShoulderExtensor, ref frontRightShoulderInertia);
+
+        DriveLumbarToWorld(chestTarget);
+
+        ControlJointStable(rearLeftKneeJoint, kneeTarget, kneePGain, kneeDGain,
+            rearLeftKneeFlexor, rearLeftKneeExtensor, ref rearLeftKneeInertia);
+        ControlJointStable(rearRightKneeJoint, kneeTarget, kneePGain, kneeDGain,
+            rearRightKneeFlexor, rearRightKneeExtensor, ref rearRightKneeInertia);
+        ControlJointStable(frontLeftElbowJoint, elbowTarget, kneePGain, kneeDGain,
+            frontLeftElbowFlexor, frontLeftElbowExtensor, ref frontLeftElbowInertia);
+        ControlJointStable(frontRightElbowJoint, elbowTarget, kneePGain, kneeDGain,
+            frontRightElbowFlexor, frontRightElbowExtensor, ref frontRightElbowInertia);
+
+        ControlJointStable(tailJoint, tailBaseAngle, tailPGain, tailDGain,
+            tailFlexor, tailExtensor, ref tailInertia);
+
+        DriveJaw();
+
+        if (vestibular != null)
+        {
+            float worldTarget = lookAtPrey ? LookTiltTowardAim() : neckTargetTilt;
+            ControlSegmentToWorldUpright(
+                vestibular.GetNeckTilt(), vestibular.GetNeckAngularVelocity(),
+                neckJoint, neckFlexor, neckExtensor, ref neckEffectiveInertia, worldTarget);
+            ControlSegmentToWorldUpright(
+                vestibular.GetHeadTilt(), vestibular.GetHeadAngularVelocity(),
+                headJoint, headFlexor, headExtensor, ref headEffectiveInertia, worldTarget);
+        }
+    }
+
+    private float LookTiltTowardAim()
+    {
+        Vector2 from = MouthPoint();
+        float look = Mathf.Atan2(leapAimPoint.y - from.y, leapAimPoint.x - from.x) * Mathf.Rad2Deg;
+        return Mathf.Clamp(look, -30f, 30f);
+    }
+
+    private void DriveJaw()
+    {
+        float open = Mathf.Clamp01(jawOpen);
+        float now = Time.fixedTime;
+        if (now < barkUntil)
+            open = 1f;
+        if (currentState == StanceState.LeapCrouch)
+            open = Mathf.Max(open, 0.22f);
+        if (now < biteOpenUntil)
+            open = 1f;
+        else if (now < biteCloseUntil)
+            open = 0f;
+
+        jawStrikeArmed = now >= biteOpenUntil && now < biteCloseUntil;
+        float target = Mathf.Lerp(jawClosedAngle, jawOpenAngle, open);
+        ControlJointStable(jawJoint, target, jawPGain, jawDGain,
+            jawFlexor, jawExtensor, ref jawInertia);
     }
 
     private Vector2 ComputeCoM()
@@ -568,7 +921,8 @@ public class DogStanceController : MonoBehaviour
     }
 
     private void ControlSegmentToWorldUpright(float tilt, float angVel, HingeJoint2D joint,
-                                              Muscle flexor, Muscle extensor, ref float cachedInertia)
+                                              Muscle flexor, Muscle extensor, ref float cachedInertia,
+                                              float worldTarget)
     {
         if (flexor == null || extensor == null) return;
         float tiltForError = tilt;
@@ -586,7 +940,7 @@ public class DogStanceController : MonoBehaviour
                 damping = k * dt / cachedInertia;
             }
         }
-        float error = Mathf.DeltaAngle(tiltForError, neckTargetTilt) / Mathf.Max(1f, neckErrorReferenceDegrees);
+        float error = Mathf.DeltaAngle(tiltForError, worldTarget) / Mathf.Max(1f, neckErrorReferenceDegrees);
         float speed = angVel / Mathf.Max(1f, speedReferenceDegPerSec);
         float raw = (-neckPGain) * error - (-neckDGain) * speed;
         float signal = Mathf.Clamp(raw / (1f + damping), -1f, 1f);
@@ -655,9 +1009,10 @@ public class DogStanceController : MonoBehaviour
     private void UpdateMuscle(Muscle muscle, float targetActivation)
     {
         if (muscle == null) return;
+        float speed = activationSpeedThisStep > 0f ? activationSpeedThisStep : muscleActivationSpeed;
         muscle.activation = Mathf.MoveTowards(
             muscle.activation, targetActivation,
-            muscleActivationSpeed * Time.fixedDeltaTime);
+            speed * Time.fixedDeltaTime);
     }
 
     private void RelaxAll()
@@ -670,6 +1025,8 @@ public class DogStanceController : MonoBehaviour
         UpdateMuscle(headExtensor, 0f);
         UpdateMuscle(tailFlexor, 0f);
         UpdateMuscle(tailExtensor, 0f);
+        UpdateMuscle(jawFlexor, 0f);
+        UpdateMuscle(jawExtensor, 0f);
         UpdateMuscle(frontRightShoulderFlexor, 0f);
         UpdateMuscle(frontRightShoulderExtensor, 0f);
         UpdateMuscle(frontLeftShoulderFlexor, 0f);

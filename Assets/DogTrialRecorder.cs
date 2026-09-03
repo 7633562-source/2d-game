@@ -39,6 +39,16 @@ public class DogTrialRecorder
     private float pushTime = -1f;
     private float pushImpulse;
     private float lastUnsettledTime = -1f;
+    private readonly JawStrike jawStrike;
+    private readonly Damageable preyLife;
+    private string lastState = "";
+    private int lastLeapCount;
+    private float lastJawAngle;
+    private int maxLeapCount;
+    private bool sawLeapCrouch;
+    private bool sawLeapPush;
+    private bool sawLeapAir;
+    private bool sawLeapBite;
 
     public DogTrialRecorder(Dog dog, TrialRunInfo info)
     {
@@ -48,7 +58,11 @@ public class DogTrialRecorder
         chest = dog != null ? dog.transform.Find("Chest") : null;
         pelvis = dog != null ? dog.transform.Find("Pelvis") : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat");
+        jawStrike = dog != null ? dog.GetComponent<JawStrike>() : null;
+        DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
+        preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
+
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle");
     }
 
     public void MarkPush(float time, float impulse)
@@ -105,6 +119,16 @@ public class DogTrialRecorder
         if (absOff > SETTLED_COM_OFFSET)
             lastUnsettledTime = time;
 
+        lastState = stance.currentState.ToString();
+        lastLeapCount = stance.leapCount;
+        lastJawAngle = stance.jawAngle;
+        if (stance.leapCount > maxLeapCount)
+            maxLeapCount = stance.leapCount;
+        if (stance.currentState == DogStanceController.StanceState.LeapCrouch) sawLeapCrouch = true;
+        if (stance.currentState == DogStanceController.StanceState.LeapPush) sawLeapPush = true;
+        if (stance.currentState == DogStanceController.StanceState.LeapAir) sawLeapAir = true;
+        if (stance.currentState == DogStanceController.StanceState.LeapBite) sawLeapBite = true;
+
         AppendCsvFloat(time);
         rows.Append(',');
         AppendCsvFloat(pitch);
@@ -128,6 +152,11 @@ public class DogTrialRecorder
         rows.Append(',').Append(stance.rearLeftGrounded ? '1' : '0');
         rows.Append(',');
         AppendCsvFloat(maxActivation);
+        rows.Append(',').Append((int)stance.currentState);
+        rows.Append(',');
+        AppendCsvFloat(stance.leapCount);
+        rows.Append(',');
+        AppendCsvFloat(stance.jawAngle);
         rows.AppendLine();
 
         samples++;
@@ -180,6 +209,17 @@ public class DogTrialRecorder
         AppendNum(json, "fourFeetGroundedFraction", samples > 0 ? samplesFourFeet / (float)samples : 0f);
         AppendNum(json, "muscleSaturationFraction", samples > 0 ? samplesSaturated / (float)samples : 0f);
         AppendNum(json, "recoverySeconds", recovery);
+        AppendStr(json, "currentState", lastState);
+        AppendNum(json, "leapCount", lastLeapCount);
+        AppendNum(json, "maxLeapCount", maxLeapCount);
+        AppendNum(json, "jawAngle", lastJawAngle);
+        json.Append(",\"sawLeapCrouch\":").Append(sawLeapCrouch ? "true" : "false");
+        json.Append(",\"sawLeapPush\":").Append(sawLeapPush ? "true" : "false");
+        json.Append(",\"sawLeapAir\":").Append(sawLeapAir ? "true" : "false");
+        json.Append(",\"sawLeapBite\":").Append(sawLeapBite ? "true" : "false");
+        json.Append(",\"jawStrikeHits\":").Append((jawStrike != null ? jawStrike.HitCount : 0).ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"preyHurtCount\":").Append((preyLife != null ? preyLife.HurtCount : 0).ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"preyPresent\":").Append(preyLife != null ? "true" : "false");
         if (info != null)
         {
             AppendNum(json, "duration", info.Duration);
@@ -229,6 +269,7 @@ public class DogTrialRecorder
             AppendNum(json, "spawnShoulderAngle", dog.spawnShoulderAngle);
             AppendNum(json, "spawnKneeAngle", dog.spawnKneeAngle);
             AppendNum(json, "spawnElbowAngle", dog.spawnElbowAngle);
+            AppendNum(json, "tailSegmentCount", dog.tailSegmentCount);
             AppendNum(json, "lumbarFriction", dog.lumbarFriction);
             AppendNum(json, "hipFriction", dog.hipFriction);
             AppendNum(json, "kneeFriction", dog.kneeFriction);
@@ -244,6 +285,8 @@ public class DogTrialRecorder
             AppendNum(json, "pawExtensorTorque", dog.pawExtensorTorque);
             AppendNum(json, "pawFlexorTorque", dog.pawFlexorTorque);
             AppendNum(json, "neckMuscleTorque", dog.neckMuscleTorque);
+            AppendNum(json, "jawMuscleTorque", dog.jawMuscleTorque);
+            json.Append(",\"hasJaw\":").Append(dog.jawCollider != null ? "true" : "false");
         }
         json.Append(",\"rigidbodyCount\":").Append(bodyCount.ToString(CultureInfo.InvariantCulture));
         json.Append(",\"continuousBodyCount\":").Append(continuous.ToString(CultureInfo.InvariantCulture));
@@ -284,6 +327,22 @@ public class DogTrialRecorder
             AppendNum(json, "heightMaxDeg", c.heightMaxDeg);
             AppendNum(json, "heightHipMaxDeg", c.heightHipMaxDeg);
             AppendNum(json, "startupHoldSeconds", c.startupHoldSeconds);
+            AppendNum(json, "jawOpen", c.jawOpen);
+            AppendNum(json, "jawAngle", c.jawAngle);
+            AppendStr(json, "currentState", c.currentState.ToString());
+            AppendNum(json, "leapCount", c.leapCount);
+            AppendNum(json, "leapCrouchSeconds", c.leapCrouchSeconds);
+            AppendNum(json, "leapPushSeconds", c.leapPushSeconds);
+            AppendNum(json, "leapAirSeconds", c.leapAirSeconds);
+            AppendNum(json, "leapBiteSeconds", c.leapBiteSeconds);
+            AppendNum(json, "leapBiteRange", c.leapBiteRange);
+            AppendNum(json, "leapPawPlant", c.leapPawPlant);
+            AppendNum(json, "leapActivationSpeed", c.leapActivationSpeed);
+            AppendNum(json, "leapAimX", c.LeapAim.x);
+            AppendNum(json, "leapAimY", c.LeapAim.y);
+            json.Append(",\"leapTargetSet\":").Append(c.leapTarget != null ? "true" : "false");
+            json.Append(",\"jawStrikeHits\":").Append((jawStrike != null ? jawStrike.HitCount : 0).ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"preyHurtCount\":").Append((preyLife != null ? preyLife.HurtCount : 0).ToString(CultureInfo.InvariantCulture));
             AppendNum(json, "targetPelvisY", c.targetPelvisY);
             AppendNum(json, "neckPGain", c.neckPGain);
             AppendNum(json, "neckDGain", c.neckDGain);

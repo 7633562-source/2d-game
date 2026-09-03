@@ -26,6 +26,7 @@ public static class ArtLibrary
     public const string DogPelvis = "Dog/pelvis";
     public const string DogNeck = "Dog/neck";
     public const string DogHead = "Dog/head";
+    public const string DogJaw = "Dog/jaw";
     public const string DogTail = "Dog/tail";
     public const string DogFrontUpper = "Dog/front_upper";
     public const string DogFrontLower = "Dog/front_lower";

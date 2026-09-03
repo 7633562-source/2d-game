@@ -1,7 +1,7 @@
 using UnityEngine;
 
 // Thin health. Not inventory, not a punch from the brain.
-// Only a BeakStrike (or later a listed weapon) calls Hurt.
+// Only a BeakStrike, JawStrike, or later a listed weapon calls Hurt.
 public class Damageable : MonoBehaviour
 {
     public float maxHealth = 10f;

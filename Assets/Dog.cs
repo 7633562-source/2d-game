@@ -19,6 +19,9 @@ public class Dog : MonoBehaviour
     private const float DefaultUpperLen = 0.17f;
     private const float DefaultLowerLen = 0.17f;
     private const float DefaultPawH = 0.05f;
+    // Planted leftover (c39 / DOG-2 c53): rake −25 / +25. Columns 0/0
+    // unload the rear in ~0.15 s (c41, c52). The rake is still a sit;
+    // StandingRootY must use the same numbers as the fields.
     private const float DefaultHipAngle = -25f;
     private const float DefaultShoulderAngle = 25f;
     private const float DefaultKneeAngle = 0f;
@@ -29,6 +32,7 @@ public class Dog : MonoBehaviour
     public Vector2 pelvisSize = new Vector2(0.22f, 0.13f);
     public Vector2 neckSize = new Vector2(0.10f, 0.08f);
     public Vector2 headSize = new Vector2(0.14f, 0.10f);
+    public Vector2 jawSize = new Vector2(0.10f, 0.032f);
     public Vector2 tailSize = new Vector2(0.20f, 0.05f);
     public Vector2 frontUpperSize = new Vector2(0.07f, DefaultUpperLen);
     public Vector2 frontLowerSize = new Vector2(0.06f, DefaultLowerLen);
@@ -42,29 +46,22 @@ public class Dog : MonoBehaviour
     public float pawHeelOffset = 0.025f;
 
     // Build-time joint angles; DogStanceController holds the same pose.
-    // c41 tried zero rake (bone stacked straight over the paw, base
-    // 0.243 → 0.530 m) on the theory that the wide base under an A-frame
-    // was the sinking mode. It was worse, not better: with the legs
-    // vertical, nothing but the paw contact resists trunk pitch, and the
-    // lumbar muscle's own reaction torque on the pelvis spins the rear
-    // free — rear paws left the ground within 0.15 s (fourFeet 0.024,
-    // drop 0.275). A probe sweep confirms a hard threshold, not a smooth
-    // trade-off: rake −12/+12 still collapses (fourFeet 0.016), rake
-    // −20/+20 replants (fourFeet 0.991) but sits deeper than full rake
-    // (drop 0.247 vs 0.203). The raked A-frame is not an accident to be
-    // engineered away — the front-back scissor is what gives the trunk a
-    // restoring moment the lumbar reaction cannot spin through. Full
-    // −25 / +25 is the working point (c39, kept here).
+    // Pair each change with -hipBase / -shoulderBase or the first step
+    // drags the limb. Do not return to 0/0 without a new mechanism.
     [Header("Build pose (deg)")]
     public float spawnHipAngle = DefaultHipAngle;
     public float spawnShoulderAngle = DefaultShoulderAngle;
     public float spawnKneeAngle = DefaultKneeAngle;
     public float spawnElbowAngle = DefaultElbowAngle;
+    public int tailSegmentCount = 5;
+    public float tailSpringStiffness = 2f;
+    public float tailSpringMaxTorque = 2f;
 
     [Header("Joint friction K")]
     public float lumbarFriction = 8f;
     public float lumbarFrictionMaxTorque = 20f;
     public float neckFriction = 0.01f;
+    public float jawFriction = 0.01f;
     public float tailFriction = 0.4f;
     public float hipFriction = 3f;
     public float kneeFriction = 3f;
@@ -75,6 +72,7 @@ public class Dog : MonoBehaviour
     [Header("Muscle torque ceilings (N·m)")]
     public float lumbarMuscleTorque = 80f;
     public float neckMuscleTorque = 8f;
+    public float jawMuscleTorque = 2.5f;
     public float tailMuscleTorque = 3f;
     public float hipMuscleTorque = 40f;
     public float kneeMuscleTorque = 45f;
@@ -89,6 +87,8 @@ public class Dog : MonoBehaviour
     public HumanSegment chestSegment;
     public HumanSegment pelvisSegment;
     public HumanSegment headSegment;
+    public HumanSegment jawSegment;
+    public BoxCollider2D jawCollider;
 
     // Painted parts carry their own fur; tint only dims the far side.
     private static readonly Color Near = Color.white;
@@ -173,6 +173,15 @@ public class Dog : MonoBehaviour
         ActuatorDriver oldAct = GetComponent<ActuatorDriver>();
         if (oldAct != null)
             Destroy(oldAct);
+        JawStrike oldJaw = GetComponent<JawStrike>();
+        if (oldJaw != null)
+            Destroy(oldJaw);
+        Damageable oldLife = GetComponent<Damageable>();
+        if (oldLife != null)
+            Destroy(oldLife);
+        OrganismVoice oldVoice = GetComponent<OrganismVoice>();
+        if (oldVoice != null)
+            Destroy(oldVoice);
 
         float pelvisCenterX = -chestSize.x * 0.5f - pelvisSize.x * 0.5f;
         float pelvisCenterY = (pelvisSize.y - chestSize.y) * 0.5f;
@@ -214,17 +223,9 @@ public class Dog : MonoBehaviour
         AddFriction(head, neckFriction);
         AddMuscles(head, neckMuscleTorque);
         headSegment = head;
+        AttachJaw(head);
 
-        HumanSegment tail = CreateSegment("Tail", tailSize, 0.020f, Near, -1, albedoKey: ArtLibrary.DogTail);
-        tail.transform.localPosition = new Vector3(
-            pelvisCenterX - pelvisSize.x * 0.5f - tailSize.x * 0.5f, pelvisCenterY, 0f);
-        tail.ConnectTo(
-            pelvis,
-            new Vector2(tailSize.x * 0.5f, 0f),
-            new Vector2(-pelvisSize.x * 0.5f, 0f),
-            -50f, 50f);
-        AddFriction(tail, tailFriction);
-        AddMuscles(tail, tailMuscleTorque);
+        CreateTail(pelvis, pelvisCenterX, pelvisCenterY);
 
         CreateFrontLeg("FrontRight", 1f, chest, 6, 7, 8, Near, Near, Near);
         CreateFrontLeg("FrontLeft", -1f, chest, -3, -2, -1, Far, Far, Far);
@@ -238,10 +239,45 @@ public class Dog : MonoBehaviour
 
         vestibularSystem = gameObject.AddComponent<VestibularSystem>();
         stance = gameObject.AddComponent<DogStanceController>();
+        AttachBite();
         stance.Bind(this);
 
         ActuatorDriver actuators = gameObject.AddComponent<ActuatorDriver>();
         actuators.RebuildCache();
+    }
+
+    // Lower jaw. Hinge at the TMJ (caudal-ventral on the head). Closed
+    // is jointAngle 0; plus drops the teeth (clockwise vs the head).
+    // Trigger: the jaw must not shove the world. Hits go through JawStrike.
+    private void AttachJaw(HumanSegment head)
+    {
+        Vector2 tmj = new Vector2(-headSize.x * 0.18f, -headSize.y * 0.38f);
+        Vector2 center = (Vector2)head.transform.localPosition + tmj + new Vector2(jawSize.x * 0.5f, 0f);
+        HumanSegment jaw = CreateSegment("Jaw", jawSize, 0.008f, Near, 3, albedoKey: ArtLibrary.DogJaw);
+        jaw.transform.localPosition = new Vector3(center.x, center.y, 0f);
+        jaw.ConnectTo(
+            head,
+            new Vector2(-jawSize.x * 0.5f, 0f),
+            tmj,
+            0f, 40f);
+        AddFriction(jaw, jawFriction);
+        AddMuscles(jaw, jawMuscleTorque);
+        if (jaw.collider != null)
+            jaw.collider.isTrigger = true;
+        jawSegment = jaw;
+        jawCollider = jaw.collider;
+    }
+
+    private void AttachBite()
+    {
+        Damageable life = gameObject.AddComponent<Damageable>();
+        life.maxHealth = 16f;
+        life.health = life.maxHealth;
+
+        gameObject.AddComponent<OrganismVoice>();
+
+        JawStrike strike = gameObject.AddComponent<JawStrike>();
+        strike.Bind(jawCollider, stance);
     }
 
     private void CreateFrontLeg(
@@ -332,6 +368,57 @@ public class Dog : MonoBehaviour
         AddMuscles(shin, kneeMuscleTorque);
 
         PlacePaw(sideName + "Paw", ankle, shin, pawOrder, pawColor, visualShift, 0.012f);
+    }
+
+    // Five vertebrae, not one rod. Distal boxes taper. The first joint
+    // still has antagonist muscles so DogStanceController can hold it;
+    // the rest are friction + a rest spring (no CoM loop on the chain).
+    private void CreateTail(HumanSegment pelvis, float pelvisCenterX, float pelvisCenterY)
+    {
+        int count = Mathf.Max(1, tailSegmentCount);
+        float segLen = tailSize.x / count;
+        float massEach = 0.020f / count;
+        HumanSegment parent = pelvis;
+        Vector2 tip = new Vector2(pelvisCenterX - pelvisSize.x * 0.5f, pelvisCenterY);
+
+        for (int i = 0; i < count; i++)
+        {
+            float taper = count == 1 ? 1f : Mathf.Lerp(1f, 0.45f, i / (float)(count - 1));
+            Vector2 size = new Vector2(segLen, tailSize.y * taper);
+            string name = i == 0 ? "Tail" : "Tail" + (i + 1);
+            HumanSegment seg = CreateSegment(name, size, massEach, Near, -1 - i, albedoKey: ArtLibrary.DogTail);
+            Vector2 center = tip + new Vector2(-segLen * 0.5f, 0f);
+            seg.transform.localPosition = new Vector3(center.x, center.y, 0f);
+            if (seg.rb != null)
+                seg.rb.rotation = 0f;
+
+            Vector2 parentAnchor = i == 0
+                ? new Vector2(-pelvisSize.x * 0.5f, 0f)
+                : new Vector2(-parent.size.x * 0.5f, 0f);
+            seg.ConnectTo(
+                parent,
+                new Vector2(segLen * 0.5f, 0f),
+                parentAnchor,
+                -40f, 40f);
+            AddFriction(seg, tailFriction);
+            AddTailSpring(seg);
+            if (i == 0)
+                AddMuscles(seg, tailMuscleTorque);
+
+            parent = seg;
+            tip = center + new Vector2(-segLen * 0.5f, 0f);
+        }
+    }
+
+    private void AddTailSpring(HumanSegment segment)
+    {
+        if (segment == null || segment.joint == null) return;
+        TreeSpring spring = segment.gameObject.AddComponent<TreeSpring>();
+        spring.restAngle = 0f;
+        spring.stiffness = tailSpringStiffness;
+        spring.maxTorque = tailSpringMaxTorque;
+        spring.holdTorque = 0f;
+        spring.worldStiffness = 0f;
     }
 
     private void PlacePaw(

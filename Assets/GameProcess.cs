@@ -11,8 +11,18 @@ public class GameProcess : MonoBehaviour
     [Header("Номера людей для логирования")]
     public int[] logHumanNumbers = new int[] { 1, 10, 20, 30, 40, 50 };
 
+    [Header("Dogs")]
+    [Tooltip("0 — do not spawn. SampleScene / World / Bird / Tree stay 0. Play is scene Dog.")]
+    public int dogCount = 0;
+    [Tooltip("Offset of the first dog from the human (or from origin), m.")]
+    public float dogOffsetX = 0f;
+    public float dogSpacing = 1.5f;
+    [Tooltip("Leap mark ahead of the first dog, m. Play scene Dog.")]
+    public float dogPreyOffsetX = 1.4f;
+
     private GroundBuilder groundBuilder;
     private List<Human> humans = new List<Human>();
+    private List<Dog> dogs = new List<Dog>();
 
     void Start()
     {
@@ -23,11 +33,13 @@ public class GameProcess : MonoBehaviour
         // 200 Гц: при 50 Гц регулятор не успевает и раскачивает тело.
         Time.fixedDeltaTime = 0.005f;
 
-        if (humanCount < 1) humanCount = 1;
+        if (dogCount < 0) dogCount = 0;
+        if (humanCount < 0) humanCount = 0;
+        if (humanCount < 1 && dogCount < 1) humanCount = 1;
         if (logHumanNumbers == null || logHumanNumbers.Length == 0)
             logHumanNumbers = new int[] { 1 };
 
-        float startX = -(humanCount - 1) * spacing / 2f;
+        float startX = humanCount < 1 ? 0f : -(humanCount - 1) * spacing / 2f;
         humanStartPosition = new Vector2(startX, -0.82f);
 
         groundBuilder = GetComponent<GroundBuilder>();
@@ -42,14 +54,19 @@ public class GameProcess : MonoBehaviour
         groundBuilder.BuildGround();
 
         CreateHumans();
+        CreateDogs();
         DisableCollisionsBetweenHumans();
-        SetupGlobalLogger();
-
-        Debug.Log($"Логгер настроен на {logHumanNumbers.Length} человек(а): [{string.Join(", ", logHumanNumbers)}]");
+        if (humans.Count > 0)
+        {
+            SetupGlobalLogger();
+            Debug.Log($"Логгер настроен на {logHumanNumbers.Length} человек(а): [{string.Join(", ", logHumanNumbers)}]");
+        }
     }
 
     private void CreateHumans()
     {
+        if (humanCount < 1) return;
+
         for (int i = 0; i < humanCount; i++)
         {
             int humanNumber = i + 1;
@@ -92,6 +109,36 @@ public class GameProcess : MonoBehaviour
             human.AddNumberLabel(humanNumber);
 
             humans.Add(human);
+        }
+    }
+
+    private void CreateDogs()
+    {
+        if (dogCount < 1) return;
+
+        float groundY = -2f;
+        float originX = humans.Count > 0
+            ? humans[0].transform.position.x + dogOffsetX
+            : dogOffsetX;
+
+        for (int i = 0; i < dogCount; i++)
+        {
+            GameObject dogObject = new GameObject("Dog_" + (i + 1));
+            Dog dog = dogObject.AddComponent<Dog>();
+            dogObject.transform.position = new Vector2(
+                originX + i * dogSpacing,
+                dog.StandingRootOffset(groundY));
+            dog.BuildDog();
+            dogs.Add(dog);
+        }
+
+        // Leap mark: position only. JawStrike reads Damageable. Not a force.
+        float preyX = originX + dogPreyOffsetX;
+        DogPrey prey = DogPrey.Spawn(new Vector2(preyX, groundY + DogPrey.DefaultHeightAboveGround));
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            if (dogs[i] != null && dogs[i].stance != null && prey != null)
+                dogs[i].stance.leapTarget = prey.transform;
         }
     }
 
