@@ -89,10 +89,17 @@ public class PlantTree : MonoBehaviour
     public int PerchPadCount { get; private set; }
     public TreeKind ResolvedKind { get; private set; }
 
-    private Color barkStump = new Color(0.36f, 0.24f, 0.14f, 1f);
-    private Color barkTrunk = new Color(0.42f, 0.28f, 0.16f, 1f);
-    private Color barkTwig = new Color(0.50f, 0.34f, 0.18f, 1f);
-    private Color leafColor = new Color(0.28f, 0.52f, 0.24f, 1f);
+    // Layout guide: one semi-transparent box per collider. No bark/leaf PNG.
+    private static readonly Color StumpColor = new Color(0.05f, 0.15f, 0.6f, 0.5f);
+    private static readonly Color TrunkColor = new Color(0.1f, 0.2f, 1f, 0.5f);
+    private static readonly Color BranchNear = new Color(0f, 0.6f, 0f, 0.5f);
+    private static readonly Color BranchFar = new Color(0.4f, 0.8f, 0.2f, 0.5f);
+    private static readonly Color TwigNear = new Color(1f, 1f, 0f, 0.5f);
+    private static readonly Color TwigFar = new Color(1f, 0.7f, 0.3f, 0.5f);
+    private static readonly Color TipNear = new Color(0.8f, 0.1f, 0.1f, 0.5f);
+    private static readonly Color TipFar = new Color(1f, 0.5f, 0.5f, 0.5f);
+    private static readonly Color LeafNear = new Color(0.5f, 0f, 0.5f, 0.5f);
+    private static readonly Color LeafFar = new Color(0.7f, 0.4f, 0.7f, 0.5f);
     private float leaderForkShare = 0.28f;
     private float sideLengthScale = 1f;
     private bool skipSideOnEvenDepth;
@@ -117,9 +124,15 @@ public class PlantTree : MonoBehaviour
         public int parentIndex;
     }
 
-    private static Color DimFar(Color c)
+    private static Color WoodColor(int depth, bool farSide)
     {
-        return new Color(c.r * 0.62f, c.g * 0.62f, c.b * 0.62f, 1f);
+        if (depth <= 0)
+            return depth < 0 ? StumpColor : TrunkColor;
+        if (depth == 1)
+            return farSide ? BranchFar : BranchNear;
+        if (depth == 2)
+            return farSide ? TwigFar : TwigNear;
+        return farSide ? TipFar : TipNear;
     }
 
     public static float RootY(float groundY = -2f)
@@ -175,7 +188,7 @@ public class PlantTree : MonoBehaviour
             "Stump",
             new Vector2(stumpWidth, stumpHeight),
             woodDensity * stumpWidth * stumpWidth * stumpHeight,
-            barkStump,
+            StumpColor,
             0,
             live,
             false);
@@ -433,10 +446,6 @@ public class PlantTree : MonoBehaviour
         sideLengthScale = 1f;
         skipSideOnEvenDepth = false;
         bothSidesAtRoot = false;
-        barkStump = new Color(0.36f, 0.24f, 0.14f, 1f);
-        barkTrunk = new Color(0.42f, 0.28f, 0.16f, 1f);
-        barkTwig = new Color(0.50f, 0.34f, 0.18f, 1f);
-        leafColor = new Color(0.28f, 0.52f, 0.24f, 1f);
         leafSize = new Vector2(0.10f, 0.14f);
         maxDepth = 3;
         maxSegments = 15;
@@ -466,10 +475,6 @@ public class PlantTree : MonoBehaviour
             skipSideOnEvenDepth = true;
             totalMass = 24f;
             leafSize = new Vector2(0.06f, 0.10f);
-            barkStump = new Color(0.22f, 0.16f, 0.12f, 1f);
-            barkTrunk = new Color(0.28f, 0.20f, 0.14f, 1f);
-            barkTwig = new Color(0.32f, 0.24f, 0.14f, 1f);
-            leafColor = new Color(0.16f, 0.38f, 0.22f, 1f);
         }
         else if (recipe == TreeKind.Willow)
         {
@@ -482,10 +487,6 @@ public class PlantTree : MonoBehaviour
             leaderForkShare = 0.16f;
             totalMass = 22f;
             leafSize = new Vector2(0.08f, 0.18f);
-            barkStump = new Color(0.34f, 0.28f, 0.16f, 1f);
-            barkTrunk = new Color(0.40f, 0.36f, 0.18f, 1f);
-            barkTwig = new Color(0.46f, 0.42f, 0.20f, 1f);
-            leafColor = new Color(0.42f, 0.58f, 0.22f, 1f);
         }
         else if (recipe == TreeKind.Bush)
         {
@@ -503,10 +504,6 @@ public class PlantTree : MonoBehaviour
             twigSpringMaxTorque = 50f;
             totalMass = 16f;
             leafSize = new Vector2(0.12f, 0.12f);
-            barkStump = new Color(0.40f, 0.22f, 0.12f, 1f);
-            barkTrunk = new Color(0.48f, 0.28f, 0.14f, 1f);
-            barkTwig = new Color(0.56f, 0.34f, 0.16f, 1f);
-            leafColor = new Color(0.34f, 0.58f, 0.20f, 1f);
         }
         else if (recipe == TreeKind.Poplar)
         {
@@ -521,10 +518,6 @@ public class PlantTree : MonoBehaviour
             leaderForkShare = 0.20f;
             totalMass = 22f;
             leafSize = new Vector2(0.07f, 0.09f);
-            barkStump = new Color(0.38f, 0.36f, 0.32f, 1f);
-            barkTrunk = new Color(0.46f, 0.44f, 0.40f, 1f);
-            barkTwig = new Color(0.54f, 0.52f, 0.46f, 1f);
-            leafColor = new Color(0.30f, 0.56f, 0.32f, 1f);
         }
     }
 
@@ -566,9 +559,8 @@ public class PlantTree : MonoBehaviour
         if (width < minWidth || length < minLength) return;
 
         bool isDynamic = rig == TreeRig.Sway;
-        Color bark = Color.Lerp(barkTrunk, barkTwig, depth / Mathf.Max(1f, (float)growDepthCap));
-        if (heading < parentHeading - 0.01f)
-            bark = DimFar(bark);
+        bool farSide = heading < parentHeading - 0.01f;
+        Color bark = WoodColor(depth, farSide);
 
         string name = $"Wood_{depth}_{SegmentCount}";
         HumanSegment seg = CreateWood(
@@ -613,7 +605,7 @@ public class PlantTree : MonoBehaviour
 
         if (depth >= growDepthCap)
         {
-            AttachLeaves(seg, heading < parentHeading);
+            AttachLeaves(seg, farSide);
             return;
         }
 
@@ -644,11 +636,11 @@ public class PlantTree : MonoBehaviour
     {
         if (!growLeaves || HeadlessTrial.Active) return;
 
-        Color color = farSide ? DimFar(leafColor) : leafColor;
         float[] sides = { -1f, 1f };
         for (int i = 0; i < sides.Length; i++)
         {
             float side = sides[i];
+            Color color = (farSide || i > 0) ? LeafFar : LeafNear;
             GameObject leafObject = new GameObject(twig.name + "_Leaf" + i);
             HumanSegment leaf = leafObject.AddComponent<HumanSegment>();
             leaf.InitializeVisualOnly(
@@ -657,8 +649,7 @@ public class PlantTree : MonoBehaviour
                 color,
                 twig.transform,
                 twig.sortingOrder + 2,
-                HumanVisualShape.Ellipse,
-                ArtLibrary.Leaf);
+                HumanVisualShape.Box);
             leaf.transform.localPosition = new Vector3(
                 side * twig.size.x * 0.35f,
                 twig.size.y * 0.42f,
@@ -687,8 +678,7 @@ public class PlantTree : MonoBehaviour
                 color,
                 transform,
                 sortingOrder,
-                HumanVisualShape.Capsule,
-                ArtLibrary.Bark);
+                HumanVisualShape.Box);
         }
         else
         {
@@ -699,8 +689,7 @@ public class PlantTree : MonoBehaviour
                 color,
                 transform,
                 sortingOrder,
-                HumanVisualShape.Capsule,
-                ArtLibrary.Bark);
+                HumanVisualShape.Box);
         }
         segment.jointMarkerDiameter = jointMarkerDiameter;
         if (segment.rb != null && floorInertia && minSegmentInertia > 0f

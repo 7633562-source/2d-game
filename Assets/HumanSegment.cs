@@ -132,7 +132,9 @@ public class HumanSegment : MonoBehaviour
     {
         if (target == null)
             return;
-        Vector2 draw = PictureSize(colliderSize, albedoKey);
+        Vector2 draw = visualShape == HumanVisualShape.Box
+            ? colliderSize
+            : PictureSize(colliderSize, albedoKey);
         target.sprite = HeadlessTrial.Active
             ? GetPlaceholderSprite()
             : GetBodySprite(draw, visualShape, albedoKey);
