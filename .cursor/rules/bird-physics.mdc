@@ -125,3 +125,26 @@ stance without takeoff. `-birdMode fly` — flap and thrust.
 4th second (glide by default). `-stopFlapMode glide|stand`.
 `-walkThrust` — flock step. `-birdFacing 1|-1`. `-birdTurnAfter`.
 `-birdMode sit|attack`. Play drive: `birdDrive` on `Bird` / `BirdFlock50`.
+
+## Budget (optimization 02.09)
+
+Read `Trials/Runs/opt_bird_code_02.md` and `opt_agent_proposals.md`
+(section bird). Not a GO card. PERF-5 is closed.
+
+Flock N=50 at 200 Hz is the **solver edge** (`wallPerSim ≈ 1`), not
+empty `FixedUpdate` and not `NearPerch`. One ragdoll is 17 RB / 32
+muscles / 16 frictions — hero budget, stance stand only.
+
+Do not:
+
+- Cut `flapFrequency`, `aiStride`, or 200 Hz for FPS.
+- Move `BirdFlight.Tick` to `Update`.
+- Disable driven `BirdSensors` / `BirdFlight` again (0% on two repeats).
+- Spawn ragdoll birds in `BirdFlock50` or World (`birdCount = 0`).
+- Replace the foot probe with `GetContacts` while `probeSat` is 0.
+
+Perch lab already answered the optional probe card:
+`perf_flock_metric_tree1` — `probeSaturatedFraction` **0**,
+`meanProbeHits` 0.54, 3774 probes / 20 s. Keep `OverlapBoxNonAlloc`
+and the cruise skip. `NearPerch` stays one AABB; sensors cache
+`nearPerch` once per tick.

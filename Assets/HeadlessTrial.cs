@@ -617,6 +617,9 @@ public class HeadlessTrial : MonoBehaviour
         treeObject.transform.position = new Vector2(0f, PlantTree.RootY(-2f));
         plantTree = treeObject.AddComponent<PlantTree>();
         plantTree.kind = PlantTree.ParseKind(GetStringArg("-treeKind", "oak"));
+        string treeRigRaw = GetStringArg("-treeRig", "sway").Trim().ToLowerInvariant();
+        if (treeRigRaw == "static")
+            plantTree.rig = TreeRig.Static;
         plantTree.seed = Mathf.RoundToInt(GetFloatArg("-treeSeed", 1f));
         plantTree.windScale = GetFloatArg("-treeWind", plantTree.windScale);
         plantTree.BuildTree();
