@@ -47,17 +47,17 @@ public class BalanceController : MonoBehaviour
     // поясницу на 17.3° из 20. Дальше есть провал (50/40 роняет), хотя 70/55
     // снова стоит и даёт 20.4 см. Пока таз не управляется, за 40/32 не
     // заходить: разница между «стоит» и «падает» там не про глубину.
-    public float crouchKneeFlex = 85f;
+    public float crouchKneeFlex = 97f;
     // Больше не входит в цель бедра: угол сустава таз–ляжка не держим.
     // Поле оставлено, чтобы стенд и инспектор не потеряли имя.
     public float crouchHipFlex = 32f;
     // Положительное — целевой наклон таза вперёд при crouch=1.
     // Вперёд = по часовой = минус к мировой цели, как у crouchTorsoLean.
     // Глубину даёт колено; таз только задаёт, насколько наклониться.
-    public float crouchPelvisTilt = 24f;
+    public float crouchPelvisTilt = 50f;
     // Положительное — добавка наклона груди вперёд при crouch=1.
     // Человек смотрит вправо, вперёд = по часовой = минус к цели.
-    public float crouchTorsoLean = 16f;
+    public float crouchTorsoLean = 24f;
     // Текущий уровень, которым пользуется поза. Для стенда и инспектора.
     public float crouchLevel;
     // Руки вперёд-вниз: кисть на земле расширяет опору (BodyState/CoM).
@@ -74,15 +74,15 @@ public class BalanceController : MonoBehaviour
     [Tooltip("Crouch level where hand-support pose starts blending in.")]
     public float crouchHandPoseStart = 0.55f;
     [Tooltip("Deep crouch shoulder target (forward/down), degrees.")]
-    public float crouchHandSupportShoulder = 52f;
+    public float crouchHandSupportShoulder = 58f;
     [Tooltip("Deep crouch elbow target, degrees.")]
-    public float crouchHandSupportElbow = -18f;
+    public float crouchHandSupportElbow = -10f;
     [Tooltip("Deep crouch wrist target, degrees.")]
-    public float crouchHandSupportWrist = -20f;
+    public float crouchHandSupportWrist = -15f;
     [Tooltip("Static shoulder split in deep crouch support pose, degrees.")]
-    public float crouchHandSupportSpread = 10f;
+    public float crouchHandSupportSpread = 12f;
     [Tooltip("Additional split from balance signal in deep crouch.")]
-    public float crouchHandBalanceSpread = 8f;
+    public float crouchHandBalanceSpread = 0f;
 
     [Header("Наклон корпуса")]
     // intent.lean: +1 вперёд (− к мировой цели торса/таза), −1 назад.
@@ -1130,7 +1130,7 @@ public class BalanceController : MonoBehaviour
         if (stepPhaseDriver != null && stepPhaseDriver.walkActive)
             ComputeWalkArmTargets(out lSh, out rSh, out lEl, out rEl, out lWr, out rWr);
         else if (crouchLevel > 0.001f && standLegLevel < 0.01f)
-            ComputeCrouchArmTargets(balanceSignal, out lSh, out rSh, out lEl, out rEl, out lWr, out rWr);
+            ComputeCrouchArmTargets(out lSh, out rSh, out lEl, out rEl, out lWr, out rWr);
         else
         {
             float armSignal = standLegLevel > 0.01f ? 0f : balanceSignal;
@@ -1147,8 +1147,7 @@ public class BalanceController : MonoBehaviour
 
     // Руки вниз к земле: минус у плеча — вперёд-вниз; локоть почти прямой.
     // Плюс у левого плеча (как на walk) уводил руку назад-вверх.
-    private void ComputeCrouchArmTargets(float balanceSignal,
-                                         out float leftShoulder, out float rightShoulder,
+    private void ComputeCrouchArmTargets(out float leftShoulder, out float rightShoulder,
                                          out float leftElbow, out float rightElbow,
                                          out float leftWrist, out float rightWrist)
     {
@@ -1161,23 +1160,13 @@ public class BalanceController : MonoBehaviour
 
         float supportStart = Mathf.Clamp01(crouchHandPoseStart);
         float supportBlend = Mathf.InverseLerp(supportStart, 1f, t);
-        float balance = Mathf.Clamp(balanceSignal, -1f, 1f);
-        float spread = supportBlend * (crouchHandSupportSpread + crouchHandBalanceSpread * Mathf.Abs(balance));
+        float spread = supportBlend * Mathf.Max(0f, crouchHandSupportSpread);
         float centerShoulder = Mathf.Lerp(
             0.5f * (leftBaseShoulder + rightBaseShoulder),
             -Mathf.Abs(crouchHandSupportShoulder),
             supportBlend);
-
-        if (balance >= 0f)
-        {
-            leftShoulder = centerShoulder - spread;
-            rightShoulder = centerShoulder + spread;
-        }
-        else
-        {
-            leftShoulder = centerShoulder + spread;
-            rightShoulder = centerShoulder - spread;
-        }
+        leftShoulder = centerShoulder - spread;
+        rightShoulder = centerShoulder + spread;
 
         leftElbow = Mathf.Lerp(baseElbow, crouchHandSupportElbow, supportBlend);
         rightElbow = Mathf.Lerp(baseElbow, crouchHandSupportElbow, supportBlend);
