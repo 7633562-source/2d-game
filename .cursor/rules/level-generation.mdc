@@ -18,16 +18,17 @@ World scene: `Assets/Scenes/World.unity`. There are no level prefabs.
 | `Chicken` | hens | flat ground, `birdCount = 5`, `birdKind` chicken. No generator. |
 | `Tree` | plants | flat ground, `treeCount = 1`. Do not attach the generator. |
 | `Dog` | quadruped | flat ground, `dogCount ≥ 1`. Do not attach the generator. |
-| `World` | levels | `WorldManager` + `LevelGenerator` Test1. `birdCount = 0`, `birdDrive` off. |
+| `World` | levels | `WorldManager` + `LevelGenerator` Test1. Yard may host a small crow flock, hens, and a few dogs. `treeCount` stays 0. |
 
 `HeadlessTrial` and `HeadlessBuild` stay on `SampleScene` and draw flat
 ground themselves. `World` and `Bird` are not in the stand build.
 
 Do not attach the generator on `SampleScene`, `Bird`, `BirdFlock50`,
 `Chicken`, `Tree`, or `Dog`, and do not call `AddComponent<LevelGenerator>`.
-`GameProcess` starts the yard only when there is a human and no birds,
-trees-from-`treeCount`, or dogs. A stray generator on a bird scene is
-ignored — wander leash stays on flat ground.
+`GameProcess` starts the yard when a human is present and `LevelGenerator`
+is already on the object. Bird / Chicken / Dog scenes have no generator,
+so their leash stays on flat ground. World may spawn a small flock, hens,
+and dogs on the same Test1 tape. Do not set `treeCount` on World.
 
 ## Profiles
 
@@ -48,7 +49,8 @@ moves like the ground. Yard `PlantTree` stay in world space. No colliders
 on backdrop. Update in `LateUpdate` after `CameraFollow`.
 
 Yard grove: `LevelGrove` plants `PlantTree` with `TreeRig.Static` on
-Test1. Do not set `GameProcess.treeCount` on World (that path is `Sway`,
+Test1 (six along the tape plus three at the gate, x ≈ 37.5 / 44.2 / 52).
+Do not set `GameProcess.treeCount` on World (that path is `Sway`,
 scene `Tree` only). Do not change `PlantTree` sizes or springs.
 
 When `humanCount > 1`, it stays `Flat`.

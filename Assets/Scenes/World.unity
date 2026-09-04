@@ -275,19 +275,25 @@ MonoBehaviour:
   humanCount: 1
   humanStartPosition: {x: 0, y: -0.82}
   spacing: 1.5
-  birdCount: 0
-  birdOffsetX: 0
+  birdCount: 6
+  birdOffsetX: 39
   birdSpacing: 1.2
   cameraFollowsBird: 0
-  birdDrive: 0
+  birdDrive: 1
+  birdDriveKind: wander
+  birdKind: crow
+  chickenCount: 10
+  chickenOffsetX: 12
+  chickenSpacing: 0.9
   treeCount: 0
   treeOffsetX: 0
   treeSpacing: 5
   cameraFollowsTree: 0
-  dogCount: 0
-  dogOffsetX: 0
-  dogSpacing: 1.5
+  dogCount: 3
+  dogOffsetX: 26
+  dogSpacing: 2
   cameraFollowsDog: 0
+  dogPreyOffsetX: 8
 --- !u!114 &907298185
 MonoBehaviour:
   m_ObjectHideFlags: 0
