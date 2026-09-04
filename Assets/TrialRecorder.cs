@@ -3,8 +3,8 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-// Контекст одного прогона: что запросили и какой билд проверили.
-// Fingerprint берётся из build-manifest.json, не пересчитывается из исходников плеера.
+// Context of one run: what was requested and which build was checked.
+// Fingerprint comes from build-manifest.json; it is not recomputed from the player sources.
 public sealed class TrialRunInfo
 {
     public string Label = "trial";
@@ -43,25 +43,25 @@ public sealed class TrialRunInfo
     public string[] CommandArgs = Array.Empty<string>();
 }
 
-// Снимает состояние человека на каждом физическом шаге прогона и считает
-// сводные метрики. Ничего не прикладывает к телу — только читает,
-// как и остальной сенсорный слой.
+// Samples the human on every physics step of the run and computes
+// summary metrics. Applies nothing to the body — read-only,
+// same as the rest of the sensor layer.
 public class TrialRecorder
 {
-    // Активацию считаем насыщенной чуть ниже единицы: PD-регулятор
-    // упирается в потолок и дальше теряет управляемость.
+    // Activation is saturated just below one: the PD controller
+    // hits the ceiling and then loses authority.
     private const float SATURATION_THRESHOLD = 0.999f;
 
-    // Считаем, что человек вернулся в равновесие, когда смещение центра масс
-    // снова укладывается в сантиметр: в спокойной позе оно около 7 мм.
+    // The human is settled when the CoM offset
+    // fits back into a centimetre: in quiet stance it is about 7 mm.
     private const float SETTLED_COM_OFFSET = 0.01f;
 
-    // После отпускания приседа таз должен подняться почти на стартовую
-    // высоту. 5 см — больше осадки стойки и меньше заметного приседа.
+    // After crouch release the pelvis should rise almost to the start
+    // height. 5 cm is more than stance sag and less than a visible squat.
     private const float PELVIS_RECOVER_TOLERANCE = 0.05f;
 
-    // Сустав у упора, если угол ближе 1° к min/max. Это не сила, а чтение
-    // геометрии: руки и голова залипают в ограничителе при слишком малом K.
+    // A joint is at the stop if the angle is within 1° of min/max. This is not force, it is
+    // geometry: arms and head stick at the limit when K is too small.
     private const float LIMIT_MARGIN_DEGREES = 1f;
 
     private readonly Human human;
@@ -126,8 +126,8 @@ public class TrialRecorder
     private int samplesRightGrounded;
     private float lastTilt;
     private float lastComOffset;
-    // Пройденный путь центра масс вдоль X. Без него смена опоры засчитывалась
-    // как ходьба, хотя тело оставалось на месте: 0.21 м за 35 с — это топтание.
+    // Distance travelled by the CoM along X. Without it a support swap counted
+    // as walking while the body stayed put: 0.21 m in 35 s is marching in place.
     private float startComX;
     private float lastComX;
     private bool hasStartComX;
@@ -142,8 +142,8 @@ public class TrialRecorder
     private float maxAbsTiltAfterPush;
     private float lastUnsettledTime = -1f;
 
-    // Пассивная вязкость шеи/головы/рук: снимок Ieff и RMS относительной
-    // скорости. На моменты не влияет — только читает уже собранное тело.
+    // Passive viscosity of neck/head/arms: snapshot of Ieff and RMS relative
+    // speed. Does not affect torques — only reads the already built body.
     private readonly JointDampingWatch neckWatch;
     private readonly JointDampingWatch headWatch;
     private readonly JointDampingWatch shoulderWatch;
@@ -203,7 +203,7 @@ public class TrialRecorder
         stepDriver = human.GetComponent<StepPhaseDriver>();
         motionIntent = human.GetComponent<MotionIntent>();
 
-        // Заголовок в тот же rows: Join+new[] выделяет массив и промежуточную строку зря.
+        // Header into the same rows: Join+new[] would allocate an array and an intermediate string for nothing.
         rows.Append("time").Append(';')
             .Append("state").Append(';')
             .Append("torsoTilt").Append(';')
@@ -248,8 +248,8 @@ public class TrialRecorder
             motionIntent = human.GetComponent<MotionIntent>();
     }
 
-    // Окно приседа: от нажатия до отпускания. Нужно, чтобы отделить
-    // просадку таза и опору от стартового оседания.
+    // Crouch window: from press to release. Needed to separate
+    // pelvis drop and support from the startup settle.
     public void MarkCrouch(float time, float level)
     {
         crouchStartTime = time;
@@ -272,15 +272,15 @@ public class TrialRecorder
         standLegReleaseTime = time;
     }
 
-    // Вызывается стендом в момент толчка, чтобы отделить метрики восстановления
-    // от того, что происходило до возмущения.
+    // Called by the stand at the push so recovery metrics
+    // are separated from what happened before the disturbance.
     public void MarkPush(float time, float impulse)
     {
         pushTime = time;
         pushImpulse = impulse;
     }
 
-    // Вызывается после каждого физического шага.
+    // Called after every physics step.
     public void Sample(float time)
     {
         samples++;
@@ -329,7 +329,7 @@ public class TrialRecorder
             ? balance.currentState
             : BalanceController.BalanceState.Balancing;
 
-        // ─── НАКОПЛЕНИЕ МЕТРИК ───
+        // ─── METRIC ACCUMULATION ───
         sumComOffsetSquared += (double)comOffset * comOffset;
         sumAbsComOffset += Mathf.Abs(comOffset);
         sumTorsoAngVelSquared += (double)angVel * angVel;
@@ -371,7 +371,7 @@ public class TrialRecorder
 
         bool inStandLegWindow = standLegStartTime >= 0f && time >= standLegStartTime
             && (standLegReleaseTime < 0f || time <= standLegReleaseTime);
-        // Walk: окно опоры — фазы Stance (не transfer), знак из standLegCmd.
+        // Walk: support window — Stance phases (not transfer), sign from standLegCmd.
         bool inWalkStanceWindow = stepDriver != null && stepDriver.walkActive
             && walkPhase == 0 && Mathf.Abs(standLegCmd) > 0.5f;
         if (inStandLegWindow || inWalkStanceWindow)
@@ -430,7 +430,7 @@ public class TrialRecorder
         SampleDampingWatch(elbowWatch);
         SampleDampingWatch(wristWatch);
 
-        // Тот же набор колонок, без new[] и Join на каждом шаге 200 Гц.
+        // The same column set, without new[] and Join on every 200 Hz step.
         rows.Append(F(time)).Append(';')
             .Append(((int)currentState).ToString(CultureInfo.InvariantCulture)).Append(';')
             .Append(F(tilt)).Append(';')
@@ -511,7 +511,7 @@ public class TrialRecorder
         float stanceFootGrounded = samplesStandLegWindow > 0
             ? samplesStanceGrounded / (float)samplesStandLegWindow
             : 0f;
-        // Сколько секунд после толчка смещение центра масс не влезало в норму.
+        // How many seconds after the push the CoM offset stayed outside the settled band.
         float recoverySeconds = pushTime >= 0f && lastUnsettledTime >= 0f
             ? lastUnsettledTime - pushTime
             : 0f;
@@ -626,6 +626,7 @@ public class TrialRecorder
         AppendNum(json, "recoveryCoMOffset", balance != null ? balance.recoveryCoMOffset : 0f);
         AppendNum(json, "fallCoMOffset", balance != null ? balance.fallCoMOffset : 0f);
         AppendNum(json, "crouchRatePerSecond", balance != null ? balance.crouchRatePerSecond : 0f);
+        AppendNum(json, "crouchReleaseRatePerSecond", balance != null ? balance.crouchReleaseRatePerSecond : 0f);
             AppendNum(json, "crouchKneeFlex", balance != null ? balance.crouchKneeFlex : 0f);
             AppendNum(json, "crouchHipFlex", balance != null ? balance.crouchHipFlex : 0f);
             AppendNum(json, "crouchPelvisTilt", balance != null ? balance.crouchPelvisTilt : 0f);
@@ -724,8 +725,8 @@ public class TrialRecorder
         AppendVec2(json, "thighSize", h.thighSize);
         AppendVec2(json, "shinSize", h.shinSize);
         AppendVec2(json, "footSize", h.footSize);
-        // Проверять надо не намерение, а факт контакта: пара считается
-        // как sqrt(µ_стопы · µ_грунта), одна стопа сцепление не задаёт.
+        // Check contact, not intent: the pair is
+        // sqrt(µ_foot · µ_ground); one foot does not set grip by itself.
         AppendNum(json, "footFriction", h.footFriction);
         float groundMu = ResolveGroundFriction();
         AppendNum(json, "groundFriction", groundMu);
@@ -754,6 +755,7 @@ public class TrialRecorder
             AppendNum(json, "kneeBaseAngle", b.kneeBaseAngle);
             AppendNum(json, "kneeRecoveryFlex", b.kneeRecoveryFlex);
             AppendNum(json, "crouchRatePerSecond", b.crouchRatePerSecond);
+            AppendNum(json, "crouchReleaseRatePerSecond", b.crouchReleaseRatePerSecond);
             AppendNum(json, "crouchKneeFlex", b.crouchKneeFlex);
             AppendNum(json, "crouchHipFlex", b.crouchHipFlex);
             AppendNum(json, "crouchPelvisTilt", b.crouchPelvisTilt);
@@ -797,6 +799,34 @@ public class TrialRecorder
             AppendNum(json, "walkLiftUnloadBias", b.walkLiftUnloadBias);
             AppendNum(json, "walkKneePeelMax", b.walkKneePeelMax);
             AppendNum(json, "walkStancePush", b.walkStancePush);
+            AppendNum(json, "runStancePushScale", b.runStancePushScale);
+            AppendNum(json, "walkTargetSpeed", b.walkTargetSpeed);
+            AppendNum(json, "walkSpeedPushGain", b.walkSpeedPushGain);
+            AppendNum(json, "walkSpeedPushMax", b.walkSpeedPushMax);
+            AppendNum(json, "walkSpeedPushComGateScale", b.walkSpeedPushComGateScale);
+            AppendNum(json, "walkXCoMWeight", b.walkXCoMWeight);
+            AppendNum(json, "walkXCoMHeight", b.walkXCoMHeight);
+            AppendNum(json, "walkSpeedLeanGain", b.walkSpeedLeanGain);
+            AppendNum(json, "walkSpeedLeanMax", b.walkSpeedLeanMax);
+            AppendNum(json, "walkSpeedLeanTorsoScale", b.walkSpeedLeanTorsoScale);
+            AppendNum(json, "walkSpeedDriveGain", b.walkSpeedDriveGain);
+            AppendNum(json, "walkSpeedDriveMax", b.walkSpeedDriveMax);
+            AppendNum(json, "walkSpeedDriveStartLevel", b.walkSpeedDriveStartLevel);
+            AppendNum(json, "walkSpeedSwingHipGain", b.walkSpeedSwingHipGain);
+            AppendNum(json, "walkSpeedSwingKneeGain", b.walkSpeedSwingKneeGain);
+            AppendNum(json, "walkSpeedSwingFlexMax", b.walkSpeedSwingFlexMax);
+            AppendNum(json, "walkSwingHipBoost", b.walkSwingHipBoost);
+            AppendNum(json, "walkSwingKneeBoost", b.walkSwingKneeBoost);
+            AppendNum(json, "walkStepLength", b.walkStepLength);
+            AppendNum(json, "walkStepLengthSpeedGain", b.walkStepLengthSpeedGain);
+            AppendNum(json, "walkStepPlacementGain", b.walkStepPlacementGain);
+            AppendNum(json, "walkStepPlacementMax", b.walkStepPlacementMax);
+            AppendNum(json, "walkStepPlacementGroundFraction", b.walkStepPlacementGroundFraction);
+            AppendNum(json, "walkPlacementSyncStart", b.walkPlacementSyncStart);
+            AppendNum(json, "walkTouchdownSyncClearance", b.walkTouchdownSyncClearance);
+            AppendNum(json, "walkStanceKneeBend", b.walkStanceKneeBend);
+            AppendNum(json, "walkForwardPelvisLean", b.walkForwardPelvisLean);
+            AppendNum(json, "walkForwardTorsoLean", b.walkForwardTorsoLean);
             AppendNum(json, "walkStanceExtend", b.walkStanceExtend);
             AppendNum(json, "walkComLeadX", b.walkComLeadX);
             AppendNum(json, "walkSwingScissorLevel", b.walkSwingScissorLevel);
@@ -805,7 +835,12 @@ public class TrialRecorder
             {
                 AppendNum(json, "stanceComTrigger", stepDriver.stanceComTrigger);
                 AppendNum(json, "stanceComMinAge", stepDriver.stanceComMinAge);
+                AppendNum(json, "stanceComTriggerPerSpeed", stepDriver.stanceComTriggerPerSpeed);
+                AppendNum(json, "walkCadenceStanceGain", stepDriver.walkCadenceStanceGain);
+                AppendNum(json, "walkCadenceMinStance", stepDriver.walkCadenceMinStance);
                 AppendNum(json, "transferMinDuration", stepDriver.transferMinDuration);
+                AppendNum(json, "walkCadenceTransferGain", stepDriver.walkCadenceTransferGain);
+                AppendNum(json, "walkCadenceMinTransfer", stepDriver.walkCadenceMinTransfer);
             }
             AppendNum(json, "walkSwingAirHold", b.walkSwingAirHold);
             AppendNum(json, "walkSwingHeelPlant", b.walkSwingHeelPlant);
@@ -815,6 +850,13 @@ public class TrialRecorder
             AppendNum(json, "walkArmShoulderSwing", b.walkArmShoulderSwing);
             AppendNum(json, "walkArmElbowSwing", b.walkArmElbowSwing);
             AppendNum(json, "walkArmTransferCarry", b.walkArmTransferCarry);
+            AppendNum(json, "walkArmBalanceShoulderGain", b.walkArmBalanceShoulderGain);
+            AppendNum(json, "walkArmBalanceElbowGain", b.walkArmBalanceElbowGain);
+            AppendNum(json, "walkLatePushGain", b.walkLatePushGain);
+            AppendNum(json, "walkLatePushStart", b.walkLatePushStart);
+            AppendNum(json, "walkLatePushMax", b.walkLatePushMax);
+            AppendNum(json, "walkLatePushNeedsAir", b.walkLatePushNeedsAir ? 1f : 0f);
+            AppendNum(json, "walkLatePushNeedsTouchdownWindow", b.walkLatePushNeedsTouchdownWindow ? 1f : 0f);
             AppendNum(json, "standLegRatePerSecond", b.standLegRatePerSecond);
             AppendNum(json, "hipPGain", b.hipPGain);
             AppendNum(json, "hipDGain", b.hipDGain);
@@ -870,7 +912,7 @@ public class TrialRecorder
         json.Append("}");
     }
 
-    // Фактические jobOptions на первом шаге — без них не видно, сбросился ли детерминизм.
+    // Actual jobOptions on the first step — without them you cannot see whether determinism reset.
     private static void AppendPhysicsJobOptions(StringBuilder json)
     {
         PhysicsJobOptions2D options = Physics2D.jobOptions;
@@ -880,9 +922,9 @@ public class TrialRecorder
         json.Append('}');
     }
 
-    // Снимок Ieff и применённого K. Ieff = 1/(1/Iself+1/Iconnected):
-    // относительное ускорение пары даёт именно эта эффективная инерция,
-    // а не I одного сегмента. Для головы connected — тонкая шея.
+    // Snapshot of Ieff and the applied K. Ieff = 1/(1/Iself+1/Iconnected):
+    // this effective inertia is what gives the pair its relative acceleration,
+    // not I of one segment. For the head, connected is the thin neck.
     private void AppendJointDamping(StringBuilder json)
     {
         json.Append(",\"jointDamping\":{");
@@ -1016,8 +1058,8 @@ public class TrialRecorder
         return false;
     }
 
-    // Земля строится GroundBuilder-ом, а не телом: без её материала
-    // цифра трения подошвы не говорит о сцеплении ничего.
+    // Ground is built by GroundBuilder, not by the body: without its material
+    // the sole friction figure says nothing about grip.
     private static float ResolveGroundFriction()
     {
         GameObject ground = GameObject.Find("Ground");
@@ -1072,7 +1114,7 @@ public class TrialRecorder
         json.Append('"').Append(key).Append("\":").Append(F(value));
     }
 
-    // Инерции и tau малы (10⁻³…10⁻⁴): четырёх знаков F4 не хватает.
+    // Inertias and tau are small (10⁻³…10⁻⁴): four F4 digits are not enough.
     private static void AppendPrecise(StringBuilder json, string key, float value, bool comma = true)
     {
         if (comma) json.Append(',');
@@ -1117,8 +1159,8 @@ public class TrialRecorder
         return value.ToString("F4", CultureInfo.InvariantCulture);
     }
 
-    // Один тип сустава: одиночный (шея, голова) или пара сторон.
-    // Ieff и K снимаются с первого живого шарнира; RMS и упоры — со всех.
+    // One joint kind: a singleton (neck, head) or a left/right pair.
+    // Ieff and K are taken from the first live hinge; RMS and stops — from all.
     private sealed class JointDampingWatch
     {
         public readonly string Name;
@@ -1200,9 +1242,9 @@ public class TrialRecorder
             }
         }
 
-        // Угол первого живого сустава группы. Одной RMS скорости мало: 360 °/с
-        // — это и мелкая дрожь на 100 Гц, и крупная качка на 12 Гц, а на экране
-        // это совершенно разные вещи. Амплитуду видно только по углу.
+        // Angle of the group's first live joint. RMS speed alone is not enough: 360 °/s
+        // can be a fine 100 Hz tremor or a large 12 Hz sway, and on screen
+        // those are completely different. Amplitude is visible only from the angle.
         public float FirstAngle()
         {
             HingeJoint2D joint = FirstAlive();
@@ -1227,8 +1269,8 @@ public class TrialRecorder
             return angle <= min + LIMIT_MARGIN_DEGREES || angle >= max - LIMIT_MARGIN_DEGREES;
         }
 
-        // Та же сумма обратных инерций, что в JointFriction: пара τ, −τ
-        // даёт относительное ускорение τ·(1/I₁ + 1/I₂).
+        // The same sum of inverse inertias as in JointFriction: the pair τ, −τ
+        // gives relative acceleration τ·(1/I₁ + 1/I₂).
         private static float EffectiveInertia(float iSelf, float iConnected)
         {
             float inv = 0f;

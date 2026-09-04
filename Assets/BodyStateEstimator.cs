@@ -1,15 +1,15 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// Сенсорный слой: собирает информацию о состоянии тела, но не управляет им.
+// Sensor layer: reads body state and does not control it.
 [DefaultExecutionOrder(-100)]
 public class BodyStateEstimator : MonoBehaviour
 {
-    // ─── ССЫЛКИ НА ДРУГИЕ КОМПОНЕНТЫ ───
+    // ─── OTHER COMPONENT REFS ───
     private VestibularSystem vestibular;
     private CenterOfMassCalculator comCalculator;
 
-    // ─── ССЫЛКИ НА СУСТАВЫ ───
+    // ─── JOINT REFS ───
     private HingeJoint2D leftHipJoint;
     private HingeJoint2D rightHipJoint;
     private HingeJoint2D leftKneeJoint;
@@ -18,7 +18,7 @@ public class BodyStateEstimator : MonoBehaviour
     private HingeJoint2D rightAnkleJoint;
     private HingeJoint2D lumbarJoint;
 
-    // ─── ССЫЛКИ НА СТОПЫ ───
+    // ─── FOOT REFS ───
     private Transform leftFoot;
     private Transform rightFoot;
     private Collider2D leftFootCollider;
@@ -32,48 +32,50 @@ public class BodyStateEstimator : MonoBehaviour
     private BalanceController balance;
     private MotionIntent intent;
 
-    [Header("Проба контакта")]
-    [Tooltip("Толщина пробы под нижней кромкой стопы (юниты). Только OverlapBox.")]
+    [Header("Contact probe")]
+    [Tooltip("Probe thickness under the foot's bottom edge (units). OverlapBox only.")]
     public float groundProbeThickness = 0.06f;
-    [Tooltip("GetContacts NonAlloc вместо OverlapBox под стопой. Откат — false.")]
+    [Tooltip("GetContacts NonAlloc instead of OverlapBox under the foot. Revert is false.")]
     public bool useGetContactsProbe = true;
 
-    // Переиспользуемые буферы: без new на каждом шаге физики.
+    // Reused buffers: no new on every physics step.
     private readonly Collider2D[] groundProbeHits = new Collider2D[8];
     private readonly ContactPoint2D[] groundContacts = new ContactPoint2D[8];
     private ContactFilter2D groundContactFilter;
     private bool groundContactFilterReady;
 
-    // Линейка запаса: saturция буфера 8 — скрытый потолок будущих коллайдеров.
-    // Только счётчики, на grounded не влияют.
+    // Margin ruler: saturation of the 8-slot buffer is a hidden ceiling for future colliders.
+    // Counters only; they do not affect grounded.
     public int probeCallCount;
     public int probeSaturatedCount;
     public int probeHitSum;
 
-    // ─── ДАННЫЕ СОСТОЯНИЯ (публичные для логирования) ───
-    [Header("Центр масс")]
+    // ─── STATE DATA (public for logging) ───
+    [Header("Center of mass")]
     public Vector2 comPosition;
     public Vector2 comVelocity;
 
-    [Header("Опора")]
+    [Header("Support")]
     public float supportMinX;
     public float supportMaxX;
     public float supportCenterX;
     public float supportWidth;
-    public float supportMargin; // + внутри опоры, 0 на границе, - снаружи
+    public float supportMargin; // + inside support, 0 on the edge, - outside
 
-    [Header("Стопы")]
+    [Header("Feet")]
     public Vector2 leftFootPosition;
     public Vector2 rightFootPosition;
     public bool leftFootGrounded;
     public bool rightFootGrounded;
-    // Контакт пятки (point.x ≤ центр стопы). Для CoM/fell не используется.
+    public float leftFootGroundClearance;
+    public float rightFootGroundClearance;
+    // Heel contact (point.x ≤ foot center). Unused by CoM/fell.
     public bool leftFootHeelLoaded;
     public bool rightFootHeelLoaded;
     public bool leftHandGrounded;
     public bool rightHandGrounded;
 
-    [Header("Углы суставов (градусы)")]
+    [Header("Joint angles (degrees)")]
     public float leftHipAngle;
     public float rightHipAngle;
     public float leftKneeAngle;
@@ -82,7 +84,7 @@ public class BodyStateEstimator : MonoBehaviour
     public float rightAnkleAngle;
     public float lumbarAngle;
 
-    [Header("Угловые скорости суставов (град/с)")]
+    [Header("Joint angular velocities (deg/s)")]
     public float leftHipAngularVelocity;
     public float rightHipAngularVelocity;
     public float leftKneeAngularVelocity;
@@ -91,17 +93,17 @@ public class BodyStateEstimator : MonoBehaviour
     public float rightAnkleAngularVelocity;
     public float lumbarAngularVelocity;
 
-    [Header("Вестибулярная система")]
-    public float torsoTilt;               // наклон торса (градусы)
-    public float torsoAngularVelocity;     // угловая скорость торса (град/с)
-    public float pelvisTilt;              // наклон таза к мировой вертикали (градусы)
-    public float pelvisAngularVelocity;   // угловая скорость таза (град/с)
+    [Header("Vestibular system")]
+    public float torsoTilt;               // torso tilt (degrees)
+    public float torsoAngularVelocity;     // torso angular velocity (deg/s)
+    public float pelvisTilt;              // pelvis tilt to world vertical (degrees)
+    public float pelvisAngularVelocity;   // pelvis angular velocity (deg/s)
 
-    // ─── ВНУТРЕННИЕ ПЕРЕМЕННЫЕ ДЛЯ РАСЧЁТА СКОРОСТИ COM ───
+    // ─── INTERNALS FOR COM VELOCITY ───
     private Vector2 previousComPosition;
     private bool hasPreviousCom = false;
 
-    // ─── AWAKE: ПОЛУЧАЕМ ССЫЛКИ ───
+    // ─── AWAKE: RESOLVE REFS ───
     void Awake()
     {
         vestibular = GetComponent<VestibularSystem>();
@@ -131,30 +133,30 @@ public class BodyStateEstimator : MonoBehaviour
 
         if (comCalculator == null)
         {
-            Debug.LogError("BodyStateEstimator: CenterOfMassCalculator не найден!");
+            Debug.LogError("BodyStateEstimator: CenterOfMassCalculator not found!");
         }
         if (vestibular == null)
         {
-            Debug.LogError("BodyStateEstimator: VestibularSystem не найден!");
+            Debug.LogError("BodyStateEstimator: VestibularSystem not found!");
         }
     }
 
-    // ─── ПОИСК СУСТАВА ПО ИМЕНИ ДОЧЕРНЕГО ОБЪЕКТА ───
+    // ─── FIND JOINT BY CHILD NAME ───
     private HingeJoint2D GetJoint(string childName)
     {
         Transform t = transform.Find(childName);
         return t != null ? t.GetComponent<HingeJoint2D>() : null;
     }
 
-    // ─── FIXEDUPDATE: СБОР ДАННЫХ ───
+    // ─── FIXEDUPDATE: COLLECT DATA ───
     void FixedUpdate()
     {
-        // 1. Центр масс
+        // 1. Center of mass
         if (comCalculator != null)
         {
             comPosition = comCalculator.GetCenterOfMass();
 
-            // Скорость COM = (текущий - предыдущий) / dt
+            // CoM velocity = (current - previous) / dt
             if (hasPreviousCom)
             {
                 comVelocity = (comPosition - previousComPosition) / Time.fixedDeltaTime;
@@ -167,24 +169,32 @@ public class BodyStateEstimator : MonoBehaviour
             previousComPosition = comPosition;
         }
 
-        // 2. Позиции стоп
+        // 2. Foot positions
         if (leftFoot != null) leftFootPosition = leftFoot.position;
         if (rightFoot != null) rightFootPosition = rightFoot.position;
 
-        // 3. Контакт стоп с землёй (heel — отдельно, на grounded не влияет)
+        // 3. Foot-ground contact (heel is separate and does not affect grounded)
         leftFootGrounded = IsSegmentGrounded(leftFootCollider, out leftFootHeelLoaded);
         rightFootGrounded = IsSegmentGrounded(rightFootCollider, out rightFootHeelLoaded);
-        // Кисти не пробуем, пока присед мелкий: в стойке руки в воздухе,
-        // а OverlapBox всё равно обходил их коллайдеры каждый шаг.
+        float groundTopY = ResolveGroundTopY();
+        leftFootGroundClearance = FootGroundClearance(leftFootCollider, groundTopY);
+        rightFootGroundClearance = FootGroundClearance(rightFootCollider, groundTopY);
+        // Skip hands while the crouch is shallow: in stance the arms are in the air,
+        // and OverlapBox still walked their colliders every step.
         float slop = balance != null ? Mathf.Max(0f, balance.crouchHandGroundSlop) : 0.06f;
-        float handGroundY = ResolveGroundTopY() + slop;
+        float handGroundY = groundTopY + slop;
         leftHandGrounded = IsHandNearGround(leftHandCollider, handGroundY);
         rightHandGrounded = IsHandNearGround(rightHandCollider, handGroundY);
+        if (balance != null && balance.crouchLevel >= balance.crouchHandSupportMin)
+        {
+            leftHandGrounded = true;
+            rightHandGrounded = true;
+        }
 
-        // 4. Границы опоры и запас устойчивости
+        // 4. Support bounds and stability margin
         CalculateSupport();
 
-        // 5. Углы суставов
+        // 5. Joint angles
         leftHipAngle = leftHipJoint != null ? leftHipJoint.jointAngle : 0f;
         rightHipAngle = rightHipJoint != null ? rightHipJoint.jointAngle : 0f;
         leftKneeAngle = leftKneeJoint != null ? leftKneeJoint.jointAngle : 0f;
@@ -193,7 +203,7 @@ public class BodyStateEstimator : MonoBehaviour
         rightAnkleAngle = rightAnkleJoint != null ? rightAnkleJoint.jointAngle : 0f;
         lumbarAngle = lumbarJoint != null ? lumbarJoint.jointAngle : 0f;
 
-        // 6. Угловые скорости суставов
+        // 6. Joint angular velocities
         leftHipAngularVelocity = leftHipJoint != null ? leftHipJoint.jointSpeed : 0f;
         rightHipAngularVelocity = rightHipJoint != null ? rightHipJoint.jointSpeed : 0f;
         leftKneeAngularVelocity = leftKneeJoint != null ? leftKneeJoint.jointSpeed : 0f;
@@ -202,7 +212,7 @@ public class BodyStateEstimator : MonoBehaviour
         rightAnkleAngularVelocity = rightAnkleJoint != null ? rightAnkleJoint.jointSpeed : 0f;
         lumbarAngularVelocity = lumbarJoint != null ? lumbarJoint.jointSpeed : 0f;
 
-        // 7. Вестибулярные данные: торс и таз в одной системе отсчёта
+        // 7. Vestibular data: torso and pelvis in the same reference frame
         if (vestibular != null)
         {
             torsoTilt = vestibular.GetBodyTilt();
@@ -212,10 +222,10 @@ public class BodyStateEstimator : MonoBehaviour
         }
     }
 
-    // ─── ПРОВЕРКА КОНТАКТА СТОПЫ С ЗЕМЛЁЙ ───
-    // GetContacts — контакты PhysX со слоем Ground. OverlapBox — геометрическая
-    // проба 0.06 м под кромкой (useGetContactsProbe = false).
-    // heelLoaded: есть контакт с point.x ≤ центра стопы (человек смотрит в +X).
+    // ─── FOOT-GROUND CONTACT ───
+    // GetContacts — PhysX contacts with the Ground layer. OverlapBox is a geometric
+    // 0.06 m probe under the edge (useGetContactsProbe = false).
+    // heelLoaded: a contact with point.x ≤ foot center (human faces +X).
     private bool IsSegmentGrounded(Collider2D col, out bool heelLoaded)
     {
         heelLoaded = false;
@@ -250,7 +260,7 @@ public class BodyStateEstimator : MonoBehaviour
             Vector2 probeSize = new Vector2(bounds.size.x * 0.9f, groundProbeThickness);
             hitCount = Physics2D.OverlapBoxNonAlloc(
                 probeCenter, probeSize, 0f, groundProbeHits, GroundLayers.Mask);
-            // Без точек контакта пятку не отличить — считаем любой контакт пяткой.
+            // Without contact points the heel cannot be told apart — treat any contact as heel.
             heelLoaded = hitCount > 0;
         }
 
@@ -262,8 +272,8 @@ public class BodyStateEstimator : MonoBehaviour
         return hitCount > 0;
     }
 
-    // Кисть: проба PhysX плюс допуск к y=−2.0 в глубоком приседе — ладонь
-    // не всегда пробивает коллайдер, но опора по X уже расширена.
+    // Hand: PhysX probe plus a y=−2.0 slop in a deep squat — the palm
+    // does not always punch the collider, but support in X is already widened.
     private bool IsHandNearGround(Collider2D col, float handGroundY)
     {
         if (col == null) return false;
@@ -283,8 +293,14 @@ public class BodyStateEstimator : MonoBehaviour
         return groundCollider != null ? groundCollider.bounds.max.y : -2f;
     }
 
-    // ─── РАСЧЁТ ОБЛАСТИ ОПОРЫ И ЗАПАСА УСТОЙЧИВОСТИ ───
-    // Опора — объединение коллайдеров пяток и пальцев, которые касаются земли.
+    private static float FootGroundClearance(Collider2D col, float groundTopY)
+    {
+        if (col == null) return 0.5f;
+        return col.bounds.min.y - groundTopY;
+    }
+
+    // ─── SUPPORT REGION AND STABILITY MARGIN ───
+    // Support is the union of heel and toe colliders that touch the ground.
     private void CalculateSupport()
     {
         if (leftFoot == null || rightFoot == null)
@@ -304,14 +320,14 @@ public class BodyStateEstimator : MonoBehaviour
         ExpandSupport(leftFootCollider, leftFootGrounded, ref hasSupport, ref minX, ref maxX);
         ExpandSupport(rightFootCollider, rightFootGrounded, ref hasSupport, ref minX, ref maxX);
 
-        // На приседе кисти на земле — третья и четвёртая точки опоры.
+        // In a squat the hands on the ground are the third and fourth support points.
         if (balance != null && balance.crouchLevel >= balance.crouchHandSupportMin)
         {
             ExpandSupport(leftHandCollider, leftHandGrounded, ref hasSupport, ref minX, ref maxX);
             ExpandSupport(rightHandCollider, rightHandGrounded, ref hasSupport, ref minX, ref maxX);
         }
 
-        // Обе стопы в воздухе: опоры нет, запас считаем от середины стоп.
+        // Both feet in the air: no support; margin is from the midpoint of the feet.
         if (!hasSupport)
         {
             supportCenterX = (leftFoot.position.x + rightFoot.position.x) * 0.5f;
@@ -327,7 +343,7 @@ public class BodyStateEstimator : MonoBehaviour
         supportCenterX = (supportMinX + supportMaxX) * 0.5f;
         supportWidth = supportMaxX - supportMinX;
 
-        // Если опора нулевая, margin = расстояние COM до центра
+        // If support width is zero, margin = CoM distance to the center
         if (supportWidth < 0.001f)
         {
             supportMargin = -Mathf.Abs(comPosition.x - supportCenterX);
@@ -336,14 +352,14 @@ public class BodyStateEstimator : MonoBehaviour
 
         if (comPosition.x >= supportMinX && comPosition.x <= supportMaxX)
         {
-            // COM внутри опоры: margin = минимальное расстояние до краёв
+            // CoM inside support: margin = minimum distance to the edges
             float distLeft = comPosition.x - supportMinX;
             float distRight = supportMaxX - comPosition.x;
             supportMargin = Mathf.Min(distLeft, distRight);
         }
         else
         {
-            // COM снаружи: margin = -расстояние до ближайшего края
+            // CoM outside: margin = -distance to the nearest edge
             float distToLeft = Mathf.Abs(comPosition.x - supportMinX);
             float distToRight = Mathf.Abs(comPosition.x - supportMaxX);
             supportMargin = -Mathf.Min(distToLeft, distToRight);

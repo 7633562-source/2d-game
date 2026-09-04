@@ -5,57 +5,60 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 
-// Прогон одного человека без окна редактора, для численного анализа баланса.
-// Активируется аргументом -trial в командной строке собранного плеера:
+// Run one human without the editor window, for numerical balance analysis.
+// Activated by the -trial argument on the built player's command line:
 //   BalanceTrial.exe -batchmode -nographics -trial -duration 10 -label base -logFile -
-//   -fixedDelta 0.005 — шаг физики (0.02 = 50 Гц, 0.005 = 200 Гц)
-//   -activationSpeed 10 — скорость набора силы мышцы
-//   -pushImpulse 20 -pushTime 5 — толчок в торс (Н·с, + вперёд) на 5-й секунде
-//   -crouch 1 -crouchTime 5 -crouchHold 10 — цель приседа через MotionIntent
-//   -lean 1|-1 -leanTime 5 -leanHold 10 — наклон корпуса (+ вперёд, − назад)
-//   -standLeg left|right|0 -standLegTime 5 -standLegHold 10 — одноногая стойка
-//   -dog 1 — прогон собаки вместо человека (humanCount = 0, плоская земля)
+//   -fixedDelta 0.005 — physics step (0.02 = 50 Hz, 0.005 = 200 Hz)
+//   -activationSpeed 10 — muscle force rise speed
+//   -pushImpulse 20 -pushTime 5 — torso push (N·s, + forward) at second 5
+//   -crouch 1 -crouchTime 5 -crouchHold 10 — crouch target via MotionIntent
+//   -lean 1|-1 -leanTime 5 -leanHold 10 — trunk lean (+ forward, − back)
+//   -standLeg left|right|0 -standLegTime 5 -standLegHold 10 — one-leg stance
+//   -dog 1 — run a dog instead of a human (humanCount = 0, flat ground)
 //   -dogLeap 1 -dogLeapTime 2 -dogPreyX 1.4 — leap attack after settle, prey mark
-//   -tree 1 — дерево (можно вместе с -bird: птицы на ветках)
-//   -treeKind oak|pine|willow|bush|poplar — рецепт кроны (по умолчанию oak)
-//   -treeSeed 1 — локальный Random вилки
-//   -treePerch 1 — посадить птиц на PlantTree.GetPerchSlots
-//   -treeWind 0 — без паруса (проверка, что ветки держат позу)
-//   -bird 1 — прогон птицы вместо человека (флаги человека не читаются)
-//   -birdMode stand|fly|walk|glide|sit|attack -takeoffDelay 0 — стойка без взлёта
-//   -birdRig ragdoll|flock — ragdoll для стойки, flock для стаи (одно тело)
-//   -birdFacing 1|-1 — нос в +X или −X (flock: картинка на Look)
-    //   -birdKind crow|chicken — рецепт тела (курица: земля, не крейсер)
-    //   -birdDrive wander|prey — мозг пишет mode (стая: wander + -birdCount)
-    //   -birdThreat 8 — метка угрозы впереди, м (0 — нет; крик + Fly, не Attack)
-    //   -threatRange 12 — дальность «видит угрозу», м
+    //   -dogWalk 1 -dogWalkTime 1 — clocked trot after settle (not human -walk)
+//   -flower 1 — garden bed (picture only, no hinges). -flowerKind rose|…
+//   -flowerCount 12 — how many plants in the row
+//   -tree 1 — tree (can pair with -bird: birds on branches)
+//   -treeKind oak|pine|willow|bush|poplar — crown recipe (default oak)
+//   -treeSeed 1 — local fork Random
+//   -treePerch 1 — seat birds on PlantTree.GetPerchSlots
+//   -treeWind 0 — no sail (check that branches hold the pose)
+//   -bird 1 — run a bird instead of a human (human flags are not read)
+//   -birdMode stand|fly|walk|glide|sit|attack -takeoffDelay 0 — stance with no takeoff
+//   -birdRig ragdoll|flock — ragdoll for stance, flock for a pack (one body)
+//   -birdFacing 1|-1 — nose along +X or −X (flock: picture on Look)
+    //   -birdKind crow|chicken — body recipe (chicken: ground, not cruise)
+    //   -birdDrive wander|prey — brain writes mode (flock: wander + -birdCount)
+    //   -birdThreat 8 — threat mark ahead, m (0 — none; cry + Fly, not Attack)
+    //   -threatRange 12 — “sees threat” range, m
 //   -glideLead / -sitMin / -sitMax / -flyMin / -flyMax / -flockLeash / -aiStride
 //     / -homeFaceDeadzone — wander timing, flock brain stride, Glide nose deadzone at the slot
-//   -birdDriveEach 1 — N× BirdDrive (особь) вместо одного BirdFlockDrive
-//   -flapHz / -flapAmp / -hover — взмах и средняя тяга (доли веса)
-//   -stopFlap 4 — на 4-й секунде убрать мах: по умолчанию планирование и посадка
-//   -stopFlapMode glide|stand — glide (пологая посадка) или stand (падение камнем)
+//   -birdDriveEach 1 — N× BirdDrive (per bird) instead of one BirdFlockDrive
+//   -flapHz / -flapAmp / -hover — flap and mean thrust (fractions of weight)
+//   -stopFlap 4 — drop the flap at second 4: default is glide and land
+//   -stopFlapMode glide|stand — glide (shallow landing) or stand (stone drop)
 //   -walk 1 -walkTime 5 -walkDuration 30 -walkStance 10 -walkTransfer 8 -walkFirst right
-//   -run 1 -runTime 5 -runHold 20 — бег (короче Stance), вместе с -walk или отдельно
-//   -swingHip / -swingKnee — сгиб свинга (бедро минус, колено плюс)
-//   -swingHipUnload — flexor-bias свинга при grounded (доля сигнала)
-//   -pelvisP / -pelvisD / -pelvisRef — PD таза к мировой вертикали
-//   -crouchPelvis — целевой наклон таза вперёд при crouch=1
+//   -run 1 -runTime 5 -runHold 20 — run (shorter Stance), with -walk or alone
+//   -swingHip / -swingKnee — swing flexion (hip minus, knee plus)
+//   -swingHipUnload — swing flexor-bias while grounded (signal fraction)
+//   -pelvisP / -pelvisD / -pelvisRef — pelvis PD to the world vertical
+//   -crouchPelvis — target pelvis tilt forward at crouch=1
 //   -neckFriction / -shoulderFriction / -elbowFriction / -wristFriction —
-//   абсолютные K пассивной вязкости до BuildHuman (голова делит neckFriction)
-//   -neckMuscle — момент мышц шеи и головы, абсолютный, после -muscle
-   //   -neckP / -neckD / -neckTilt / -neckRef — PD шеи и головы к мировой вертикали
-   //   -shoulderP / -elbowP / -wristP и парные D/Base/Ref — суставная поза рук
-   //   -armShoulderBal / -armElbowBal / -armWristBal — контрперенос от CoM (град/ед.)
-   // Все коэффициенты баланса можно переопределить аргументами, не пересобирая плеер,
-// поэтому один билд обслуживает любой перебор параметров.
+//   absolute K of passive viscosity before BuildHuman (head shares neckFriction)
+//   -neckMuscle — neck and head muscle torque, absolute, after -muscle
+   //   -neckP / -neckD / -neckTilt / -neckRef — neck and head PD to the world vertical
+   //   -shoulderP / -elbowP / -wristP and paired D/Base/Ref — arm joint pose
+   //   -armShoulderBal / -armElbowBal / -armWristBal — CoM counter-reach (deg/unit)
+   // All balance coefficients can be overridden by arguments without rebuilding the player,
+// so one build serves any parameter sweep.
 public class HeadlessTrial : MonoBehaviour
 {
-    // GameProcess проверяет этот флаг и не строит своих 50 человек,
-    // иначе прогон утонет в 700 Rigidbody2D.
+    // GameProcess checks this flag and does not build its own 50 humans,
+    // or the run would drown in 700 Rigidbody2D.
     public static bool Active { get; private set; }
 
-    // Предохранитель: если физика зависнет, процесс не должен жить вечно.
+    // Safety cap: if physics hangs, the process must not live forever.
     private const float REAL_TIME_LIMIT_SECONDS = 600f;
     private static readonly WaitForFixedUpdate FixedStep = new WaitForFixedUpdate();
 
@@ -64,13 +67,13 @@ public class HeadlessTrial : MonoBehaviour
     private string outputFolder;
     private float startY = -0.82f;
 
-    // Толчок в торс: проверка, держит ли регулятор возмущение, а не только
-    // сам себя. Без него равновесие может быть просто статической позой.
+    // Torso push: checks whether the controller holds a disturbance, not only
+    // itself. Without it, equilibrium may be just a static pose.
     private float pushTime;
     private float pushImpulse;
     private Rigidbody2D torsoBody;
 
-    // Присед через MotionIntent, не через клавиатуру: в batchmode её нет.
+    // Crouch via MotionIntent, not the keyboard: batchmode has none.
     private float crouchTarget;
     private float crouchTime;
     private float crouchHold;
@@ -79,13 +82,13 @@ public class HeadlessTrial : MonoBehaviour
     private float leanHold;
     private MotionIntent intent;
 
-    // Одноногая стойка: −1 левая опора, +1 правая, 0 обе. Как присед —
-    // намерение выставляем каждый шаг, чтобы живой ввод не стёр сценарий.
+    // One-leg stance: −1 left support, +1 right, 0 both. Same as crouch —
+    // the intent is written every step so live input cannot erase the script.
     private float standLegTarget;
     private float standLegTime;
     private float standLegHold;
 
-    // Чередование опоры: reuse StepPhaseDriver, не SIMBICON.
+    // Support swap: reuse StepPhaseDriver, not SIMBICON.
     private float walkTarget;
     private float walkTime;
     private float walkDuration;
@@ -99,6 +102,11 @@ public class HeadlessTrial : MonoBehaviour
     private float walkHeelAirMin = 0f;
     private float walkComTrigger = 0f;
     private float walkComTriggerMinAge = 0.35f;
+    private float walkComTriggerPerSpeed = 0f;
+    private float walkCadenceStanceGain = 0f;
+    private float walkCadenceMinStance = 1.0f;
+    private float walkCadenceTransferGain = 0f;
+    private float walkCadenceMinTransfer = 0.5f;
     private float walkTransferMinDuration = 0.7f;
     private float walkTransferMaxDuration;
     private float walkTransferComMax;
@@ -112,15 +120,20 @@ public class HeadlessTrial : MonoBehaviour
     private TrialRunInfo runInfo;
     private bool spawnBird;
     private bool spawnTree;
+    private bool spawnFlower;
     private bool treePerch;
     private PlantTree plantTree;
     private PlantTrialRecorder plantRecorder;
+    private PlantFlower[] trialFlowers;
+    private FlowerTrialRecorder flowerRecorder;
     private bool spawnDog;
     private Dog dog;
     private DogTrialRecorder dogRecorder;
     private bool dogLeap;
     private float dogLeapTime = 2f;
     private float dogPreyX = 1.4f;
+    private bool dogWalk;
+    private float dogWalkTime = 1f;
     private Bird bird;
     private Bird[] trialBirds;
     private BirdTrialRecorder birdRecorder;
@@ -159,7 +172,7 @@ public class HeadlessTrial : MonoBehaviour
 
         ConfigureDeterministicPhysics();
 
-        // Пол солвера — только CLI-перебор цикла 5; прод остаётся 8/3.
+        // Solver floor — CLI sweep of cycle 5 only; production stays 8/3.
         int velocityIterations = Mathf.RoundToInt(GetFloatArg("-velocityIterations", Physics2D.velocityIterations));
         int positionIterations = Mathf.RoundToInt(GetFloatArg("-positionIterations", Physics2D.positionIterations));
         if (velocityIterations > 0)
@@ -167,8 +180,8 @@ public class HeadlessTrial : MonoBehaviour
         if (positionIterations > 0)
             Physics2D.positionIterations = positionIterations;
 
-        // Шаг физики задаём до загрузки сцены: иначе первый FixedUpdate
-        // ещё идёт со стандартными 0.02 с, и сравнение частот будет кривым.
+        // Set the physics step before the scene loads: otherwise the first FixedUpdate
+        // still runs at the default 0.02 s, and frequency comparisons go crooked.
         float fixedDelta = GetFloatArg("-fixedDelta", Time.fixedDeltaTime);
         if (fixedDelta > 0f)
             Time.fixedDeltaTime = fixedDelta;
@@ -178,8 +191,8 @@ public class HeadlessTrial : MonoBehaviour
         host.AddComponent<HeadlessTrial>();
     }
 
-    // Стенд сравнивает прогоны побитово: без этого PhysX 2D на грани
-    // контуров (правая опора) один и тот же exe даёт fell / не fell.
+    // The stand compares runs bitwise: without this, PhysX 2D on the edge of
+    // contacts (right support) makes the same exe give fell / not fell.
     private static void ConfigureDeterministicPhysics()
     {
         UnityEngine.Random.InitState(0);
@@ -197,6 +210,7 @@ public class HeadlessTrial : MonoBehaviour
         outputFolder = GetStringArg("-out", DefaultOutputFolder());
         spawnBird = GetFloatArg("-bird", 0f) > 0.5f;
         spawnTree = GetFloatArg("-tree", 0f) > 0.5f;
+        spawnFlower = GetFloatArg("-flower", 0f) > 0.5f;
         treePerch = GetFloatArg("-treePerch", spawnTree && spawnBird ? 1f : 0f) > 0.5f;
         birdDriveKind = GetStringArg("-birdDrive", "").Trim().ToLowerInvariant();
         trialBirdKind = Bird.ParseKind(GetStringArg("-birdKind", "crow"));
@@ -206,6 +220,8 @@ public class HeadlessTrial : MonoBehaviour
         dogLeap = GetFloatArg("-dogLeap", 0f) > 0.5f;
         dogLeapTime = GetFloatArg("-dogLeapTime", 2f);
         dogPreyX = GetFloatArg("-dogPreyX", 1.4f);
+        dogWalk = GetFloatArg("-dogWalk", 0f) > 0.5f;
+        dogWalkTime = GetFloatArg("-dogWalkTime", 1f);
         if (spawnDog && spawnBird)
         {
             Debug.LogWarning("HeadlessTrial: -dog and -bird both set; running dog.");
@@ -213,8 +229,8 @@ public class HeadlessTrial : MonoBehaviour
         }
         stopFlapTime = GetFloatArg("-stopFlap", 0f);
         stopFlapMode = GetStringArg("-stopFlapMode", "glide").Trim().ToLowerInvariant();
-        // Птица ниже человека: −0.82 оставит её в воздухе на метр.
-        // Собака: лапы на y = −2.0, корень у центра груди.
+        // The bird sits lower than the human: −0.82 would leave it a metre in the air.
+        // Dog: paws at y = −2.0, root at the chest centre.
         startY = spawnDog
             ? GetFloatArg("-startY", Dog.StandingRootY(-2f))
             : spawnBird
@@ -245,6 +261,11 @@ public class HeadlessTrial : MonoBehaviour
         walkHeelAirMin = GetFloatArg("-walkHeelAir", 0f);
         walkComTrigger = GetFloatArg("-walkComTrigger", 0.01f);
         walkComTriggerMinAge = GetFloatArg("-walkComTrigAge", 0.25f);
+        walkComTriggerPerSpeed = GetFloatArg("-walkComTriggerPerSpeed", 0f);
+        walkCadenceStanceGain = GetFloatArg("-walkCadenceStanceGain", 0f);
+        walkCadenceMinStance = GetFloatArg("-walkCadenceMinStance", 1.0f);
+        walkCadenceTransferGain = GetFloatArg("-walkCadenceTransferGain", 0f);
+        walkCadenceMinTransfer = GetFloatArg("-walkCadenceMinTransfer", 0.5f);
         walkFirstStance = ParseStandLegArg(GetStringArg("-walkFirst", "right"));
         walkTransferMaxDuration = GetFloatArg("-walkTransfer", 6f);
         walkTransferMinDuration = GetFloatArg("-walkTransferMin", 0.7f);
@@ -264,13 +285,13 @@ public class HeadlessTrial : MonoBehaviour
 
         BuildTrialScene();
 
-        // После сборки сцены: мир PhysX уже создан, jobOptions надо зафиксировать снова.
+        // After the scene is built: the PhysX world already exists, so jobOptions must be pinned again.
         ConfigureDeterministicPhysics();
 
         StartCoroutine(RunTrial());
     }
 
-    // ─── СБОРКА МИНИМАЛЬНОЙ СЦЕНЫ: ЗЕМЛЯ + ОДИН ЧЕЛОВЕК ИЛИ ПТИЦА ───
+    // ─── MINIMAL SCENE BUILD: GROUND + ONE HUMAN OR BIRD ───
     private void BuildTrialScene()
     {
         GameObject groundHost = new GameObject("TrialGround");
@@ -292,6 +313,9 @@ public class HeadlessTrial : MonoBehaviour
         if (spawnTree)
             BuildTreeScene();
 
+        if (spawnFlower)
+            BuildFlowerScene();
+
         if (spawnBird)
         {
             BuildBirdScene();
@@ -307,20 +331,20 @@ public class HeadlessTrial : MonoBehaviour
             return;
         }
 
-        if (spawnTree)
+        if (spawnTree || spawnFlower)
             return;
 
         GameObject humanObject = new GameObject("TrialHuman");
-        // y = −0.82 ставит стопы точно на верхнюю кромку земли (−2.0):
-        // (pelvisSize.y + torsoSize.y)/2 + бедро + голень + стопа
+        // y = −0.82 puts the feet exactly on the top of the ground (−2.0):
+        // (pelvisSize.y + torsoSize.y)/2 + thigh + shin + foot
         // = 0.25 + 0.43 + 0.43 + 0.07 = 1.18.
         humanObject.transform.position = new Vector2(0f, startY);
 
         human = humanObject.AddComponent<Human>();
         human.footFriction = GetFloatArg("-footFriction", human.footFriction);
-        // MotionIntent и StepPhaseDriver до PlayerInputSource: у того
-        // RequireComponent(StepPhaseDriver), иначе Unity создаст второй
-        // экземпляр, а стенд будет Tick-ать «наш», метрики — чужой.
+        // MotionIntent and StepPhaseDriver before PlayerInputSource: that one
+        // has RequireComponent(StepPhaseDriver), or Unity would create a second
+        // instance and the stand would Tick “ours” while metrics read the other.
         intent = humanObject.AddComponent<MotionIntent>();
         stepDriver = humanObject.AddComponent<StepPhaseDriver>();
         stepDriver.externalDrive = true;
@@ -329,31 +353,37 @@ public class HeadlessTrial : MonoBehaviour
         stepDriver.stanceHeelAirMin = walkHeelAirMin;
         stepDriver.stanceComTrigger = walkComTrigger;
         stepDriver.stanceComMinAge = walkComTriggerMinAge;
+        stepDriver.stanceComTriggerPerSpeed = walkComTriggerPerSpeed;
+        stepDriver.walkCadenceStanceGain = walkCadenceStanceGain;
+        stepDriver.walkCadenceMinStance = walkCadenceMinStance;
         stepDriver.transferMaxDuration = walkTransferMaxDuration;
         stepDriver.transferMinDuration = walkTransferMinDuration;
+        stepDriver.walkCadenceTransferGain = walkCadenceTransferGain;
+        stepDriver.walkCadenceMinTransfer = walkCadenceMinTransfer;
         stepDriver.transferComOffsetMax = walkTransferComMax;
         stepDriver.transferFallbackComMax = walkTransferFallbackComMax;
         stepDriver.transferStandLegLevelMax = walkTransferLevelMax;
         stepDriver.firstStance = walkFirstStance;
         humanObject.AddComponent<PlayerInputSource>();
 
-        // Моменты и трение читаются при построении тела, поэтому меняем их до BuildHuman.
+        // Torques and friction are read when the body is built, so change them before BuildHuman.
         float muscleMultiplier = GetFloatArg("-muscle", 1f);
         float frictionMultiplier = GetFloatArg("-friction", 1f);
         ApplyMultipliers(human, muscleMultiplier, frictionMultiplier);
-        // Абсолютные K после множителя: диагностический перебор tau
-        // не должен зависеть от -friction и не трогает дефолты Human.
+        // Absolute K after the multiplier: a diagnostic tau sweep
+        // must not depend on -friction and must not touch Human defaults.
         ApplyFrictionOverrides(human);
         ApplyMuscleOverrides(human);
 
         human.BuildHuman();
+        FactionStamp.Player(humanObject);
 
-        // Коэффициенты регуляторов живут в BalanceController, который появляется
-        // внутри BuildHuman, поэтому переопределяем их после сборки.
+        // Controller gains live in BalanceController, which appears
+        // inside BuildHuman, so override them after the build.
         BalanceController balance = human.GetComponent<BalanceController>();
         ApplyGains(balance);
-        // Driver уже на объекте до Awake. Bind закрывает late-add одним
-        // вызовом, без GetComponent в FixedUpdate.
+        // The driver is already on the object before Awake. Bind closes a late-add
+        // in one call, without GetComponent in FixedUpdate.
         if (balance != null)
             balance.BindStepPhaseDriver(stepDriver);
 
@@ -380,6 +410,7 @@ public class HeadlessTrial : MonoBehaviour
         }
         dogObject.transform.position = new Vector2(0f, startY);
         dog.BuildDog();
+        FactionStamp.Wolf(dogObject);
         ApplyDogGains(dog.stance);
 
         if (dogLeap || HasArg("-dogPreyX"))
@@ -486,6 +517,22 @@ public class HeadlessTrial : MonoBehaviour
             c.Bark();
         if (GetFloatArg("-dogBite", 0f) > 0.5f)
             c.Bite();
+        c.walkPeriod = GetFloatArg("-dogWalkPeriod", c.walkPeriod);
+        c.walkDuty = GetFloatArg("-dogWalkDuty", c.walkDuty);
+        c.walkRearLag = GetFloatArg("-dogWalkRearLag", c.walkRearLag);
+        c.walkHipFlex = GetFloatArg("-dogWalkHipFlex", c.walkHipFlex);
+        c.walkShoulderFlex = GetFloatArg("-dogWalkShoulderFlex", c.walkShoulderFlex);
+        c.walkHipExtend = GetFloatArg("-dogWalkHipExt", c.walkHipExtend);
+        c.walkShoulderExtend = GetFloatArg("-dogWalkShoulderExt", c.walkShoulderExtend);
+        c.walkKneeFlex = GetFloatArg("-dogWalkKneeFlex", c.walkKneeFlex);
+        c.walkElbowFlex = GetFloatArg("-dogWalkElbowFlex", c.walkElbowFlex);
+        c.walkPawPlant = GetFloatArg("-dogWalkPlant", c.walkPawPlant);
+        c.walkFrontPlantScale = GetFloatArg("-dogWalkFrontPlant", c.walkFrontPlantScale);
+        c.walkChestTilt = GetFloatArg("-dogWalkChest", c.walkChestTilt);
+        c.walkLumbarP = GetFloatArg("-dogWalkLumbarP", c.walkLumbarP);
+        c.walkHipP = GetFloatArg("-dogWalkHipP", c.walkHipP);
+        c.walkKneeP = GetFloatArg("-dogWalkKneeP", c.walkKneeP);
+        c.walkActivationSpeed = GetFloatArg("-dogWalkAct", c.walkActivationSpeed);
     }
 
     private void BuildBirdScene()
@@ -511,6 +558,7 @@ public class HeadlessTrial : MonoBehaviour
             next.minBodyInertia = GetFloatArg("-bodyInertia", next.minBodyInertia);
             birdObject.transform.position = new Vector2(originX + i * spacing, startY);
             next.BuildBird();
+            FactionStamp.Bird(birdObject);
             ApplyBirdGains(next.controller);
             if (next.flight != null)
             {
@@ -546,7 +594,7 @@ public class HeadlessTrial : MonoBehaviour
             BirdFlockDrive flock = host.AddComponent<BirdFlockDrive>();
             flock.allowHeadless = true;
             flock.seed = birdDriveSeed;
-            // Тайминг до Bind: Reset wander читает sitMin/sitMax.
+            // Timing before Bind: wander Reset reads sitMin/sitMax.
             flock.sitMin = GetFloatArg("-sitMin", flock.sitMin);
             flock.sitMax = GetFloatArg("-sitMax", flock.sitMax);
             flock.flyMin = GetFloatArg("-flyMin", flock.flyMin);
@@ -563,7 +611,7 @@ public class HeadlessTrial : MonoBehaviour
         }
         else if (birdDriveKind == "wander" && count > 1 && driveEach)
         {
-            // Особь: свой BirdDrive и сид на каждую птицу (дороже shared flock Update).
+            // Per bird: its own BirdDrive and seed (costlier than a shared flock Update).
             float sitMin = GetFloatArg("-sitMin", 1.4f);
             float sitMax = GetFloatArg("-sitMax", 3.6f);
             float flyMin = GetFloatArg("-flyMin", 2.2f);
@@ -677,7 +725,53 @@ public class HeadlessTrial : MonoBehaviour
             plantRecorder.Sample(simulated);
             if (Time.realtimeSinceStartup > realDeadline)
             {
-                Debug.LogWarning("HeadlessTrial: превышен лимит реального времени, прогон прерван.");
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
+                break;
+            }
+        }
+
+        Finish(simulated, Time.realtimeSinceStartup - trialWallStart);
+    }
+
+    // Picture-only garden plants. No hinges. Default row is all 12 kinds.
+    private void BuildFlowerScene()
+    {
+        string kindRaw = GetStringArg("-flowerKind", "");
+        bool lockKind = !string.IsNullOrEmpty(kindRaw);
+        FlowerKind locked = lockKind ? PlantFlower.ParseKind(kindRaw) : FlowerKind.Rose;
+        int count = Mathf.Max(1, Mathf.RoundToInt(GetFloatArg("-flowerCount", lockKind ? 1f : 12f)));
+        float spacing = GetFloatArg("-flowerSpacing", 0.55f);
+        float originX = GetFloatArg("-flowerOffsetX", -3.3f);
+        trialFlowers = new PlantFlower[count];
+        int seed0 = Mathf.RoundToInt(GetFloatArg("-flowerSeed", 1f));
+        for (int i = 0; i < count; i++)
+        {
+            FlowerKind kind = lockKind ? locked : PlantFlower.KindFromIndex(i);
+            GameObject go = new GameObject("TrialFlower_" + (i + 1) + "_" + kind);
+            go.transform.position = new Vector2(originX + i * spacing, PlantFlower.RootY(-2f));
+            PlantFlower flower = (PlantFlower)go.AddComponent(PlantFlower.ComponentType(kind));
+            flower.kind = kind;
+            flower.seed = seed0 + i;
+            flower.BuildFlower();
+            trialFlowers[i] = flower;
+        }
+        flowerRecorder = new FlowerTrialRecorder(trialFlowers, runInfo);
+    }
+
+    private IEnumerator RunFlowerTrial()
+    {
+        if (flowerRecorder == null)
+            flowerRecorder = new FlowerTrialRecorder(trialFlowers, runInfo);
+        float trialWallStart = Time.realtimeSinceStartup;
+        float simulated = 0f;
+        float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
+        while (simulated < duration)
+        {
+            yield return FixedStep;
+            simulated += Time.fixedDeltaTime;
+            if (Time.realtimeSinceStartup > realDeadline)
+            {
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
                 break;
             }
         }
@@ -689,7 +783,7 @@ public class HeadlessTrial : MonoBehaviour
     {
         if (c == null)
         {
-            Debug.LogError("HeadlessTrial: BirdController не найден.");
+            Debug.LogError("HeadlessTrial: BirdController not found.");
             return;
         }
 
@@ -747,8 +841,8 @@ public class HeadlessTrial : MonoBehaviour
         target.lumbarFrictionMaxTorque = GetFloatArg("-lumbarFrictionCap", target.lumbarFrictionMaxTorque);
     }
 
-    // Переопределяет только те K, которые явно передали в CLI.
-    // Шея и голова делят одно поле neckFriction — отдельного флага для головы нет.
+    // Overrides only those K that were passed explicitly on the CLI.
+    // Neck and head share one neckFriction field — there is no separate head flag.
     private static void ApplyFrictionOverrides(Human target)
     {
         if (target == null) return;
@@ -758,10 +852,10 @@ public class HeadlessTrial : MonoBehaviour
         target.wristFriction = GetFloatArg("-wristFriction", target.wristFriction);
     }
 
-    // Момент мышц шеи и головы: абсолютное значение, после множителя -muscle.
-    // Одно поле на оба сустава, как и в Human. Нужен отдельным флагом, потому
-    // что при инерции 0.0015 кг·м² прежние 15 Н·м давали 9900 рад/с², и PD
-    // разворачивал сустав каждый шаг физики.
+    // Neck and head muscle torque: absolute value, after the -muscle multiplier.
+    // One field for both joints, same as in Human. It needs its own flag because
+    // at 0.0015 kg·m² inertia the old 15 N·m gave 9900 rad/s², and PD
+    // reversed the joint every physics step.
     private static void ApplyMuscleOverrides(Human target)
     {
         if (target == null) return;
@@ -772,7 +866,7 @@ public class HeadlessTrial : MonoBehaviour
     {
         if (balance == null)
         {
-            Debug.LogError("HeadlessTrial: BalanceController не найден на человеке.");
+            Debug.LogError("HeadlessTrial: BalanceController not found on the human.");
             return;
         }
 
@@ -795,6 +889,7 @@ public class HeadlessTrial : MonoBehaviour
         balance.recoveryCoMOffset = GetFloatArg("-recoveryOffset", balance.recoveryCoMOffset);
         balance.fallCoMOffset = GetFloatArg("-fallOffset", balance.fallCoMOffset);
         balance.crouchRatePerSecond = GetFloatArg("-crouchRate", balance.crouchRatePerSecond);
+        balance.crouchReleaseRatePerSecond = GetFloatArg("-crouchReleaseRate", balance.crouchReleaseRatePerSecond);
         balance.crouchKneeFlex = GetFloatArg("-crouchKnee", balance.crouchKneeFlex);
         balance.crouchHipFlex = GetFloatArg("-crouchHip", balance.crouchHipFlex);
         balance.crouchPelvisTilt = GetFloatArg("-crouchPelvis", balance.crouchPelvisTilt);
@@ -861,6 +956,34 @@ public class HeadlessTrial : MonoBehaviour
         balance.walkLiftUnloadBias = GetFloatArg("-walkLiftUnload", balance.walkLiftUnloadBias);
         balance.walkKneePeelMax = GetFloatArg("-walkKneePeel", balance.walkKneePeelMax);
         balance.walkStancePush = GetFloatArg("-walkStancePush", balance.walkStancePush);
+        balance.runStancePushScale = GetFloatArg("-runStancePushScale", balance.runStancePushScale);
+        balance.walkTargetSpeed = GetFloatArg("-walkTargetSpeed", balance.walkTargetSpeed);
+        balance.walkSpeedPushGain = GetFloatArg("-walkSpeedPushGain", balance.walkSpeedPushGain);
+        balance.walkSpeedPushMax = GetFloatArg("-walkSpeedPushMax", balance.walkSpeedPushMax);
+        balance.walkSpeedPushComGateScale = GetFloatArg("-walkSpeedPushComGateScale", balance.walkSpeedPushComGateScale);
+        balance.walkXCoMWeight = GetFloatArg("-walkXCoMWeight", balance.walkXCoMWeight);
+        balance.walkXCoMHeight = GetFloatArg("-walkXCoMHeight", balance.walkXCoMHeight);
+        balance.walkSpeedLeanGain = GetFloatArg("-walkSpeedLeanGain", balance.walkSpeedLeanGain);
+        balance.walkSpeedLeanMax = GetFloatArg("-walkSpeedLeanMax", balance.walkSpeedLeanMax);
+        balance.walkSpeedLeanTorsoScale = GetFloatArg("-walkSpeedLeanTorsoScale", balance.walkSpeedLeanTorsoScale);
+        balance.walkSpeedDriveGain = GetFloatArg("-walkSpeedDriveGain", balance.walkSpeedDriveGain);
+        balance.walkSpeedDriveMax = GetFloatArg("-walkSpeedDriveMax", balance.walkSpeedDriveMax);
+        balance.walkSpeedDriveStartLevel = GetFloatArg("-walkSpeedDriveStartLevel", balance.walkSpeedDriveStartLevel);
+        balance.walkSpeedSwingHipGain = GetFloatArg("-walkSpeedSwingHipGain", balance.walkSpeedSwingHipGain);
+        balance.walkSpeedSwingKneeGain = GetFloatArg("-walkSpeedSwingKneeGain", balance.walkSpeedSwingKneeGain);
+        balance.walkSpeedSwingFlexMax = GetFloatArg("-walkSpeedSwingFlexMax", balance.walkSpeedSwingFlexMax);
+        balance.walkSwingHipBoost = GetFloatArg("-walkSwingHipBoost", balance.walkSwingHipBoost);
+        balance.walkSwingKneeBoost = GetFloatArg("-walkSwingKneeBoost", balance.walkSwingKneeBoost);
+        balance.walkStepLength = GetFloatArg("-walkStepLength", balance.walkStepLength);
+        balance.walkStepLengthSpeedGain = GetFloatArg("-walkStepLengthSpeedGain", balance.walkStepLengthSpeedGain);
+        balance.walkStepPlacementGain = GetFloatArg("-walkStepPlacementGain", balance.walkStepPlacementGain);
+        balance.walkStepPlacementMax = GetFloatArg("-walkStepPlacementMax", balance.walkStepPlacementMax);
+        balance.walkStepPlacementGroundFraction = GetFloatArg("-walkStepPlacementGroundFraction", balance.walkStepPlacementGroundFraction);
+        balance.walkPlacementSyncStart = GetFloatArg("-walkPlacementSyncStart", balance.walkPlacementSyncStart);
+        balance.walkTouchdownSyncClearance = GetFloatArg("-walkTouchdownSyncClearance", balance.walkTouchdownSyncClearance);
+        balance.walkStanceKneeBend = GetFloatArg("-walkStanceKneeBend", balance.walkStanceKneeBend);
+        balance.walkForwardPelvisLean = GetFloatArg("-walkForwardPelvisLean", balance.walkForwardPelvisLean);
+        balance.walkForwardTorsoLean = GetFloatArg("-walkForwardTorsoLean", balance.walkForwardTorsoLean);
         balance.walkStanceExtend = GetFloatArg("-walkStanceExtend", balance.walkStanceExtend);
         balance.walkComLeadX = GetFloatArg("-walkComLead", balance.walkComLeadX);
         balance.walkSwingScissorLevel = GetFloatArg("-walkSwingScissor", balance.walkSwingScissorLevel);
@@ -873,18 +996,25 @@ public class HeadlessTrial : MonoBehaviour
         balance.walkArmShoulderSwing = GetFloatArg("-walkArmShoulder", balance.walkArmShoulderSwing);
         balance.walkArmElbowSwing = GetFloatArg("-walkArmElbow", balance.walkArmElbowSwing);
         balance.walkArmTransferCarry = GetFloatArg("-walkArmTransfer", balance.walkArmTransferCarry);
+        balance.walkArmBalanceShoulderGain = GetFloatArg("-walkArmBalanceShoulderGain", balance.walkArmBalanceShoulderGain);
+        balance.walkArmBalanceElbowGain = GetFloatArg("-walkArmBalanceElbowGain", balance.walkArmBalanceElbowGain);
+        balance.walkLatePushGain = GetFloatArg("-walkLatePushGain", balance.walkLatePushGain);
+        balance.walkLatePushStart = GetFloatArg("-walkLatePushStart", balance.walkLatePushStart);
+        balance.walkLatePushMax = GetFloatArg("-walkLatePushMax", balance.walkLatePushMax);
+        balance.walkLatePushNeedsAir = GetFloatArg("-walkLatePushNeedsAir", balance.walkLatePushNeedsAir ? 1f : 0f) > 0.5f;
+        balance.walkLatePushNeedsTouchdownWindow = GetFloatArg("-walkLatePushNeedsTouchdownWindow", balance.walkLatePushNeedsTouchdownWindow ? 1f : 0f) > 0.5f;
         balance.standLegRatePerSecond = GetFloatArg("-standLegRate", balance.standLegRatePerSecond);
         balance.standLegReleaseRatePerSecond = GetFloatArg("-standLegReleaseRate", balance.standLegReleaseRatePerSecond);
 
-        // Скорость, с которой активация мышцы догоняет команду регулятора.
-        // 500 — почти мгновенно; 10 — мышца набирает силу за ~0.1 с.
+        // Speed at which muscle activation catches the controller command.
+        // 500 — almost instant; 10 — the muscle rises in ~0.1 s.
         balance.muscleActivationSpeed = GetFloatArg("-activationSpeed", balance.muscleActivationSpeed);
     }
 
-    // ─── САМ ПРОГОН: ШАГАЕМ ФИЗИКОЙ И СНИМАЕМ СОСТОЯНИЕ ───
+    // ─── THE RUN ITSELF: STEP PHYSICS AND SAMPLE STATE ───
     private IEnumerator RunTrial()
     {
-        // Первый шаг пропускаем: на нём тело ещё оседает в суставах.
+        // Skip the first step: the body is still settling in the joints.
         yield return FixedStep;
 
         if (spawnDog)
@@ -896,6 +1026,12 @@ public class HeadlessTrial : MonoBehaviour
         if (spawnBird)
         {
             yield return RunBirdTrial();
+            yield break;
+        }
+
+        if (spawnFlower && !spawnTree)
+        {
+            yield return RunFlowerTrial();
             yield break;
         }
 
@@ -942,7 +1078,7 @@ public class HeadlessTrial : MonoBehaviour
 
             if (Time.realtimeSinceStartup > realDeadline)
             {
-                Debug.LogWarning("HeadlessTrial: превышен лимит реального времени, прогон прерван.");
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
                 break;
             }
         }
@@ -959,6 +1095,7 @@ public class HeadlessTrial : MonoBehaviour
         float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
         bool pushed = false;
         bool leaped = false;
+        bool walked = false;
 
         while (simulated < duration)
         {
@@ -978,11 +1115,18 @@ public class HeadlessTrial : MonoBehaviour
                 leaped = true;
             }
 
+            if (!walked && dogWalk && simulated >= dogWalkTime)
+            {
+                if (dog != null && dog.stance != null)
+                    dog.stance.Walk();
+                walked = true;
+            }
+
             dogRecorder.Sample(simulated);
 
             if (Time.realtimeSinceStartup > realDeadline)
             {
-                Debug.LogWarning("HeadlessTrial: превышен лимит реального времени, прогон прерван.");
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
                 break;
             }
         }
@@ -1010,7 +1154,7 @@ public class HeadlessTrial : MonoBehaviour
             if (!flapStopped && stopFlapTime > 0.01f && simulated >= stopFlapTime
                 && bird != null && bird.controller != null)
             {
-                // Без маха не зависает: планирует и садится. Камнем — stand.
+                // Without a flap it does not hover: it glides and lands. Stone drop — stand.
                 bird.controller.mode = stopFlapMode == "stand" ? BirdMode.Stand : BirdMode.Glide;
                 bird.controller.takeoffDelay = 0f;
                 flapStopped = true;
@@ -1028,7 +1172,7 @@ public class HeadlessTrial : MonoBehaviour
 
             if (Time.realtimeSinceStartup > realDeadline)
             {
-                Debug.LogWarning("HeadlessTrial: превышен лимит реального времени, прогон прерван.");
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
                 break;
             }
         }
@@ -1036,12 +1180,12 @@ public class HeadlessTrial : MonoBehaviour
         Finish(simulated, Time.realtimeSinceStartup - trialWallStart);
     }
 
-    // Импульс прикладываем к торсу: так толкают человека в плечо, а не в стопу.
+    // Apply the impulse to the torso: that is a shove at the shoulder, not the foot.
     private void ApplyPush(float time)
     {
         if (torsoBody == null)
         {
-            Debug.LogWarning("HeadlessTrial: торс не найден, толчок не применён.");
+            Debug.LogWarning("HeadlessTrial: torso not found, push not applied.");
             return;
         }
 
@@ -1052,8 +1196,8 @@ public class HeadlessTrial : MonoBehaviour
             dogRecorder.MarkPush(time, pushImpulse);
     }
 
-    // Каждое окно удержания выставляем заново: если PlayerInputSource
-    // вдруг оживёт, он не сотрёт сценарий одним кадром.
+    // Rewrite each hold window every step: if PlayerInputSource
+    // suddenly wakes, it cannot erase the script in one frame.
     private void UpdateCrouchIntent(float time, ref bool marked, ref bool released)
     {
         if (intent == null) return;
@@ -1073,7 +1217,7 @@ public class HeadlessTrial : MonoBehaviour
         }
     }
 
-    // Наклон через MotionIntent: +1 вперёд, −1 назад (как стрелки в Play).
+    // Lean via MotionIntent: +1 forward, −1 back (same as the Play arrows).
     private void UpdateLeanIntent(float time, ref bool marked, ref bool released)
     {
         if (intent == null) return;
@@ -1088,8 +1232,8 @@ public class HeadlessTrial : MonoBehaviour
             released = true;
     }
 
-    // Чередование standLeg по таймеру: обе опоры до walkTime, потом ±1 каждые walkStance.
-    // -run 1 в окне runTime…runHold ставит intent.run (короче Stance).
+    // Timed standLeg swap: both supports until walkTime, then ±1 every walkStance.
+    // -run 1 in the runTime…runHold window sets intent.run (shorter Stance).
     private void UpdateWalkIntent(float time)
     {
         if (intent == null || stepDriver == null) return;
@@ -1120,8 +1264,13 @@ public class HeadlessTrial : MonoBehaviour
         stepDriver.stanceHeelAirMin = walkHeelAirMin;
         stepDriver.stanceComTrigger = walkComTrigger;
         stepDriver.stanceComMinAge = walkComTriggerMinAge;
+        stepDriver.stanceComTriggerPerSpeed = walkComTriggerPerSpeed;
+        stepDriver.walkCadenceStanceGain = walkCadenceStanceGain;
+        stepDriver.walkCadenceMinStance = walkCadenceMinStance;
         stepDriver.transferMaxDuration = walkTransferMaxDuration;
         stepDriver.transferMinDuration = walkTransferMinDuration;
+        stepDriver.walkCadenceTransferGain = walkCadenceTransferGain;
+        stepDriver.walkCadenceMinTransfer = walkCadenceMinTransfer;
         stepDriver.transferComOffsetMax = walkTransferComMax;
         stepDriver.transferFallbackComMax = walkTransferFallbackComMax;
         stepDriver.transferStandLegLevelMax = walkTransferLevelMax;
@@ -1129,8 +1278,8 @@ public class HeadlessTrial : MonoBehaviour
         stepDriver.Tick(time);
     }
 
-    // left / −1 — опора слева, right / +1 — справа, 0 / both — обе ноги.
-    // Строка, не float: иначе «left» молча падает в дефолт, как запятая в числе.
+    // left / −1 — left support, right / +1 — right, 0 / both — both feet.
+    // A string, not a float: otherwise “left” silently falls back to the default, like a comma in a number.
     private void UpdateStandLegIntent(float time, ref bool marked, ref bool released)
     {
         if (intent == null) return;
@@ -1167,7 +1316,7 @@ public class HeadlessTrial : MonoBehaviour
             return 0f;
         }
 
-        Debug.LogWarning($"HeadlessTrial: не разобрал -standLeg={raw}, беру 0 (обе ноги).");
+        Debug.LogWarning($"HeadlessTrial: could not parse -standLeg={raw}, using 0 (both feet).");
         return 0f;
     }
 
@@ -1196,6 +1345,11 @@ public class HeadlessTrial : MonoBehaviour
                 File.WriteAllText(csvPath, "t\n");
                 summary = plantRecorder.BuildSummaryJson(simulated, wallSeconds);
             }
+            else if (spawnFlower)
+            {
+                File.WriteAllText(csvPath, "t\n");
+                summary = flowerRecorder.BuildSummaryJson(simulated, wallSeconds);
+            }
             else
             {
                 File.WriteAllText(csvPath, recorder.BuildCsv());
@@ -1203,13 +1357,13 @@ public class HeadlessTrial : MonoBehaviour
             }
             File.WriteAllText(Path.Combine(outputFolder, label + ".json"), summary);
 
-            // Маркер в stdout, чтобы результат читался прямо из лога прогона.
+            // Marker in stdout so the result can be read straight from the run log.
             Debug.Log("TRIAL_SUMMARY " + summary);
             Debug.Log("TRIAL_CSV " + csvPath);
         }
         catch (Exception e)
         {
-            Debug.LogError("HeadlessTrial: не удалось записать результаты: " + e.Message);
+            Debug.LogError("HeadlessTrial: failed to write results: " + e.Message);
             Application.Quit(2);
             return;
         }
@@ -1321,7 +1475,7 @@ public class HeadlessTrial : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogWarning("HeadlessTrial: не прочитал build-manifest: " + e.Message);
+            Debug.LogWarning("HeadlessTrial: failed to read build-manifest: " + e.Message);
             return null;
         }
     }
@@ -1364,7 +1518,7 @@ public class HeadlessTrial : MonoBehaviour
         return Path.Combine(Directory.GetCurrentDirectory(), "trials");
     }
 
-    // ─── ЧТЕНИЕ АРГУМЕНТОВ КОМАНДНОЙ СТРОКИ ───
+    // ─── COMMAND-LINE ARGUMENT PARSING ───
     private static string GetStringArg(string name, string fallback)
     {
         string[] args = Environment.GetCommandLineArgs();
@@ -1383,12 +1537,12 @@ public class HeadlessTrial : MonoBehaviour
         string raw = GetStringArg(name, null);
         if (string.IsNullOrEmpty(raw)) return fallback;
 
-        // Инвариантная культура обязательна: на русской локали запятая
-        // и точка разбираются иначе, и параметры молча съезжают.
+        // Invariant culture is required: on a Russian locale comma
+        // and dot parse differently, and parameters silently slip.
         if (float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
             return value;
 
-        Debug.LogWarning($"HeadlessTrial: не разобрал {name}={raw}, беру {fallback}.");
+        Debug.LogWarning($"HeadlessTrial: could not parse {name}={raw}, using {fallback}.");
         return fallback;
     }
 }
