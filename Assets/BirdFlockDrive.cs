@@ -34,6 +34,10 @@ public class BirdFlockDrive : MonoBehaviour
     [Tooltip("Keep Fly this long after see/hear, s.")]
     public float alertHold = 2.2f;
 
+    [Header("Life")]
+    public float ownStrength = 1f;
+    public float threatStrength = 2f;
+
     public int MemberCount { get; private set; }
     public int TakeoffCount { get; private set; }
     public int WalkCount { get; private set; }
@@ -43,6 +47,8 @@ public class BirdFlockDrive : MonoBehaviour
     public int PerchLandCount { get; private set; }
     public int DirtRejectCount { get; private set; }
     public int CryCount { get; private set; }
+    public int LifeSwitchCount { get; private set; }
+    public LifeState Life { get; private set; } = LifeState.Forage;
 
     private struct Member
     {
@@ -56,6 +62,7 @@ public class BirdFlockDrive : MonoBehaviour
         public float perchX;
         public bool hasPerch;
         public float alertUntil;
+        public LifeState life;
     }
 
     private Member[] members;
@@ -77,6 +84,8 @@ public class BirdFlockDrive : MonoBehaviour
 
         members = new Member[birds.Length];
         MemberCount = birds.Length;
+        LifeSwitchCount = 0;
+        Life = LifeState.Forage;
         float now = Time.time;
         for (int i = 0; i < birds.Length; i++)
         {
@@ -123,7 +132,8 @@ public class BirdFlockDrive : MonoBehaviour
                 wander = wander,
                 chicken = hen,
                 voice = voice,
-                homeX = body != null ? body.position.x : bird.transform.position.x
+                homeX = body != null ? body.position.x : bird.transform.position.x,
+                life = LifeState.Forage
             };
         }
 
@@ -185,6 +195,8 @@ public class BirdFlockDrive : MonoBehaviour
         int perchLands = 0;
         int dirt = 0;
         int cries = 0;
+        int switches = LifeSwitchCount;
+        LifeState firstLife = Life;
         for (int i = 0; i < members.Length; i++)
         {
             // Без копии struct — иначе лишняя работа на N особях каждый кадр.
@@ -201,8 +213,19 @@ public class BirdFlockDrive : MonoBehaviour
             Vector2 pos = body != null
                 ? body.position
                 : new Vector2(members[i].homeX, 0f);
-            if (TickAlarm(i, control, members[i].voice, pos, now, heardCount))
+            LifeState next = ChooseMemberLife(i, control, members[i].voice, pos, now, heardCount);
+            if (next != members[i].life)
             {
+                members[i].life = next;
+                switches++;
+            }
+
+            if (i == 0)
+                firstLife = members[i].life;
+
+            if (members[i].life == LifeState.Flee)
+            {
+                TickFlee(i, control, members[i].voice, pos, now, heardCount);
                 if (members[i].voice != null)
                     cries += members[i].voice.CryCount;
                 continue;
@@ -255,9 +278,11 @@ public class BirdFlockDrive : MonoBehaviour
         PerchLandCount = perchLands;
         DirtRejectCount = dirt;
         CryCount = cries;
+        LifeSwitchCount = switches;
+        Life = firstLife;
     }
 
-    private bool TickAlarm(
+    private LifeState ChooseMemberLife(
         int i,
         BirdController control,
         OrganismVoice voice,
@@ -265,32 +290,42 @@ public class BirdFlockDrive : MonoBehaviour
         float now,
         int heardCount)
     {
-        if (voice == null || control == null)
-            return false;
+        float dx;
+        bool saw = threat != null && control != null && OrganismAlert.SeesAhead(
+            pos.x, control.FacingSign(), threat.position.x, threatRange, 0.12f, out dx);
+        bool heard = voice != null && OrganismAlert.HearsForeignAlarm(
+            voice.SourceId, pos, heardBuf, heardCount);
+        bool stronger = saw && OrganismLife.HostileIsStronger(ownStrength, threatStrength);
+        return OrganismLife.ChooseWake(stronger, false, heard, now < members[i].alertUntil);
+    }
+
+    private void TickFlee(
+        int i,
+        BirdController control,
+        OrganismVoice voice,
+        Vector2 pos,
+        float now,
+        int heardCount)
+    {
+        if (control == null)
+            return;
 
         float dx = 0f;
         bool saw = threat != null && OrganismAlert.SeesAhead(
             pos.x, control.FacingSign(), threat.position.x, threatRange, 0.12f, out dx);
-        bool heard = OrganismAlert.HearsForeignAlarm(
+        bool heard = voice != null && OrganismAlert.HearsForeignAlarm(
             voice.SourceId, pos, heardBuf, heardCount);
 
         if (saw)
         {
-            voice.Cry(VoiceKind.Alarm);
+            if (voice != null)
+                voice.Cry(VoiceKind.Alarm);
             control.SetFacing(dx > 0f ? -1f : 1f);
             members[i].alertUntil = now + alertHold;
-            control.mode = members[i].chicken != null ? BirdMode.Walk : BirdMode.Fly;
-            return true;
         }
+        else if (heard)
+            members[i].alertUntil = now + alertHold;
 
-        if (heard || now < members[i].alertUntil)
-        {
-            if (heard)
-                members[i].alertUntil = now + alertHold;
-            control.mode = members[i].chicken != null ? BirdMode.Walk : BirdMode.Fly;
-            return true;
-        }
-
-        return false;
+        control.mode = members[i].chicken != null ? BirdMode.Walk : BirdMode.Fly;
     }
 }

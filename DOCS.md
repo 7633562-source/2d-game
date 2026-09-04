@@ -23,12 +23,16 @@ folder (same as GPU-10). Night report: `Trials/Runs/docs_daily/` and
 | What each agent may optimize | `Trials/Runs/opt_agent_proposals.md` | cutting 200 Hz, retuning PD |
 | Latest optimization verification | `Trials/Runs/opt_code_audit_31.md` | invalid Flat cycles 31/32 |
 | Bird Flock capacity | `Trials/Runs/perf_bird_flock_01.md` | ragdoll birds, empty callback candidate |
+| Bird code audit | `Trials/Runs/opt_bird_code_02.md` | cutting flap rate, ragdoll flock of 50 |
 | Torque signs | `.cursor/rules/balance-actuators.mdc` | guessing from the angle sum |
 | Agent roster | `.cursor/ROSTER.md`, `AGENTS.md` | college in `~/.cursor/agents/` |
 | Brains | `.cursor/rules/ai.mdc` | forces, PD, `BirdFlight` |
+| Life state (every brain) | `ai.mdc` + `LifeState` / `OrganismLife` (card `BIRD-10-life`) | `BirdMode`, Sit as Sleep |
+| Factions | `ai.mdc` + `FactionMember` / `FactionTable` (card `FACTION-1`) | species as a side, stamp in `FixedUpdate` |
 | Voice | `OrganismVoice` / `SoundBus` (card `BIRD-6-voice`) | mixer as ears |
 | Beak | `Beak` segment + `BeakStrike` (card `BIRD-8-beak`) | chest / wing hit |
 | Tree sit | `BirdPerch` pads, wood ghost (`BIRD-9-tree-ghost`) | landing on trunk colliders |
+| Static grove | `Trials/Runs/plant_static_cheap_02.md` | Sway hinges in World, wood RB on grove |
 | Dog stance | `.cursor/rules/dog-physics.mdc`, `Trials/Runs/dog_cycles.md` | human `BalanceController` |
 | Dog look | `Assets/Resources/Art/Dog/`, card `VIS-DOG-textures` | dog sizes / stance gains |
 | Bird look | `Art/Crow/`, `Art/Chicken/`, card `VIS-BIRD-textures` | `BirdFlight` / `BirdKind` sizes |

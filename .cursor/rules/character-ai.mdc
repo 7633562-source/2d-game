@@ -14,8 +14,10 @@ The brain decides **what** the human wants. Balance is `BalanceController`.
 Torques come only from `Muscle` and `JointFriction`.
 
 The human is a `LivingOrganism`, a **sibling** of Bird, not its child.
-Vision and hearing: `.cursor/rules/ai.mdc` (**See and hear**). Do not use
-`VestibularSystem` as eyes or `CameraFollow` as sight.
+Vision and hearing: `.cursor/rules/ai.mdc` (**See and hear**). Life state
+(`Sleep` / `Wake` and Wake kinds): the same file (**Life state**).
+`MotionIntent` is how Wake is asked of the body, not a second tree.
+Do not use `VestibularSystem` as eyes or `CameraFollow` as sight.
 
 Factions: read `.cursor/rules/ai.mdc` (Factions, Attitude). This file
 does not invent a second law. The human brain reads `FactionMember` /

@@ -25,20 +25,21 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 | physics | deep crouch WIP intentionally leaves code defaults 98/28 after `crouch_accept`; accepted journal remains 55/12 until the physics work closes | HumanPhysics continuation |
 | visual | code hand is `0.06×0.32`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/VIS-HAND.md` |
 | docs | pointers and baselines; do not clean Runs | `DOCS.md` |
-| optimization | P1 + safe P2/P3 closed; World cycle 39 known work 0.414 ms. PERF-5 Flock 1/2/5/10/50 wallPerSim 0.51/0.55/0.73/0.96/1.00; empty callback candidate 0%, reverted | `.cursor/tasks/PERF-1-optimization.md`; archives `PERF-4-runtime-cache-cleanup.md`, `PERF-5-bird-flock.md` |
-| level | Test1 Sol: tape to 96, curb faces, back fence picture; grove Xs unchanged | no new card |
-| bird | BIRD-9 tree1 accepted: `perchLandCount` 5, `fell` false; wood ghost and `BirdPerch` pads; 50-bird shared-perch stress is not the one-bird acceptance | `BIRD-9-tree-ghost.md`; `perf_bird_flock_01.md` |
-| plant | five kinds (oak canon); Tree scene row of 5; hold still oak | `.cursor/tasks/PLANT-1-tree.md` |
+| optimization | P1 + P2/P3 + PERF-5 closed. Bird code audit 02.09: flock N=50 is the 200 Hz solver edge; ragdoll 1 bird is 17 RB / 32 muscles — stand only, no new 10% candidate | `opt_bird_code_02.md`; archive `PERF-5-bird-flock.md` |
+| level | Test1 yard: gate Static trees + World flock 6 / hens 10 / dogs 3; `treeCount` 0 | no new card |
+| bird | BIRD-9 tree1 accepted. Opt 02.09: flock 50 is the 200 Hz edge; ragdoll 17 RB stand-only; perch `probeSat` 0 — no `GetContacts` | `opt_bird_code_02.md`; `BIRD-9-tree-ghost.md` |
+| plant | PLANT-2 accepted. Pass 03.09: Static skips hold/sync; perch slots cached; leaves are sprites not `HumanSegment` | `plant_static_cheap_02.md`; archive `PLANT-2-static-cheap.md`; `PLANT-1-tree.md` |
 | visual | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/VIS-TREE.md` |
 | visual | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/VIS-DOG-textures.md` |
 | visual | crow / chicken parts in `Art/Crow` and `Art/Chicken` | `.cursor/tasks/VIS-BIRD-textures.md` |
-| ai | BIRD-9 perch pads + wood ghost; hen Peck / voice still stand | `BIRD-9-tree-ghost.md` |
-| dog | 10 stand cycles done — wiring yes, stance no (`dog_cycles.md`); CPU×3 next | `.cursor/tasks/DOG-1-physics.md` |
+| ai | Factions at spawn: Player / Wildlife.Wolf / Wildlife.Bird. Wolf↔Bird Hostile | `FACTION-1.md` |
+| dog | DOG-2 c53–c62 done. Leftover: rake −25/+25, `startupHipP` 8 / 0.25 s. `dog_c59_stand` drop **0.193**, `fourFeet` 0.992 — still a sit, not ~0.01 | `.cursor/tasks/DOG-2-stance-10.md` |
 
 ## Closed — do not open
 
 Forces in `Update`, 100/50 Hz in prod, merge pelvis+torso, amputate arms,
 SIMBICON, retune PD for FPS. PERF-2: keep 200 Hz (`perf_wave2_timestep.json`).
+Wood `Rigidbody2D` / wood collider on `TreeRig.Static` (PLANT-2).
 
 ## Automations
 

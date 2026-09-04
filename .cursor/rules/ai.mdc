@@ -26,10 +26,77 @@ LivingOrganism
 ```
 
 Every `LivingOrganism` has **vision** and **hearing** — see **See and hear**.
-The brain reads those plus faction, then writes **what** the creature wants.
+Every one also has a **life state** — see **Life state**. The brain reads
+senses plus faction plus life state, then writes **what** the creature wants.
 Balance, takeoff, and joint pose belong to control and actuators. Torques
 come only from `Muscle` / `JointFriction`. Bird lift comes only from
 `BirdFlight` (the flap). There is no invisible upward force.
+
+## Life state
+
+This concept is **forming**. It is the shared mind of every intelligent
+living object: bird, human, dog, later kinds. A species does not invent
+its own root tree. Body pose is not life state.
+
+A living object is always in exactly one life state:
+
+```
+Sleep
+Wake
+  Flee        — run from a threat
+  Pursue      — chase prey or an enemy
+  Forage      — search for food
+  (later kinds — add them here first)
+```
+
+`Sleep` and `Wake` belong to **all** living intelligent objects.
+`Wake` kinds are also shared. A hen, a crow, a dog, and a human all
+flee, pursue, or forage; they do not each get a private root.
+
+Ordinary waking is `Forage` (search for food). That is the default
+life of a bird. `Forage` may switch:
+
+| Sees / hears | Then |
+|---|---|
+| Hostile of an enemy faction, **stronger** than self | `Flee` |
+| Hostile of an enemy faction, **weaker** than self | `Pursue` (attack) |
+| Foreign `Alarm`, does not see | `Flee` |
+| Nothing hostile | stay / return to `Forage` |
+
+Faction labels on the level come later. v1 stand-in (card `BIRD-10-life`):
+`BirdThreat` = stronger hostile, `BirdPrey` = weaker. Same compare:
+`OrganismLife.HostileIsStronger`. Do not invent a species-only peer of
+`Sleep` (`DogJumpBite`, `BirdStoop` as a life root). Those are how a
+body fulfills `Wake / Pursue`.
+
+Life state is **why**. Intent and body mode are **how**:
+
+| Life | Not the same as | Body may fulfill it with |
+|---|---|---|
+| `Sleep` | `Sit`, `Stand`, a limp ragdoll | sit / later a sleep pose; no hunt |
+| `Wake / Flee` | `BirdMode.Fly`, `moveX` | bird: `Cry` then `Fly` or Walk away; human: `moveX` away |
+| `Wake / Pursue` | `Attack`, a jump-bite | bird: `Attack`; dog: later muscle jump; human: `moveX` toward |
+| `Wake / Forage` | `Peck`, `Walk` | hen: Walk / Peck; crow: wander / Peck |
+
+```csharp
+// ❌ Sit is not Sleep; Fly is not Flee
+life = BirdMode.Sit;
+
+// ❌ a species root beside Sleep
+life = DogJumpBite;
+
+// ✅ one shared tree; the species writes only intent
+// life = Wake / Flee;
+control.mode = BirdMode.Fly;
+```
+
+Shared type: `LifeState` + `OrganismLife.ChooseWake` (card `BIRD-10-life`).
+The brain holds one `Life`, then writes only intent. Do not invent
+`FactionMember` / `Vision` / a god brain without a new card. New Wake
+kinds are named in this table before they appear in code.
+
+The player (index 0) is a `LivingOrganism`. Keyboard is not a life
+automaton until a card says so.
 
 ## What a brain may write
 
@@ -57,27 +124,44 @@ intent.moveX = 1f;
 
 ## Factions
 
-Every character belongs to a faction: human, bird, future species.
-Species is not a side. An allied human and an allied bird may share one
-faction. The player (index 0) is one faction; a `Flock` is another, or
-several flocks are several factions.
+Faction is **data**, written when the body is created (card `FACTION-1`).
+It is not a species and not an actuator. Species is the ragdoll; faction
+is the side. An allied human and an allied bird may share one faction.
 
-Working names (not lore): `Player`, `Wildlife`. Lore names do not block
-the layer.
+```
+1  Player          — one member: human index 0
+2  Wildlife
+     Wolf          — Dog body (wolf subfaction)
+     Bird          — crow, hen, flock
+```
 
-Faction is **data**, not an actuator. When a card exists:
+Working names, not lore. New factions and subfactions are named here
+before they appear in code.
 
-- `FactionMember` — label on the body (human and bird).
-- `FactionTable` — pair of factions → `Ally` / `Neutral` / `Hostile`.
-  Spawn or scenario writes the table. Every brain **reads** it.
-  Do not hard-code “bird fears human” inside `BirdController`.
+Stamp at spawn (`FactionStamp` in `GameProcess` / `HeadlessTrial`), not
+in `FixedUpdate`. `FactionMember` lives on the body root. Trees have no
+faction. Extra lab humans (`i > 0`) stay unlabeled until a card.
+
+`FactionTable.Rel` is the only relation. Every brain **reads** it.
+Do not hard-code “bird fears wolf” or “bird fears human” inside
+`BirdController`.
+
+| Pair | Stance |
+|---|---|
+| Player — Player | `Ally` |
+| same Wildlife subfaction | `Ally` |
+| Wildlife.Wolf — Wildlife.Bird | `Hostile` |
+| Player — Wildlife (any) | `Neutral` until a later card |
+
+Hostility between Wolf and Bird is a **subfaction** feud inside Wildlife,
+not two root factions. `Hostile` still means life `Flee` or `Pursue`
+(strength), not a force.
 
 Do not put faction inside `BalanceController`, `BirdFlight`, or
-`BirdSensors`. Do not add `AddForce` here. Do not invent `FactionMember`
-or a brain without a `.cursor/tasks/` card.
+`BirdSensors`. Do not `AddForce` here. Do not invent `Vision` that
+scans members without a card. v1 bird life still uses markers.
 
-The shared table is not a brain. One brain still owns one species.
-No god object that writes both human and bird intent.
+The table is not a brain. One brain still owns one species.
 
 ## Attitude
 
@@ -150,14 +234,14 @@ You can **hear** a Hostile you cannot see (behind you, or behind dirt).
 
 ### What the brain does with it
 
-| Knows | Then (first attitude) |
-|---|---|
-| Sees Hostile / prey close and high enough | `Attack` (stoop, no hit) — prey marker only |
-| Sees threat / Hostile far | `Cry(Alarm)`, then `Fly` away (not `Attack`) |
-| Hears `Alarm` / Hostile, does not see | `Fly` (alert). Do not cry unless also seen |
-| Sees Ally | stay / walk / fly with |
-| Grounded, no prey ahead, or just landed | `Sit` |
-| Only Neutral | keep current intent |
+| Knows | Life | Then (body) |
+|---|---|---|
+| Sees weaker Hostile / prey close and high enough | `Pursue` | `Attack` (stoop) |
+| Sees stronger Hostile / threat | `Flee` | `Cry(Alarm)`, then `Fly` (hen: Walk) |
+| Hears `Alarm`, does not see | `Flee` | `Fly` / Walk. Do not cry unless also seen |
+| Sees Ally | `Forage` | stay / walk / fly with |
+| Grounded, no hostile, or just landed | `Forage` | wander / Sit / Peck |
+| Only Neutral | `Forage` | keep current forage |
 
 A flock shares one cheap scan — not a Linecast per bird at 200 Hz.
 Cap the seen/heard lists. Ranges are public fields, not a hard-coded fear.

@@ -16,6 +16,8 @@ public class BirdTrialRecorder
     private readonly TrialRunInfo info;
     private readonly BirdSensors sensors;
     private readonly BirdController control;
+    private readonly BirdDrive drive;
+    private readonly BirdFlockDrive flockDrive;
     private readonly Transform body;
 
     private readonly StringBuilder rows = new StringBuilder();
@@ -51,6 +53,9 @@ public class BirdTrialRecorder
     private int samplesFly;
     private int samplesGlide;
     private int samplesPeck;
+    private int samplesForage;
+    private int samplesFlee;
+    private int samplesPursue;
     private int lastFacingSign = 1;
     private bool enteredFlight;
 
@@ -60,6 +65,8 @@ public class BirdTrialRecorder
         this.info = info;
         sensors = bird != null ? bird.sensors : null;
         control = bird != null ? bird.controller : null;
+        drive = bird != null ? bird.GetComponent<BirdDrive>() : null;
+        flockDrive = UnityEngine.Object.FindFirstObjectByType<BirdFlockDrive>();
         Transform bodyT = bird != null ? bird.transform.Find("Body") : null;
         body = bodyT;
 
@@ -111,6 +118,12 @@ public class BirdTrialRecorder
         else if (mode == (int)BirdMode.Fly) samplesFly++;
         else if (mode == (int)BirdMode.Glide) samplesGlide++;
         else if (mode == (int)BirdMode.Peck) samplesPeck++;
+        LifeState life = drive != null
+            ? drive.Life
+            : flockDrive != null ? flockDrive.Life : LifeState.Forage;
+        if (life == LifeState.Forage) samplesForage++;
+        else if (life == LifeState.Flee) samplesFlee++;
+        else if (life == LifeState.Pursue) samplesPursue++;
         if (mode == (int)BirdMode.Fly
             || mode == (int)BirdMode.Glide
             || mode == (int)BirdMode.Attack)
@@ -347,6 +360,15 @@ public class BirdTrialRecorder
                     cries += drives[i].CryCount;
             }
             json.Append(",\"cryCount\":").Append(cries.ToString(CultureInfo.InvariantCulture));
+            AppendStr(json, "life", drive.Life.ToString());
+            json.Append(",\"lifeSwitchCount\":").Append(drive.LifeSwitchCount.ToString(CultureInfo.InvariantCulture));
+            if (samples > 0)
+            {
+                float n = samples;
+                AppendNum(json, "lifeForageFraction", samplesForage / n);
+                AppendNum(json, "lifeFleeFraction", samplesFlee / n);
+                AppendNum(json, "lifePursueFraction", samplesPursue / n);
+            }
             json.Append(",\"hasThreat\":").Append(drive.threat != null ? "true" : "false");
             AppendNum(json, "threatRange", drive.threatRange);
             AppendNum(json, "glideLead", drive.glideLead);
@@ -370,6 +392,15 @@ public class BirdTrialRecorder
             json.Append(",\"perchLandCount\":").Append(flock.PerchLandCount.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"dirtRejectCount\":").Append(flock.DirtRejectCount.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"cryCount\":").Append(flock.CryCount.ToString(CultureInfo.InvariantCulture));
+            AppendStr(json, "life", flock.Life.ToString());
+            json.Append(",\"lifeSwitchCount\":").Append(flock.LifeSwitchCount.ToString(CultureInfo.InvariantCulture));
+            if (samples > 0)
+            {
+                float n = samples;
+                AppendNum(json, "lifeForageFraction", samplesForage / n);
+                AppendNum(json, "lifeFleeFraction", samplesFlee / n);
+                AppendNum(json, "lifePursueFraction", samplesPursue / n);
+            }
             json.Append(",\"hasThreat\":").Append(flock.threat != null ? "true" : "false");
             AppendNum(json, "threatRange", flock.threatRange);
             AppendNum(json, "glideLead", flock.glideLead);
@@ -457,5 +488,17 @@ public class BirdTrialRecorder
     {
         json.Append(",\"").Append(key).Append("\":");
         json.Append(value.ToString("G9", CultureInfo.InvariantCulture));
+    }
+
+    private void AppendLife(StringBuilder json, LifeState life, int switches)
+    {
+        AppendStr(json, "life", life.ToString());
+        json.Append(",\"lifeSwitchCount\":").Append(switches.ToString(CultureInfo.InvariantCulture));
+        if (samples <= 0)
+            return;
+        float n = samples;
+        AppendNum(json, "lifeForageFraction", samplesForage / n);
+        AppendNum(json, "lifeFleeFraction", samplesFlee / n);
+        AppendNum(json, "lifePursueFraction", samplesPursue / n);
     }
 }

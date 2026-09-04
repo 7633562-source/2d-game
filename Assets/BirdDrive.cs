@@ -55,6 +55,17 @@ public class BirdDrive : MonoBehaviour
     [Tooltip("Keep Fly this long after see/hear, s.")]
     public float alertHold = 2.2f;
 
+    [Header("Life")]
+    [Tooltip("Self vs hostile. Stronger other → Flee; weaker → Pursue.")]
+    public float ownStrength = 1f;
+    [Tooltip("v1 stand-in until FactionMember. Threat marker strength.")]
+    public float threatStrength = 2f;
+    [Tooltip("v1 stand-in until FactionMember. Prey marker strength.")]
+    public float preyStrength = 0.5f;
+
+    public LifeState Life { get; private set; } = LifeState.Forage;
+    public int LifeSwitchCount { get; private set; }
+
     public int TakeoffCount => wander != null ? wander.takeoffCount : 0;
     public int WalkCount => chicken != null ? chicken.walkCount : 0;
     public int PeckCount => chicken != null ? chicken.peckCount : 0;
@@ -137,9 +148,44 @@ public class BirdDrive : MonoBehaviour
     {
         if (HeadlessTrial.Active && !allowHeadless) return;
         if (control == null || sensors == null) return;
-        if (TryAlarm())
-            return;
 
+        EnterLife(ChooseLife());
+        if (Life == LifeState.Flee)
+            TickFlee();
+        else if (Life == LifeState.Pursue)
+            TickPrey();
+        else if (Life == LifeState.Sleep)
+            WriteSleepBody();
+        else
+            TickForage();
+    }
+
+    private void EnterLife(LifeState next)
+    {
+        if (next == Life)
+            return;
+        Life = next;
+        LifeSwitchCount++;
+    }
+
+    private LifeState ChooseLife()
+    {
+        float selfX = bodyRb != null ? bodyRb.position.x : transform.position.x;
+        Vector2 pos = bodyRb != null ? bodyRb.position : (Vector2)transform.position;
+        float dx;
+        bool sawThreat = threat != null && OrganismAlert.SeesAhead(
+            selfX, control.FacingSign(), threat.position.x, threatRange, 0.12f, out dx);
+        bool sawPrey = prey != null
+            && Mathf.Abs(prey.position.x - selfX) < noticeRange;
+        bool heard = voice != null && OrganismAlert.HearsForeignAlarm(
+            voice.SourceId, pos, Time.time, 0.6f, heardBuf);
+        bool stronger = sawThreat && OrganismLife.HostileIsStronger(ownStrength, threatStrength);
+        bool weaker = sawPrey && !OrganismLife.HostileIsStronger(ownStrength, preyStrength);
+        return OrganismLife.ChooseWake(stronger, weaker, heard, Time.time < alertUntil);
+    }
+
+    private void TickForage()
+    {
         if (IsChicken())
         {
             TickChicken();
@@ -152,7 +198,14 @@ public class BirdDrive : MonoBehaviour
             return;
         }
 
-        TickPrey();
+        if (sensors.bothGrounded)
+            WritePreyMode(BirdMode.Sit, 0f);
+    }
+
+    private void WriteSleepBody()
+    {
+        if (control != null)
+            control.mode = BirdMode.Sit;
     }
 
     private bool IsChicken()
@@ -267,37 +320,30 @@ public class BirdDrive : MonoBehaviour
         lastPreyMode = next;
     }
 
-    // Sees a threat ahead → cry, face away, Fly. Hears a foreign Alarm → Fly.
-    private bool TryAlarm()
+    // Flee body: cry if the stronger hostile is ahead, face away, Fly (hen: Walk).
+    private void TickFlee()
     {
-        if (voice == null || control == null)
-            return false;
+        if (control == null)
+            return;
 
         float selfX = bodyRb != null ? bodyRb.position.x : transform.position.x;
         Vector2 pos = bodyRb != null ? bodyRb.position : (Vector2)transform.position;
         float dx = 0f;
         bool saw = threat != null && OrganismAlert.SeesAhead(
             selfX, control.FacingSign(), threat.position.x, threatRange, 0.12f, out dx);
-        bool heard = OrganismAlert.HearsForeignAlarm(
+        bool heard = voice != null && OrganismAlert.HearsForeignAlarm(
             voice.SourceId, pos, Time.time, 0.6f, heardBuf);
 
         if (saw)
         {
-            voice.Cry(VoiceKind.Alarm);
+            if (voice != null)
+                voice.Cry(VoiceKind.Alarm);
             control.SetFacing(dx > 0f ? -1f : 1f);
             alertUntil = Time.time + alertHold;
-            control.mode = IsChicken() ? BirdMode.Walk : BirdMode.Fly;
-            return true;
         }
+        else if (heard)
+            alertUntil = Time.time + alertHold;
 
-        if (heard || Time.time < alertUntil)
-        {
-            if (heard)
-                alertUntil = Time.time + alertHold;
-            control.mode = IsChicken() ? BirdMode.Walk : BirdMode.Fly;
-            return true;
-        }
-
-        return false;
+        control.mode = IsChicken() ? BirdMode.Walk : BirdMode.Fly;
     }
 }
