@@ -724,6 +724,12 @@ public class TrialRecorder
         AppendVec2(json, "thighSize", h.thighSize);
         AppendVec2(json, "shinSize", h.shinSize);
         AppendVec2(json, "footSize", h.footSize);
+        // Проверять надо не намерение, а факт контакта: пара считается
+        // как sqrt(µ_стопы · µ_грунта), одна стопа сцепление не задаёт.
+        AppendNum(json, "footFriction", h.footFriction);
+        float groundMu = ResolveGroundFriction();
+        AppendNum(json, "groundFriction", groundMu);
+        AppendNum(json, "contactFriction", Mathf.Sqrt(Mathf.Max(0f, h.footFriction) * Mathf.Max(0f, groundMu)));
         AppendNum(json, "lumbarFriction", h.lumbarFriction);
         AppendNum(json, "lumbarFrictionMaxTorque", h.lumbarFrictionMaxTorque);
         AppendNum(json, "hipFriction", h.hipFriction);
@@ -759,6 +765,13 @@ public class TrialRecorder
             AppendNum(json, "crouchArmElbow", b.crouchArmElbow);
             AppendNum(json, "crouchArmWrist", b.crouchArmWrist);
             AppendNum(json, "crouchHandSupportMin", b.crouchHandSupportMin);
+            AppendNum(json, "crouchHandGroundSlop", b.crouchHandGroundSlop);
+            AppendNum(json, "crouchHandPoseStart", b.crouchHandPoseStart);
+            AppendNum(json, "crouchHandSupportShoulder", b.crouchHandSupportShoulder);
+            AppendNum(json, "crouchHandSupportElbow", b.crouchHandSupportElbow);
+            AppendNum(json, "crouchHandSupportWrist", b.crouchHandSupportWrist);
+            AppendNum(json, "crouchHandSupportSpread", b.crouchHandSupportSpread);
+            AppendNum(json, "crouchHandBalanceSpread", b.crouchHandBalanceSpread);
             AppendNum(json, "swingHipFlex", b.swingHipFlex);
             AppendNum(json, "swingKneeFlex", b.swingKneeFlex);
             AppendNum(json, "swingKneeGroundedFraction", b.swingKneeGroundedFraction);
@@ -1001,6 +1014,19 @@ public class TrialRecorder
         json.Append(",\"max\":").Append(F(joint.limits.max));
         json.Append('}');
         return false;
+    }
+
+    // Земля строится GroundBuilder-ом, а не телом: без её материала
+    // цифра трения подошвы не говорит о сцеплении ничего.
+    private static float ResolveGroundFriction()
+    {
+        GameObject ground = GameObject.Find("Ground");
+        if (ground == null)
+            return 0.4f;
+        Collider2D col = ground.GetComponent<Collider2D>();
+        if (col == null)
+            return 0.4f;
+        return col.sharedMaterial != null ? col.sharedMaterial.friction : 0.4f;
     }
 
     private static void AppendVec2(StringBuilder json, string key, Vector2 value, bool comma = true)

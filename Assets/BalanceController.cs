@@ -47,17 +47,17 @@ public class BalanceController : MonoBehaviour
     // поясницу на 17.3° из 20. Дальше есть провал (50/40 роняет), хотя 70/55
     // снова стоит и даёт 20.4 см. Пока таз не управляется, за 40/32 не
     // заходить: разница между «стоит» и «падает» там не про глубину.
-    public float crouchKneeFlex = 98f;
+    public float crouchKneeFlex = 85f;
     // Больше не входит в цель бедра: угол сустава таз–ляжка не держим.
     // Поле оставлено, чтобы стенд и инспектор не потеряли имя.
     public float crouchHipFlex = 32f;
     // Положительное — целевой наклон таза вперёд при crouch=1.
     // Вперёд = по часовой = минус к мировой цели, как у crouchTorsoLean.
     // Глубину даёт колено; таз только задаёт, насколько наклониться.
-    public float crouchPelvisTilt = 28f;
+    public float crouchPelvisTilt = 24f;
     // Положительное — добавка наклона груди вперёд при crouch=1.
     // Человек смотрит вправо, вперёд = по часовой = минус к цели.
-    public float crouchTorsoLean = 15f;
+    public float crouchTorsoLean = 16f;
     // Текущий уровень, которым пользуется поза. Для стенда и инспектора.
     public float crouchLevel;
     // Руки вперёд-вниз: кисть на земле расширяет опору (BodyState/CoM).
@@ -68,9 +68,21 @@ public class BalanceController : MonoBehaviour
     [Tooltip("Цель кисти на приседе, град.")]
     public float crouchArmWrist = -8f;
     [Tooltip("Мин. crouchLevel, чтобы кисти входили в опору.")]
-    public float crouchHandSupportMin = 0.15f;
+    public float crouchHandSupportMin = 0.55f;
     [Tooltip("Допуск к y=−2.0: кисть считается на земле в приседе, м.")]
-    public float crouchHandGroundSlop = 0.06f;
+    public float crouchHandGroundSlop = 0.24f;
+    [Tooltip("Crouch level where hand-support pose starts blending in.")]
+    public float crouchHandPoseStart = 0.55f;
+    [Tooltip("Deep crouch shoulder target (forward/down), degrees.")]
+    public float crouchHandSupportShoulder = 52f;
+    [Tooltip("Deep crouch elbow target, degrees.")]
+    public float crouchHandSupportElbow = -18f;
+    [Tooltip("Deep crouch wrist target, degrees.")]
+    public float crouchHandSupportWrist = -20f;
+    [Tooltip("Static shoulder split in deep crouch support pose, degrees.")]
+    public float crouchHandSupportSpread = 10f;
+    [Tooltip("Additional split from balance signal in deep crouch.")]
+    public float crouchHandBalanceSpread = 8f;
 
     [Header("Наклон корпуса")]
     // intent.lean: +1 вперёд (− к мировой цели торса/таза), −1 назад.
@@ -98,7 +110,7 @@ public class BalanceController : MonoBehaviour
     // Пока стопа на земле, то же PD таза на обоих бёдрах: лишний flexor
     // разгружает GRF свинга, и колено может оторвать стопу, а не сложить
     // замкнутую цепь. Снимать свинг с таза при grounded нельзя.
-    public float swingHipUnloadBias = 0.32f;
+    public float swingHipUnloadBias = 0.25f;
     // Правая нога впереди (+X), левая сзади: при опоре слева свинг впереди
     // и 50% grounded knee его не снимает — нужны отдельные коэффициенты.
     public float forwardSwingHipUnloadScale = 1.3f;
@@ -120,12 +132,12 @@ public class BalanceController : MonoBehaviour
     // (не только при обеих grounded: кадр отрыва иначе возвращает soft=1).
     // Контрперенос рук на walkActive выключен (иначе elbowLimit↑ и fold).
     [Tooltip("Доля unload/knee/tilt свинга при walk + split.")]
-    public float dualSupportSwingScale = 0.32f;
+    public float dualSupportSwingScale = 0.45f;
     // Потолок standLegLevel на всём walkActive: если резать только при
     // обеих grounded, краткий отрыв даёт level→1 и fold после посадки.
     // Холодный oneg walkActive=false — без потолка.
     [Tooltip("Макс. standLegLevel пока walkActive. 0 = без потолка.")]
-    public float dualSupportStandCap = 0.4f;
+    public float dualSupportStandCap = 0.30f;
     // Множитель unload/knee свинга на walk-split поверх dualSoft. Tilt
     // остаётся на dualSoft — иначе fold после swap. 1 = как сейчас.
     [Tooltip("Доп. множитель unload/knee на walk-split (не для tilt). 1 = выкл.")]
@@ -154,9 +166,9 @@ public class BalanceController : MonoBehaviour
     public float walkSwingToeOffMax = 0f;
     // Доп. unload и сгиб колена от liftAct — только через CLI; дефолт 0.
     [Tooltip("Доп. hip-unload при liftAct=1 на walk-split.")]
-    public float walkLiftUnloadBias = 0f;
+    public float walkLiftUnloadBias = 0.02f;
     [Tooltip("Доля swingKneeFlex на grounded-свинге при liftAct=1.")]
-    public float walkKneePeelMax = 0f;
+    public float walkKneePeelMax = 0.05f;
     // Толчок опорной стопы при полном weightBlend: CoM над опорой сам
     // не отрывает свинг (ankleBalance≈0). Не PD к углу — только сигнал
     // в ankleBalance. 0 = выкл. CLI -walkStancePush.
@@ -172,7 +184,7 @@ public class BalanceController : MonoBehaviour
     // опорной стопы: разгон даёт тяжесть, свинг подставляется. Невидимой силы
     // нет. 0 = прежнее поведение. CLI -walkComLead.
     [Tooltip("Метров впереди опоры держать CoM при moveX≠0. 0 = топтание на месте.")]
-    public float walkComLeadX = 0f;
+    public float walkComLeadX = 0.02f;
     // Поза свинга включается только после отрыва (swingHipLatched), а отрыв
     // требует, чтобы ляжка уже ушла вперёд — замкнутый круг: оба бедра сидят
     // на «держать таз вертикально», ни одно не выносится, стопа не покидает
@@ -180,13 +192,13 @@ public class BalanceController : MonoBehaviour
     // вперёд, пока он ещё на земле, как только вес перенесён на опору.
     // 0 = выкл, прежнее поведение. CLI -walkSwingScissor.
     [Tooltip("standLegLevel, с которого свинг выносится вперёд ещё на земле. 0 = выкл.")]
-    public float walkSwingScissorLevel = 0f;
+    public float walkSwingScissorLevel = 0.20f;
     // Вынос ляжки вперёд по третьему закону отбрасывает таз назад: полный
     // −swingHipFlex на земле даёт отрыв (swingFoot 0.50 вместо 0.999), но
     // человек уезжает назад и складывается за 7 с. Доля выноса на земле;
     // в воздухе поза остаётся полной. CLI -walkSwingScissorFlex.
     [Tooltip("Доля swingHipFlex в позе ножниц на земле. 1 = полный вынос.")]
-    public float walkSwingScissorFlex = 1f;
+    public float walkSwingScissorFlex = 0.25f;
     // После чирка hipair снова upright и сажает стопу. Держим flex ещё
     // hold секунд на grounded (не commit до первого воздуха). CLI, дефолт 0.
     [Tooltip("Секунд удержания swing-hip flex после !grounded. 0 = выкл.")]
@@ -400,7 +412,7 @@ public class BalanceController : MonoBehaviour
     // Непрерывный !grounded свинга для walkSwingLatchAir.
     private float swingAirStreak;
     // Последняя команда опоры: при смене знака сбрасываем уровень и защёлку.
-    private float lastStandCmd;
+    private float heldStandCmd;
     // Угол свинга в кадр защёлки. Цель после отрыва не слабее этого сгиба:
     // Min(angleAtLatch, −swingHipFlex) — более отрицательное = больше сгиб.
     private float swingHipAngleAtLatch;
@@ -467,26 +479,33 @@ public class BalanceController : MonoBehaviour
         UpdateLeanLevel();
         UpdateStandLegLevel();
 
-        // standLeg: +1 опора справа (левый свинг), −1 опора слева.
-        // Пока уровень нулевой, путь тот же: обе ноги одинаковые.
-        // Сброс после UpdateStandLegLevel: на кадре входа в split level
-        // всё равно 0 (ramp ещё не успел).
-        float standCmd = intent != null ? intent.standLeg : 0f;
-        bool wasSplit = Mathf.Abs(lastStandCmd) > 0.5f;
-        bool isSplit = Mathf.Abs(standCmd) > 0.5f;
-        if (!wasSplit && isSplit)
-        {
-            standLegLevel = 0f;
-            swingHipLatched = false;
-        }
-        else if (isSplit && wasSplit && Mathf.Sign(standCmd) != Mathf.Sign(lastStandCmd))
-        {
-            standLegLevel = 0f;
-            swingHipLatched = false;
-        }
-        lastStandCmd = standCmd;
-
         bool walkSoft = stepPhaseDriver != null && stepPhaseDriver.walkActive;
+        float standCmd = intent != null ? intent.standLeg : 0f;
+        if (!walkSoft)
+        {
+            bool requestSplit = Mathf.Abs(standCmd) > 0.5f;
+            if (requestSplit)
+            {
+                float requestSign = Mathf.Sign(standCmd);
+                bool hadSplit = Mathf.Abs(heldStandCmd) > 0.5f;
+                if (!hadSplit || Mathf.Sign(heldStandCmd) != requestSign)
+                {
+                    standLegLevel = 0f;
+                    swingHipLatched = false;
+                }
+                heldStandCmd = requestSign;
+            }
+            else if (standLegLevel <= 0.001f)
+            {
+                heldStandCmd = 0f;
+            }
+
+            standCmd = heldStandCmd;
+        }
+        else
+        {
+            heldStandCmd = 0f;
+        }
 
         bool splitLegs = standLegLevel > 0.001f && Mathf.Abs(standCmd) > 0.5f;
         bool leftIsSwing = splitLegs && standCmd > 0.5f;
@@ -1111,7 +1130,7 @@ public class BalanceController : MonoBehaviour
         if (stepPhaseDriver != null && stepPhaseDriver.walkActive)
             ComputeWalkArmTargets(out lSh, out rSh, out lEl, out rEl, out lWr, out rWr);
         else if (crouchLevel > 0.001f && standLegLevel < 0.01f)
-            ComputeCrouchArmTargets(out lSh, out rSh, out lEl, out rEl, out lWr, out rWr);
+            ComputeCrouchArmTargets(balanceSignal, out lSh, out rSh, out lEl, out rEl, out lWr, out rWr);
         else
         {
             float armSignal = standLegLevel > 0.01f ? 0f : balanceSignal;
@@ -1128,19 +1147,42 @@ public class BalanceController : MonoBehaviour
 
     // Руки вниз к земле: минус у плеча — вперёд-вниз; локоть почти прямой.
     // Плюс у левого плеча (как на walk) уводил руку назад-вверх.
-    private void ComputeCrouchArmTargets(out float leftShoulder, out float rightShoulder,
+    private void ComputeCrouchArmTargets(float balanceSignal,
+                                         out float leftShoulder, out float rightShoulder,
                                          out float leftElbow, out float rightElbow,
                                          out float leftWrist, out float rightWrist)
     {
         float t = Mathf.Clamp01(crouchLevel);
         float sh = crouchArmShoulder * t;
-        // Левый якорь дальше (−X): чуть сильнее «вниз-вперёд».
-        leftShoulder = Mathf.Lerp(shoulderBaseAngle, shoulderBaseAngle - sh * 1.08f, t);
-        rightShoulder = Mathf.Lerp(shoulderBaseAngle, shoulderBaseAngle - sh * 0.92f, t);
-        leftElbow = Mathf.Lerp(elbowBaseAngle, crouchArmElbow, t);
-        rightElbow = Mathf.Lerp(elbowBaseAngle, crouchArmElbow, t);
-        leftWrist = Mathf.Lerp(wristBaseAngle, crouchArmWrist, t);
-        rightWrist = Mathf.Lerp(wristBaseAngle, crouchArmWrist, t);
+        float leftBaseShoulder = Mathf.Lerp(shoulderBaseAngle, shoulderBaseAngle - sh * 1.08f, t);
+        float rightBaseShoulder = Mathf.Lerp(shoulderBaseAngle, shoulderBaseAngle - sh * 0.92f, t);
+        float baseElbow = Mathf.Lerp(elbowBaseAngle, crouchArmElbow, t);
+        float baseWrist = Mathf.Lerp(wristBaseAngle, crouchArmWrist, t);
+
+        float supportStart = Mathf.Clamp01(crouchHandPoseStart);
+        float supportBlend = Mathf.InverseLerp(supportStart, 1f, t);
+        float balance = Mathf.Clamp(balanceSignal, -1f, 1f);
+        float spread = supportBlend * (crouchHandSupportSpread + crouchHandBalanceSpread * Mathf.Abs(balance));
+        float centerShoulder = Mathf.Lerp(
+            0.5f * (leftBaseShoulder + rightBaseShoulder),
+            -Mathf.Abs(crouchHandSupportShoulder),
+            supportBlend);
+
+        if (balance >= 0f)
+        {
+            leftShoulder = centerShoulder - spread;
+            rightShoulder = centerShoulder + spread;
+        }
+        else
+        {
+            leftShoulder = centerShoulder + spread;
+            rightShoulder = centerShoulder - spread;
+        }
+
+        leftElbow = Mathf.Lerp(baseElbow, crouchHandSupportElbow, supportBlend);
+        rightElbow = Mathf.Lerp(baseElbow, crouchHandSupportElbow, supportBlend);
+        leftWrist = Mathf.Lerp(baseWrist, crouchHandSupportWrist, supportBlend);
+        rightWrist = Mathf.Lerp(baseWrist, crouchHandSupportWrist, supportBlend);
 
         leftShoulder = Mathf.Clamp(leftShoulder, -85f, 85f);
         rightShoulder = Mathf.Clamp(rightShoulder, -85f, 85f);

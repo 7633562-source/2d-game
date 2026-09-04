@@ -2,7 +2,7 @@ using UnityEngine;
 using System.Collections.Generic;
 
 // Сенсорный слой: собирает информацию о состоянии тела, но не управляет им.
-// Содержит данные о центре масс, его скорости, опоре, суставах и вестибулярной системе.
+[DefaultExecutionOrder(-100)]
 public class BodyStateEstimator : MonoBehaviour
 {
     // ─── ССЫЛКИ НА ДРУГИЕ КОМПОНЕНТЫ ───
@@ -24,9 +24,31 @@ public class BodyStateEstimator : MonoBehaviour
     private Collider2D leftFootCollider;
     private Collider2D rightFootCollider;
 
-    [Header("Проба контакта стопы")]
-    [Tooltip("Толщина пробы под нижней кромкой стопы (юниты).")]
+    private Transform leftHand;
+    private Transform rightHand;
+    private Collider2D leftHandCollider;
+    private Collider2D rightHandCollider;
+    private Collider2D groundCollider;
+    private BalanceController balance;
+    private MotionIntent intent;
+
+    [Header("Проба контакта")]
+    [Tooltip("Толщина пробы под нижней кромкой стопы (юниты). Только OverlapBox.")]
     public float groundProbeThickness = 0.06f;
+    [Tooltip("GetContacts NonAlloc вместо OverlapBox под стопой. Откат — false.")]
+    public bool useGetContactsProbe = true;
+
+    // Переиспользуемые буферы: без new на каждом шаге физики.
+    private readonly Collider2D[] groundProbeHits = new Collider2D[8];
+    private readonly ContactPoint2D[] groundContacts = new ContactPoint2D[8];
+    private ContactFilter2D groundContactFilter;
+    private bool groundContactFilterReady;
+
+    // Линейка запаса: saturция буфера 8 — скрытый потолок будущих коллайдеров.
+    // Только счётчики, на grounded не влияют.
+    public int probeCallCount;
+    public int probeSaturatedCount;
+    public int probeHitSum;
 
     // ─── ДАННЫЕ СОСТОЯНИЯ (публичные для логирования) ───
     [Header("Центр масс")]
@@ -45,6 +67,11 @@ public class BodyStateEstimator : MonoBehaviour
     public Vector2 rightFootPosition;
     public bool leftFootGrounded;
     public bool rightFootGrounded;
+    // Контакт пятки (point.x ≤ центр стопы). Для CoM/fell не используется.
+    public bool leftFootHeelLoaded;
+    public bool rightFootHeelLoaded;
+    public bool leftHandGrounded;
+    public bool rightHandGrounded;
 
     [Header("Углы суставов (градусы)")]
     public float leftHipAngle;
@@ -93,6 +120,15 @@ public class BodyStateEstimator : MonoBehaviour
         leftFootCollider = leftFoot != null ? leftFoot.GetComponent<Collider2D>() : null;
         rightFootCollider = rightFoot != null ? rightFoot.GetComponent<Collider2D>() : null;
 
+        leftHand = transform.Find("LeftArmHand");
+        rightHand = transform.Find("RightArmHand");
+        leftHandCollider = leftHand != null ? leftHand.GetComponent<Collider2D>() : null;
+        rightHandCollider = rightHand != null ? rightHand.GetComponent<Collider2D>() : null;
+        balance = GetComponent<BalanceController>();
+        intent = GetComponent<MotionIntent>();
+        GameObject ground = GameObject.Find("Ground");
+        groundCollider = ground != null ? ground.GetComponent<Collider2D>() : null;
+
         if (comCalculator == null)
         {
             Debug.LogError("BodyStateEstimator: CenterOfMassCalculator не найден!");
@@ -135,9 +171,15 @@ public class BodyStateEstimator : MonoBehaviour
         if (leftFoot != null) leftFootPosition = leftFoot.position;
         if (rightFoot != null) rightFootPosition = rightFoot.position;
 
-        // 3. Контакт стоп с землёй
-        leftFootGrounded = IsFootGrounded(leftFootCollider);
-        rightFootGrounded = IsFootGrounded(rightFootCollider);
+        // 3. Контакт стоп с землёй (heel — отдельно, на grounded не влияет)
+        leftFootGrounded = IsSegmentGrounded(leftFootCollider, out leftFootHeelLoaded);
+        rightFootGrounded = IsSegmentGrounded(rightFootCollider, out rightFootHeelLoaded);
+        // Кисти не пробуем, пока присед мелкий: в стойке руки в воздухе,
+        // а OverlapBox всё равно обходил их коллайдеры каждый шаг.
+        float slop = balance != null ? Mathf.Max(0f, balance.crouchHandGroundSlop) : 0.06f;
+        float handGroundY = ResolveGroundTopY() + slop;
+        leftHandGrounded = IsHandNearGround(leftHandCollider, handGroundY);
+        rightHandGrounded = IsHandNearGround(rightHandCollider, handGroundY);
 
         // 4. Границы опоры и запас устойчивости
         CalculateSupport();
@@ -171,29 +213,74 @@ public class BodyStateEstimator : MonoBehaviour
     }
 
     // ─── ПРОВЕРКА КОНТАКТА СТОПЫ С ЗЕМЛЁЙ ───
-    // Проба ставится у нижней кромки стопы. Раньше бокс висел вокруг центра
-    // стопы и не доставал до опоры на половину её толщины, поэтому контакт
-    // не фиксировался ни разу за прогон.
-    private bool IsFootGrounded(Collider2D footCollider)
+    // GetContacts — контакты PhysX со слоем Ground. OverlapBox — геометрическая
+    // проба 0.06 м под кромкой (useGetContactsProbe = false).
+    // heelLoaded: есть контакт с point.x ≤ центра стопы (человек смотрит в +X).
+    private bool IsSegmentGrounded(Collider2D col, out bool heelLoaded)
     {
-        if (footCollider == null) return false;
+        heelLoaded = false;
+        if (col == null) return false;
 
-        Bounds bounds = footCollider.bounds;
-        Vector2 probeCenter = new Vector2(bounds.center.x, bounds.min.y);
-        Vector2 probeSize = new Vector2(bounds.size.x * 0.9f, groundProbeThickness);
-
-        Collider2D[] hits = Physics2D.OverlapBoxAll(probeCenter, probeSize, 0f);
-
-        foreach (var hit in hits)
+        int hitCount;
+        if (useGetContactsProbe)
         {
-            // Если коллайдер не принадлежит человеку (не является дочерним),
-            // считаем, что есть контакт с внешним объектом (землёй).
-            if (!hit.transform.IsChildOf(transform))
+            if (!groundContactFilterReady)
             {
-                return true;
+                groundContactFilter = new ContactFilter2D();
+                groundContactFilter.SetLayerMask(GroundLayers.Mask);
+                groundContactFilter.useTriggers = false;
+                groundContactFilterReady = true;
+            }
+            hitCount = col.GetContacts(groundContactFilter, groundContacts);
+            float midX = col.bounds.center.x;
+            int n = Mathf.Min(hitCount, groundContacts.Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (groundContacts[i].point.x <= midX)
+                {
+                    heelLoaded = true;
+                    break;
+                }
             }
         }
-        return false;
+        else
+        {
+            Bounds bounds = col.bounds;
+            Vector2 probeCenter = new Vector2(bounds.center.x, bounds.min.y);
+            Vector2 probeSize = new Vector2(bounds.size.x * 0.9f, groundProbeThickness);
+            hitCount = Physics2D.OverlapBoxNonAlloc(
+                probeCenter, probeSize, 0f, groundProbeHits, GroundLayers.Mask);
+            // Без точек контакта пятку не отличить — считаем любой контакт пяткой.
+            heelLoaded = hitCount > 0;
+        }
+
+        probeCallCount++;
+        probeHitSum += hitCount;
+        int bufLen = useGetContactsProbe ? groundContacts.Length : groundProbeHits.Length;
+        if (hitCount >= bufLen)
+            probeSaturatedCount++;
+        return hitCount > 0;
+    }
+
+    // Кисть: проба PhysX плюс допуск к y=−2.0 в глубоком приседе — ладонь
+    // не всегда пробивает коллайдер, но опора по X уже расширена.
+    private bool IsHandNearGround(Collider2D col, float handGroundY)
+    {
+        if (col == null) return false;
+        bool heelIgnored;
+        if (IsSegmentGrounded(col, out heelIgnored)) return true;
+        return col.bounds.min.y <= handGroundY;
+    }
+
+    private float ResolveGroundTopY()
+    {
+        if (groundCollider == null)
+        {
+            GameObject ground = GameObject.Find("Ground");
+            if (ground != null)
+                groundCollider = ground.GetComponent<Collider2D>();
+        }
+        return groundCollider != null ? groundCollider.bounds.max.y : -2f;
     }
 
     // ─── РАСЧЁТ ОБЛАСТИ ОПОРЫ И ЗАПАСА УСТОЙЧИВОСТИ ───
@@ -216,6 +303,13 @@ public class BodyStateEstimator : MonoBehaviour
 
         ExpandSupport(leftFootCollider, leftFootGrounded, ref hasSupport, ref minX, ref maxX);
         ExpandSupport(rightFootCollider, rightFootGrounded, ref hasSupport, ref minX, ref maxX);
+
+        // На приседе кисти на земле — третья и четвёртая точки опоры.
+        if (balance != null && balance.crouchLevel >= balance.crouchHandSupportMin)
+        {
+            ExpandSupport(leftHandCollider, leftHandGrounded, ref hasSupport, ref minX, ref maxX);
+            ExpandSupport(rightHandCollider, rightHandGrounded, ref hasSupport, ref minX, ref maxX);
+        }
 
         // Обе стопы в воздухе: опоры нет, запас считаем от середины стоп.
         if (!hasSupport)

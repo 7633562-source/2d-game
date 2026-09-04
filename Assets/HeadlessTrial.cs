@@ -235,7 +235,7 @@ public class HeadlessTrial : MonoBehaviour
         walkTarget = Mathf.Clamp01(GetFloatArg("-walk", 0f));
         walkTime = GetFloatArg("-walkTime", 5f);
         walkDuration = GetFloatArg("-walkDuration", 30f);
-        walkStanceDuration = GetFloatArg("-walkStance", 8f);
+        walkStanceDuration = GetFloatArg("-walkStance", 6f);
         runTarget = Mathf.Clamp01(GetFloatArg("-run", 0f));
         runTime = GetFloatArg("-runTime", 5f);
         runHold = GetFloatArg("-runHold", 20f);
@@ -243,10 +243,10 @@ public class HeadlessTrial : MonoBehaviour
         runTransferMaxDuration = GetFloatArg("-runTransfer", 4f);
         walkHeelStrikeMinAge = GetFloatArg("-walkHeelMin", 0f);
         walkHeelAirMin = GetFloatArg("-walkHeelAir", 0f);
-        walkComTrigger = GetFloatArg("-walkComTrigger", 0f);
-        walkComTriggerMinAge = GetFloatArg("-walkComTrigAge", 0.35f);
+        walkComTrigger = GetFloatArg("-walkComTrigger", 0.01f);
+        walkComTriggerMinAge = GetFloatArg("-walkComTrigAge", 0.25f);
         walkFirstStance = ParseStandLegArg(GetStringArg("-walkFirst", "right"));
-        walkTransferMaxDuration = GetFloatArg("-walkTransfer", 8f);
+        walkTransferMaxDuration = GetFloatArg("-walkTransfer", 6f);
         walkTransferMinDuration = GetFloatArg("-walkTransferMin", 0.7f);
         walkTransferComMax = GetFloatArg("-walkTransferCom", 0.10f);
         walkTransferFallbackComMax = GetFloatArg("-walkTransferFallbackCom", 0.12f);
@@ -807,6 +807,12 @@ public class HeadlessTrial : MonoBehaviour
         balance.crouchArmWrist = GetFloatArg("-crouchArmWrist", balance.crouchArmWrist);
         balance.crouchHandSupportMin = GetFloatArg("-crouchHandMin", balance.crouchHandSupportMin);
         balance.crouchHandGroundSlop = GetFloatArg("-crouchHandSlop", balance.crouchHandGroundSlop);
+        balance.crouchHandPoseStart = GetFloatArg("-crouchHandPoseStart", balance.crouchHandPoseStart);
+        balance.crouchHandSupportShoulder = GetFloatArg("-crouchHandShoulder", balance.crouchHandSupportShoulder);
+        balance.crouchHandSupportElbow = GetFloatArg("-crouchHandElbow", balance.crouchHandSupportElbow);
+        balance.crouchHandSupportWrist = GetFloatArg("-crouchHandWrist", balance.crouchHandSupportWrist);
+        balance.crouchHandSupportSpread = GetFloatArg("-crouchHandSpread", balance.crouchHandSupportSpread);
+        balance.crouchHandBalanceSpread = GetFloatArg("-crouchHandBalSpread", balance.crouchHandBalanceSpread);
         balance.pelvisPGain = GetFloatArg("-pelvisP", balance.pelvisPGain);
         balance.pelvisDGain = GetFloatArg("-pelvisD", balance.pelvisDGain);
         balance.pelvisErrorReferenceDegrees = GetFloatArg("-pelvisRef", balance.pelvisErrorReferenceDegrees);

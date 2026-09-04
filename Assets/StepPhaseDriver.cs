@@ -15,7 +15,7 @@ public class StepPhaseDriver : MonoBehaviour
     // Keep in sync with HeadlessTrial -walkStance default (8). Shorter Play
     // values (4) fold on the stand; do not lower without a trial.
     [Tooltip("Минимум секунд на одной ноге перед запросом переноса.")]
-    public float stanceDuration = 8f;
+    public float stanceDuration = 6f;
 
     // Бег (intent.run): короче опора — чаще смена ног. Не SIMBICON.
     [Tooltip("Секунд Stance при intent.run=1.")]
@@ -37,17 +37,17 @@ public class StepPhaseDriver : MonoBehaviour
     // Это остаётся условием внутри драйвера фаз, а не отдельный конечный
     // автомат: SIMBICON не открываем. 0 = только таймер, прежнее поведение.
     [Tooltip("CoM впереди опорной стопы (м) → Transfer. 0 = только таймер.")]
-    public float stanceComTrigger = 0f;
+    public float stanceComTrigger = 0.01f;
 
     [Tooltip("Мин. возраст Stance (с) до срабатывания по CoM.")]
-    public float stanceComMinAge = 0.35f;
+    public float stanceComMinAge = 0.25f;
 
     [Tooltip("Первая фаза: +1 правая опора, −1 левая.")]
     public float firstStance = 1f;
 
     [Header("Перенос (event-gated)")]
     [Tooltip("Максимум секунд в двойной опоре — потом мягкий fallback.")]
-    public float transferMaxDuration = 8f;
+    public float transferMaxDuration = 6f;
 
     [Tooltip("Макс. Transfer при intent.run=1.")]
     public float runTransferMaxDuration = 4f;
