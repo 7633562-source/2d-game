@@ -70,24 +70,25 @@ public class TrialRecorder
     // geometry: arms and head stick at the limit when K is too small.
     private const float LIMIT_MARGIN_DEGREES = 1f;
 
-    // ─── PHYSICAL FALL DETECTION ───
-    // The automaton is not ground truth. Trial p_sw1 (18.09, 07:55 build) lay on
-    // the dirt from 8 s to 39 s with torsoTilt -51 deg, headY -1.52 and
-    // supportMargin -0.84, while BalanceState stayed at Recovery and `fell`
-    // stayed false — the Falling state is never entered once the get-up
-    // automaton owns the body. The body is down when the torso is past 45 deg
-    // AND the pelvis has dropped 30 cm, or when the pelvis is more than half a
-    // metre low AND the head has fallen below the standing pelvis height.
-    // Measured over the 1095 fallen=false runs on disk: a quiet stance reaches
-    // neither, the deepest crouch stops at 0.46 m of pelvis drop with the head
-    // 0.10 m above the standing pelvis height, and both routes together catch
-    // 19 runs the automaton missed.
-    private const float DOWN_TILT_DEGREES = 45f;
-    private const float DOWN_PELVIS_DROP = 0.30f;
-    private const float DOWN_DEEP_DROP = 0.50f;
-    // The signal must hold a few frames: one noisy frame is not a fall. The
-    // reported time is the FIRST frame of the run, not the end of the settle.
-    private const float DOWN_SETTLE_SECONDS = 0.03f;
+    // ─── PHYSICAL FALL DETECTION (C1, 18.09) ───
+    // ONE criterion for the whole project: Assets/FallCriterion.cs. The private
+    // tilt/drop/settle constants and both drop arms that stood here are gone.
+    // The automaton is still not ground truth (trial p_sw1 lay on the dirt from
+    // 8 s while BalanceState stayed at Recovery) - but a second private rule is
+    // not ground truth either: this one reported 8.415 s on a body that had
+    // already collapsed at 6.035 s, and the arena's copy latched 2112 of 2112
+    // rows on 0.064 m of ordinary walk-onset sink because it measured the drop
+    // against the spawn pose. The shared rule: down when the root is 0.25 m
+    // below its own SETTLED stand height, or when |tilt| > 60 deg, held 0.15 s;
+    // the reported time is the FIRST frame of that hold.
+    private FallCriterion.Latch fallLatch;
+    private FallCriterion.Baseline standBaseline;
+    // The settled stand height is measured over the same quiet stance window the
+    // load meter's Wsup uses, and frozen at its end: never the spawn pose, never
+    // a running maximum, so a body that has started to sink cannot lower its own
+    // bar. Only frames leaning less than 45 deg are admitted.
+    private const float BASELINE_WINDOW_START = 4.0f;
+    private const float BASELINE_WINDOW_END = 5.0f;
 
     private readonly Human human;
     private readonly string label;
@@ -113,7 +114,6 @@ public class TrialRecorder
     // First frame the body was actually down (physical); -1 while he is up.
     // `fell` and `survivedSeconds` read this one, not the automaton.
     private float physicalFallTime = -1f;
-    private float downAge;
     private int samplesDown;
     // True on this frame whenever the body is on the ground (not latched).
     private bool downNow;
@@ -222,6 +222,9 @@ public class TrialRecorder
     private StepPhaseDriver stepDriver;
     private MotionIntent motionIntent;
     private ArmDrive armDrive;
+    // The pose-library controller (the default walk path and every arena human):
+    // read for the IK saturation bit only - the reporter never drives it.
+    private PoseDriveController pose;
     // Arm drive evidence, tracked here so the number lands in the JSON as well
     // as in the per-side CSV columns: the counter phase is only measurable if
     // the commanded phase and the delivered joint angle are both on record.
@@ -257,6 +260,63 @@ public class TrialRecorder
     private readonly float[] legDemandOut = new float[BalanceController.LegJointCount];
     private int legFallbackMask;
     private int legLayerOut;
+
+    // ─── C1 LOAD METER (append-only, recorder only) ───
+    // Read by nothing but the CSV and the JSON: no controller sees these. The
+    // vertical contact force is the solver's OWN impulse on the four sole plates
+    // (ContactPoint2D.normalImpulse / dt), not a geometric probe and not a
+    // hardcoded mass. Wsup is the measured total vertical force over the quiet
+    // stance window 4.0-5.0 s; the drop test in FallCriterion uses the pelvis
+    // height, so the two are independent measurements of the same stance.
+    private readonly Collider2D[] soleCollider = new Collider2D[4];   // heelL, toeL, heelR, toeR
+    private readonly float[] soleFz = new float[2];                   // per side, N
+    private readonly float[] solePlateMinX = new float[2];
+    private readonly float[] solePlateMaxX = new float[2];
+    private readonly float[] solePlateMinY = new float[2];
+    // Contact points of one frame, kept so the CoP can be built only from the
+    // points that actually lie on a sole plate (see SampleSoleLoad).
+    private const int CopPointCapacity = 8;
+    private readonly float[] copPointX = new float[2 * CopPointCapacity];
+    private readonly float[] copPointW = new float[2 * CopPointCapacity];
+    private readonly int[] copPointCount = new int[2];
+    private readonly ContactPoint2D[] contactBuffer = new ContactPoint2D[24];
+    private ContactFilter2D groundFilter;
+    private bool groundFilterReady;
+    private bool soleCollidersResolved;
+    private float fzL;
+    private float fzR;
+    // C2a: footLoadedL/R are MEASURED load flags now, not the capture walker's
+    // tap. The tap is written only while the walker ticks (so a stand window or
+    // any stand-only run read 0.00 in every frame) and it FREEZES at the last
+    // tick after the walker stops, which is worse than being empty. The flag
+    // below is derived from the same solver impulses as fzL/fzR on EVERY step.
+    // Stated threshold: a sole the solver pushes more than this many newtons
+    // through is loaded. 20 N is 2.9 % of the 682 N measured baseline wSup, so
+    // it means "the solver is carrying weight here", not "the plate is inside
+    // the contactOffset band" (that band is 20 mm wide, see the C2a report);
+    // the walk guard's 0.2 * wSup (~136 N) is the same test at a higher bar.
+    public float footLoadFlagNewtons = 20f;
+    private int footLoadFlagL;
+    private int footLoadFlagR;
+    private float fzOverWsup;
+    private float xCopMeas;
+    private int copValid;
+    private int copRejected;
+    private float hullMinX;
+    private float hullMaxX;
+    private float lambdaMeas;
+    private float dcmNow;
+    private float supportHeight;
+    private float comVelX;
+    private int ikSaturated;
+    private int samplesIkSaturated;
+    private double quietFzSum;
+    private int quietFzCount;
+    private float wSup;
+    private float lastComXSample;
+    private float lastComYSample;
+    private float lastSoleBottomY;
+    private bool hasComSample;
 
     public TrialRecorder(Human human, string label)
         : this(human, new TrialRunInfo { Label = label })
@@ -305,6 +365,7 @@ public class TrialRecorder
         stepDriver = human.GetComponent<StepPhaseDriver>();
         motionIntent = human.GetComponent<MotionIntent>();
         armDrive = human.GetComponent<ArmDrive>();
+        pose = human.GetComponent<PoseDriveController>();
 
         // Header into the same rows: Join+new[] would allocate an array and an intermediate string for nothing.
         rows.Append("time").Append(';')
@@ -404,6 +465,23 @@ public class TrialRecorder
             .Append("armHaveR").Append(';')
             .Append("armRestL").Append(';')
             .Append("armRestR").Append(';')
+            // armAimVoteL/R — APPEND-ONLY. The +/-1 that the old sign VOTE
+            // produced for the press aim, next to armAimSignL/R which is the sign
+            // the drive actually used (now +1 by construction: a HingeJoint2D
+            // rotates its child by exactly its joint angle, so the upper arm's
+            // world direction moves one for one with it on BOTH sides — the
+            // mirrored arms differ in their rest direction, not in the
+            // derivative). p_arms34 recorded vote -1 on both sides while the
+            // columns show the +1 relation, and the drive followed the vote: the
+            // left palm never reached its own latched point.
+            .Append("armAimVoteL").Append(';')
+            .Append("armAimVoteR").Append(';')
+            // armAimBranchL/R — the elbow branch the press is holding (0 = upper
+            // arm at beta+alpha, 1 = beta-alpha, -1 = unsolved). Both branches can
+            // be legal at once; if this column flips every 1-3 frames the PD is
+            // chasing a posture it cannot hold and the palm never lands.
+            .Append("armAimBranchL").Append(';')
+            .Append("armAimBranchR").Append(';')
             // down = on the ground this frame, fell = latched at the first
             // down frame, so the frame the flag turns true is in the CSV.
             .Append("down").Append(';')
@@ -424,7 +502,8 @@ public class TrialRecorder
             // gateMask/rejectCode — the first-step gates that passed, and the
             // first one that did not. planValid — the frozen plan accepted.
             // soleClear*/footLoaded* — measured sole clearance above the slab
-            // and the contact sensor's own load flags.
+            // and the measured load flags (see SampleSoleLoad: fz* above a
+            // stated threshold, every frame, walker or not).
             .Append("tapActive").Append(';')
             .Append("tapAge").Append(';')
             .Append("tapFresh").Append(';')
@@ -505,7 +584,44 @@ public class TrialRecorder
             .Append("demandKneeL").Append(';')
             .Append("demandKneeR").Append(';')
             .Append("demandAnkleL").Append(';')
-            .Append("demandAnkleR").AppendLine();
+            .Append("demandAnkleR").Append(';')
+            // ─── C1 LOAD METER (append-only, indices stable) ───
+            // fzL/fzR/fzTotal — vertical contact force per foot and in total, N,
+            //    from the solver's own contact impulses on the heel+toe plates
+            //    (ContactPoint2D.normalImpulse / dt).
+            // wSup — the MEASURED total vertical force in quiet stance
+            //    (4.0-5.0 s window), N: the denominator, never a hardcoded mass.
+            // fzOverWsup — fzTotal / wSup: 1.0 means the body is carried.
+            // xCopMeas — centre of pressure x from the same impulses, m.
+            // hullMin/hullMax — support hull of the LOADED plates, m (zero width
+            //    at the CoM when nothing is loaded).
+            // lambdaMeas — right foot's share of the total load, 0..1.
+            // dcm — capture point comX + comVelX*sqrt(h/g), m.
+            // supportH — CoM height above the loaded sole bottom, m.
+            // comVelX — one-step finite difference of comX, m/s.
+            // ikSaturated — 1 when the IK that last drove a leg had to clamp
+            //    (the capture walker's chord clamp or the pose controller's
+            //    dy/length clamp); 0 otherwise.
+            .Append("fzL").Append(';')
+            .Append("fzR").Append(';')
+            .Append("fzTotal").Append(';')
+            .Append("wSup").Append(';')
+            .Append("fzOverWsup").Append(';')
+            .Append("xCopMeas").Append(';')
+            .Append("hullMin").Append(';')
+            .Append("hullMax").Append(';')
+            .Append("lambdaMeas").Append(';')
+            .Append("dcm").Append(';')
+            .Append("supportH").Append(';')
+            .Append("comVelX").Append(';')
+            .Append("ikSaturated").Append(';')
+            // copValid — 1 when the CoP above came from contact points lying on
+            //    a sole plate; 0 when no such point existed and the cell is the
+            //    CoM fallback (never to be read as a measurement).
+            // copRejected — manifold points of this frame that were NOT on a
+            //    plate (Box2D vertex-face points from the ground's corner).
+            .Append("copValid").Append(';')
+            .Append("copRejected").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -644,33 +760,41 @@ public class TrialRecorder
         lastTilt = tilt;
         lastComOffset = comOffset;
 
-        // ─── PHYSICAL FALL ───
-        // Tilt / head / pelvis only, never the controller state: the automaton
-        // can park at Recovery while the body lies on the dirt (p_sw1).
-        float pelvisDropNow = startPelvisY - pelvisY;
-        float headRelToStandingPelvis = headY - startPelvisY;
-        downNow = (Mathf.Abs(tilt) >= DOWN_TILT_DEGREES && pelvisDropNow >= DOWN_PELVIS_DROP)
-            || (pelvisDropNow >= DOWN_DEEP_DROP && headRelToStandingPelvis <= 0f);
+        // ─── PHYSICAL FALL (C1: the one project-wide criterion) ───
+        // Tilt / root height only, never the controller state: the automaton can
+        // park at Recovery while the body lies on the dirt (p_sw1). The settled
+        // stand height is measured over the quiet window and then frozen.
+        if (time >= BASELINE_WINDOW_START && time < BASELINE_WINDOW_END)
+            standBaseline.Feed(pelvisY, tilt);
+        else if (time >= BASELINE_WINDOW_END)
+            standBaseline.Freeze();
+        float fallBaselineHeight = standBaseline.valid
+            ? standBaseline.height
+            : float.NegativeInfinity;
+        // No measured stand height (a trial shorter than the window, or a body
+        // already down in it) disables the DROP arm - the criterion is then the
+        // tilt alone. Feeding it the spawn pose is exactly what made the arena's
+        // copy latch 2112 of 2112 rows, so it is not used as a bar.
+        downNow = FallCriterion.Step(ref fallLatch, fallBaselineHeight, pelvisY, tilt,
+            Time.fixedDeltaTime, time);
         if (downNow)
         {
-            downAge += Time.fixedDeltaTime;
             samplesDown++;
             // Real palm contact while the body is down: the press needs it, and
             // "the palm is at the slab" was already being logged as grounded.
             samplesDownArm++;
             if (handContactL) samplesDownHandContactL++;
             if (handContactR) samplesDownHandContactR++;
-            // The run's FIRST frame, not the end of the settle. A single-frame
-            // crossing mid-dive (p_arms4: 6.115, then |tilt| 45.2 -> 26.6 deg
-            // with the pelvis still dropping) is rejected by the settle on
-            // purpose and the latch lands on the first sustained run.
-            if (physicalFallTime < 0f && downAge >= DOWN_SETTLE_SECONDS)
-                physicalFallTime = time - (downAge - Time.fixedDeltaTime);
+            // The run's FIRST frame of the sustained run, not the end of the
+            // settle: a single-frame crossing mid-dive (p_arms4: 6.115 s, then
+            // |tilt| 45.2 -> 26.6 deg with the pelvis still dropping) never
+            // reaches the sustain and the latch lands on the first real run.
+            if (physicalFallTime < 0f && fallLatch.fired)
+                physicalFallTime = fallLatch.fireTime;
         }
-        else
-        {
-            downAge = 0f;
-        }
+
+        // ─── LOAD METER (C1: per foot, per frame) ───
+        SampleSoleLoad(time, comPosition, pelvisY);
 
         if (state != null)
         {
@@ -1003,6 +1127,10 @@ public class TrialRecorder
             .Append(F(armDrive != null ? armDrive.PressAimHaveR : 0f)).Append(';')
             .Append(F(armDrive != null ? armDrive.PressRestL : 0f)).Append(';')
             .Append(F(armDrive != null ? armDrive.PressRestR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimVoteL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimVoteR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimBranchL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimBranchR : 0f)).Append(';')
             .Append(downNow ? "1" : "0").Append(';')
             .Append(physicalFallTime >= 0f ? "1" : "0").Append(';')
             // ─── WALK-1 command tap. Appended last, never reordered: the
@@ -1062,8 +1190,13 @@ public class TrialRecorder
             .Append(tap.planValid).Append(';')
             .Append(tap.touchL).Append(';')
             .Append(tap.touchR).Append(';')
-            .Append(tap.loadedL).Append(';')
-            .Append(tap.loadedR).Append(';')
+            // C2a: footLoaded* is the MEASURED load flag (fz* > footLoadFlagNewtons,
+            // see SampleSoleLoad), live on every row. It used to carry the walker
+            // tap's loaded bit, which read 0.00 through every stand window and
+            // then froze at the last tick. footTouch*/footSupport* below are still
+            // the walker's own tap (tapFresh says whether they are fresh).
+            .Append(footLoadFlagL).Append(';')
+            .Append(footLoadFlagR).Append(';')
             .Append(tap.supportL).Append(';')
             .Append(tap.supportR).Append(';')
             .Append(F(soleClearL)).Append(';')
@@ -1081,7 +1214,23 @@ public class TrialRecorder
             .Append(F(legDemandOut[2])).Append(';')
             .Append(F(legDemandOut[3])).Append(';')
             .Append(F(legDemandOut[4])).Append(';')
-            .Append(F(legDemandOut[5])).AppendLine();
+            .Append(F(legDemandOut[5])).Append(';')
+            // C1 load meter - same order as the header block above.
+            .Append(F(fzL)).Append(';')
+            .Append(F(fzR)).Append(';')
+            .Append(F(fzL + fzR)).Append(';')
+            .Append(F(wSup)).Append(';')
+            .Append(F(fzOverWsup)).Append(';')
+            .Append(F(xCopMeas)).Append(';')
+            .Append(F(hullMinX)).Append(';')
+            .Append(F(hullMaxX)).Append(';')
+            .Append(F(lambdaMeas)).Append(';')
+            .Append(F(dcmNow)).Append(';')
+            .Append(F(supportHeight)).Append(';')
+            .Append(F(comVelX)).Append(';')
+            .Append(ikSaturated).Append(';')
+            .Append(copValid).Append(';')
+            .Append(copRejected).AppendLine();
     }
 
     private static float WatchAngle(JointDampingWatch watch, int index)
@@ -1159,6 +1308,24 @@ public class TrialRecorder
         AppendNum(json, "fallTime", physicalFallTime);
         AppendNum(json, "fallAutomatonTime", fallTime);
         AppendNum(json, "downSeconds", samplesDown * Time.fixedDeltaTime);
+        // C1: the criterion's own inputs, so the fall time is never quoted
+        // without the baseline it was measured against. The rule itself lives in
+        // Assets/FallCriterion.cs (0.25 m below the settled stand, or 60 deg
+        // tilt, held 0.15 s).
+        AppendNum(json, "fallBaselineHeight", standBaseline.Value(startPelvisY));
+        json.Append(",\"fallBaselineValid\":").Append(standBaseline.valid ? "true" : "false");
+        // fallBaselineValid false means the drop arm never fired: the spawn pose
+        // reported above is for scale only, never used as a bar.
+        json.Append(",\"fallBaselineFrozen\":").Append(standBaseline.frozen ? "true" : "false");
+        AppendNum(json, "fallCriterionDropMeters", FallCriterion.DropMeters);
+        AppendNum(json, "fallCriterionTiltDegrees", FallCriterion.TiltDegrees);
+        AppendNum(json, "fallCriterionSustainSeconds", FallCriterion.SustainSeconds);
+        AppendNum(json, "wSupNewtons", wSup);
+        // How many frames the measured weight was averaged over, so the window is
+        // never a mystery. (The last frame of the window prints as 5.0000 s: the
+        // player's time is 4.99995 s there, and it is inside the window.)
+        AppendNum(json, "wSupQuietFrames", quietFzCount);
+        AppendNum(json, "ikSaturatedFraction", FractionSaturatedIk());
         AppendNum(json, "downFraction", Fraction(samplesDown));
         AppendNum(json, "maxAbsTorsoTilt", maxAbsTilt);
         AppendNum(json, "maxAbsLumbarAngle", maxAbsLumbarAngle);
@@ -1354,6 +1521,15 @@ public class TrialRecorder
         // no room and could not be a press whatever the body did.
         AppendNum(json, "armPressPlantFoldL", armDrive != null ? armDrive.PressPlantFoldL : 0f);
         AppendNum(json, "armPressPlantFoldR", armDrive != null ? armDrive.PressPlantFoldR : 0f);
+        // The press aim sign the drive used (+1, exact) against the old vote.
+        // They disagreed on both sides in p_arms34 and the drive followed the
+        // vote, so both are recorded: a regression shows up as a divergence.
+        AppendNum(json, "armPressAimSignL", armDrive != null ? armDrive.PressAimSignL : 0f);
+        AppendNum(json, "armPressAimSignR", armDrive != null ? armDrive.PressAimSignR : 0f);
+        AppendNum(json, "armPressAimVoteL", armDrive != null ? armDrive.PressAimVoteL : 0f);
+        AppendNum(json, "armPressAimVoteR", armDrive != null ? armDrive.PressAimVoteR : 0f);
+        AppendNum(json, "armPressAimBranchL", armDrive != null ? armDrive.PressAimBranchL : -1f);
+        AppendNum(json, "armPressAimBranchR", armDrive != null ? armDrive.PressAimBranchR : -1f);
         AppendNum(json, "armPressRequest", armDrive != null ? armDrive.PressRequest : 0f);
         AppendNum(json, "armMaxHandY", maxArmHandY);
         AppendNum(json, "muscleMultiplier", human.muscleMultiplier);
@@ -2132,6 +2308,225 @@ public class TrialRecorder
     // ankle, a world-upright hip, a zero snap) or that nobody asked for is
     // recorded with the MEASURED joint angle and its reqFallbackMask bit set:
     // the column is then a held angle, not an ask, and it is never NaN.
+    // ─── C1 LOAD METER: per foot, per frame ───
+    // One fixed step of measured load. Every number comes from the solver's own
+    // contact impulses on the four sole plates or from the CoM the rig already
+    // publishes; there is no hardcoded mass and no geometric proxy. Recorder
+    // only - no controller reads any of it.
+    private void SampleSoleLoad(float time, Vector2 comPosition, float pelvisY)
+    {
+        if (!soleCollidersResolved) ResolveSoleColliders();
+        if (!groundFilterReady)
+        {
+            groundFilter = new ContactFilter2D();
+            groundFilter.SetLayerMask(GroundLayers.Mask);
+            groundFilter.useTriggers = false;
+            groundFilterReady = true;
+        }
+        float dt = Time.fixedDeltaTime;
+        if (dt <= 0f) dt = 0.005f;
+
+        for (int side = 0; side < 2; side++)
+        {
+            soleFz[side] = 0f;
+            solePlateMinX[side] = float.MaxValue;
+            solePlateMaxX[side] = float.MinValue;
+            solePlateMinY[side] = float.MaxValue;
+            copPointCount[side] = 0;
+        }
+
+        // Heel and toe are two plates of one support: the load of the foot is
+        // what the solver pushes through both of them.
+        for (int i = 0; i < 4; i++)
+        {
+            Collider2D col = soleCollider[i];
+            if (col == null) continue;
+            int side = i < 2 ? 0 : 1;
+            Bounds b = col.bounds;
+            if (b.min.x < solePlateMinX[side]) solePlateMinX[side] = b.min.x;
+            if (b.max.x > solePlateMaxX[side]) solePlateMaxX[side] = b.max.x;
+            if (b.min.y < solePlateMinY[side]) solePlateMinY[side] = b.min.y;
+            int n = col.GetContacts(groundFilter, contactBuffer);
+            int count = Mathf.Min(n, contactBuffer.Length);
+            for (int k = 0; k < count; k++)
+            {
+                ContactPoint2D cp = contactBuffer[k];
+                // normalImpulse is the solver's impulse along the contact
+                // normal. Only its UPWARD part is weight: a contact pressing
+                // sideways against a lip is not support.
+                float vertical = cp.normalImpulse * cp.normal.y;
+                if (vertical <= 0f) continue;
+                soleFz[side] += vertical / dt;
+                int slot = side * CopPointCapacity + copPointCount[side];
+                if (copPointCount[side] < CopPointCapacity)
+                {
+                    copPointX[slot] = cp.point.x;
+                    copPointW[slot] = vertical;
+                    copPointCount[side]++;
+                }
+            }
+        }
+
+        fzL = soleFz[0];
+        fzR = soleFz[1];
+        float total = fzL + fzR;
+
+        // C2a load flag: live on every step, standing included, and never
+        // frozen with the walker tap. Both feet are reported independently -
+        // a sole that the solver carries no weight through is 0 N, which is a
+        // reading, not a missing sample (measured: quiet stance rocks the load
+        // between the soles at ~3 Hz, so neither flag is true in every frame).
+        footLoadFlagL = fzL > footLoadFlagNewtons ? 1 : 0;
+        footLoadFlagR = fzR > footLoadFlagNewtons ? 1 : 0;
+
+        // Support hull = the plates that carry contact this frame. The CoP is the
+        // impulse-weighted mean of the contact points on exactly these plates, so
+        // "CoP inside the hull" holds by construction rather than almost always: a
+        // plate in contact counts even at 1 N - it is still support - and the
+        // earlier 5 %-of-total floor let a lightly loaded plate shift the CoP
+        // outside a hull built without it (1 frame in 7045, 4 mm). In flight no
+        // hull exists and it is reported as zero width at the CoM.
+        bool useLeft = soleFz[0] > 0f;
+        bool useRight = soleFz[1] > 0f;
+        if (!useLeft && !useRight)
+        {
+            useLeft = true;
+            useRight = true;
+        }
+        hullMinX = float.MaxValue;
+        hullMaxX = float.MinValue;
+        if (useLeft && solePlateMinX[0] < float.MaxValue)
+        {
+            hullMinX = solePlateMinX[0];
+            hullMaxX = solePlateMaxX[0];
+        }
+        if (useRight && solePlateMinX[1] < float.MaxValue)
+        {
+            hullMinX = Mathf.Min(hullMinX, solePlateMinX[1]);
+            hullMaxX = Mathf.Max(hullMaxX, solePlateMaxX[1]);
+        }
+        if (hullMinX > hullMaxX)
+        {
+            hullMinX = comPosition.x;
+            hullMaxX = comPosition.x;
+        }
+
+        xCopMeas = CopFromPlateContacts(comPosition.x, useLeft, useRight);
+        lambdaMeas = total > 1e-3f ? fzR / total : 0f;
+
+        float soleBottom = float.MaxValue;
+        if (useLeft && solePlateMinY[0] < float.MaxValue)
+            soleBottom = Mathf.Min(soleBottom, solePlateMinY[0]);
+        if (useRight && solePlateMinY[1] < float.MaxValue)
+            soleBottom = Mathf.Min(soleBottom, solePlateMinY[1]);
+        if (soleBottom < float.MaxValue) lastSoleBottomY = soleBottom;
+        supportHeight = Mathf.Max(0.05f, comPosition.y - lastSoleBottomY);
+
+        // The rig publishes no CoM velocity, so this is a one-step finite
+        // difference (5 ms at the trial step). Stated as such, not as a sensor.
+        comVelX = hasComSample ? (comPosition.x - lastComXSample) / dt : 0f;
+        lastComXSample = comPosition.x;
+        lastComYSample = comPosition.y;
+        hasComSample = true;
+        dcmNow = comPosition.x + comVelX * Mathf.Sqrt(supportHeight / 9.81f);
+
+        // Wsup: the MEASURED total vertical force in quiet stance, never a
+        // hardcoded mass. It is the mean over the whole 4.0-5.0 s window, so the
+        // value stops moving when the window closes.
+        if (time >= BASELINE_WINDOW_START && time < BASELINE_WINDOW_END)
+        {
+            quietFzSum += total;
+            quietFzCount++;
+        }
+        if (quietFzCount > 0) wSup = (float)(quietFzSum / quietFzCount);
+        fzOverWsup = wSup > 1f ? total / wSup : 0f;
+
+        ikSaturated = ResolveIkSaturated();
+        if (ikSaturated != 0) samplesIkSaturated++;
+    }
+
+    private float FractionSaturatedIk()
+    {
+        return samples > 0 ? (float)samplesIkSaturated / samples : 0f;
+    }
+
+    // The CoP is the impulse-weighted mean of the contact points that lie ON the
+    // sole plates. Box2D can report a manifold point outside the plate - a
+    // vertex-face point from the ground's corner: measured once at 6.700 s,
+    // 22.7 N (3.3 % of body weight) on a foot the estimator logged 19 mm clear,
+    // point 3.8 mm outside the plate AABB. Such a point is not a pressure centre,
+    // so it is counted in copRejected instead of being averaged in. When no point
+    // lies on a plate the CoP is undefined: the cell then carries the CoM and
+    // copValid = 0, so a reader can never mistake a fallback for a measurement.
+    private float CopFromPlateContacts(float fallbackX, bool useLeft, bool useRight)
+    {
+        float weight = 0f;
+        float moment = 0f;
+        copRejected = 0;
+        for (int side = 0; side < 2; side++)
+        {
+            for (int k = 0; k < copPointCount[side]; k++)
+            {
+                float x = copPointX[side * CopPointCapacity + k];
+                float w = copPointW[side * CopPointCapacity + k];
+                bool onPlate = (useLeft && x >= solePlateMinX[0] && x <= solePlateMaxX[0])
+                    || (useRight && x >= solePlateMinX[1] && x <= solePlateMaxX[1]);
+                if (onPlate)
+                {
+                    moment += x * w;
+                    weight += w;
+                }
+                else
+                {
+                    copRejected++;
+                }
+            }
+        }
+        copValid = weight > 1e-6f ? 1 : 0;
+        return copValid == 1 ? moment / weight : fallbackX;
+    }
+
+    // True when the IK that most recently drove a leg had to clamp its reach.
+    // Two implementations exist (the capture walker's chord clamp in
+    // SolveCaptureLegIk and the pose controller's dy/length clamp in
+    // SolveLegIk); the recorder reports whichever solved most recently instead
+    // of guessing which one is "the" walker. Instrumentation only.
+    private int ResolveIkSaturated()
+    {
+        int frame = Time.frameCount;
+        int captureTick = balance != null ? balance.CaptureIkSolveTick : int.MinValue;
+        int poseTick = pose != null ? pose.IkSolveTick : int.MinValue;
+        if (captureTick != int.MinValue && captureTick >= poseTick
+            && frame - captureTick <= 2)
+            return balance.CaptureIkSaturated ? 1 : 0;
+        if (poseTick != int.MinValue && frame - poseTick <= 2)
+            return pose.IkSaturated ? 1 : 0;
+        return 0;
+    }
+
+    // The four sole plates are the heel and toe colliders Human.CreateLeg builds
+    // ("LeftLegFoot"/"LeftLegToe", ...), the same boxes BalanceController
+    // caches. Resolved lazily: the rig may still be constructing at Bind time.
+    private void ResolveSoleColliders()
+    {
+        if (human == null) return;
+        soleCollider[0] = SegmentCollider("LeftLegFoot");
+        soleCollider[1] = SegmentCollider("LeftLegToe");
+        soleCollider[2] = SegmentCollider("RightLegFoot");
+        soleCollider[3] = SegmentCollider("RightLegToe");
+        bool any = soleCollider[0] != null || soleCollider[1] != null
+            || soleCollider[2] != null || soleCollider[3] != null;
+        // Only latch when something was found: a first Sample before the body is
+        // built must not freeze four nulls forever.
+        if (any) soleCollidersResolved = true;
+    }
+
+    private Collider2D SegmentCollider(string name)
+    {
+        Transform t = human.transform.Find(name);
+        return t != null ? t.GetComponent<Collider2D>() : null;
+    }
+
     private void CompleteLegRequestRecord(BalanceController.CaptureWalkTap tap,
                                           int tapActive)
     {
