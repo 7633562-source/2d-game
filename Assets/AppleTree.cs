@@ -15,6 +15,18 @@ public class AppleTree : TreeBase
     [Tooltip("Apples hung on each outer twig.")]
     public int applesPerTwig = 2;
 
+    [Header("Height — Yury 18.09: random 2–5 m from the seed")]
+    [Tooltip("Lowest crown height, m. Every part size scales to hit the target.")]
+    public float minHeightM = 2.0f;
+    [Tooltip("Highest crown height, m.")]
+    public float maxHeightM = 5.0f;
+    [Tooltip("This tree's target crown height, m. 0 = derive from the seed on build.")]
+    public float appleHeightM;
+
+    // Crown height above the root the base recipe (trunk 0.82 m) reaches.
+    // Measured 18.09: startCrownY 0.332 m above the −2 m root (same as the oak).
+    private const float baseHeightM = 2.332f;
+
     private readonly Color leafGreen = new Color(0.24f, 0.50f, 0.22f, 1f);
     private readonly Color leafGreenFar = new Color(0.20f, 0.42f, 0.14f, 1f);
     private readonly Color crownGreen = new Color(0.22f, 0.46f, 0.20f, 1f);
@@ -41,6 +53,8 @@ public class AppleTree : TreeBase
         stumpWidth = 0.20f;
         lengthDecay = 0.72f;
         widthDecay = 0.65f;
+        minWidth = 0.04f;
+        minLength = 0.18f;
         forkAngle = 28f;
         forkJitter = 4f;
         leaderForkShare = 0.28f;
@@ -51,6 +65,24 @@ public class AppleTree : TreeBase
         worldHoldScale = 0f;
         sideLengthScale = 1f;
         growsLeaves = true;
+
+        // Yury 18.09 (JOB 3): apple height is random 2–5 m from the seed, so
+        // two runs of one build stay identical (never an unseeded Random).
+        // One factor multiplies every part size (collider.size, not
+        // localScale), so the tree lands on the target height and keeps its
+        // 15 segments at both extremes.
+        if (appleHeightM <= 0f)
+        {
+            System.Random heightRng = new System.Random(seed);
+            appleHeightM = Mathf.Lerp(minHeightM, maxHeightM, (float)heightRng.NextDouble());
+        }
+        float scale = appleHeightM / baseHeightM;
+        trunkLength *= scale;
+        trunkWidth *= scale;
+        stumpHeight *= scale;
+        stumpWidth *= scale;
+        minWidth *= scale;
+        minLength *= scale;
     }
 
     protected override void DecorateNode(HumanSegment seg, int depth, float heading, bool farSide, bool isTip)

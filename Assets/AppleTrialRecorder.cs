@@ -89,6 +89,10 @@ public class AppleTrialRecorder
             json.Append(",\"treePerchPadCount\":0");
             AppendStr(json, "treeRig", "Sway");
             AppendStr(json, "treeKind", tree.KindName);
+            json.Append(",\"appleSeed\":").Append(tree.seed.ToString(CultureInfo.InvariantCulture));
+            if (tree is AppleTree apple)
+                json.Append(",\"appleHeightM\":").Append(apple.appleHeightM.ToString("0.###", CultureInfo.InvariantCulture));
+            AppendNum(json, "appleHeightActualM", tree.HeightMeters);
             json.Append(",\"treeSeed\":").Append(tree.seed.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"treeLeafCount\":").Append(tree.LeafCount.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"treeFruitCount\":").Append(tree.FruitCount.ToString(CultureInfo.InvariantCulture));
