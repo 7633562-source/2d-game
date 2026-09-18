@@ -46,13 +46,16 @@ materials only, PPU 128 / 100 / 32 / 512 as above.
 ## Proof that the loaders find them
 
 `Assets/Editor/ArtImportCheck.cs` loads every path exactly the way the loaders do and exits non-zero
-if anything is missing. Run (bash, editor closed):
+if anything is missing. Run (bash, editor closed, **without** `-nographics` — the tiling check is a
+render and skips itself silently when there is no graphics device):
 
 ```
-"F:/6000.5.8f1/Editor/Unity.exe" -batchmode -nographics \
+"F:/6000.5.8f1/Editor/Unity.exe" -batchmode \
   -projectPath "E:/Games/2D Game/My project" \
-  -executeMethod ArtImportCheck.VerifyArt -logFile <logfile> -quit
+  -executeMethod ArtImportCheck.VerifyArt \
+  -logFile "E:/Games/2D Game/My project/Logs/art-import-check.log" -quit
 ```
+
 
 Result 18.09: `failures=0`, and for each key
 `Level/ground_fill via Load<Sprite> sprite=ground_fill rect=1024x256 ppu=128 ...`,
@@ -71,6 +74,38 @@ ART-IMPORT-CHECK TILE ground_fill period=256px colourDiffAtOneTile=0.0000 -> REP
 The sprite's texture reports `wrapMode = Clamp` at runtime even though the import keeps
 `wrapU/wrapV: 1`, so the pixel test is the only trustworthy answer - and it is positive.
 
+## Re-verified 18.09 20:18 - independent run on the committed bytes
+
+Same command as above (`-logFile Logs/art-import-check.log`, editor closed). Log kept as
+`Logs/art-import-check-2026-09-18-2018.log`. Result `ART-IMPORT-CHECK end failures=0`, `ExitCode: 0`:
+
+```
+ART-IMPORT-CHECK OK Level/ground_fill via Load<Sprite> rect=1024x256 ppu=128 native=8x2m    format=RGB24
+ART-IMPORT-CHECK OK Level/ground_cap  via Load<Sprite> rect=128x14  ppu=100 native=1,28x0,14m RGBA32
+ART-IMPORT-CHECK OK Level/sky         via Load<Sprite> rect=512x128 ppu=32  native=16x4m   format=RGB24
+ART-IMPORT-CHECK OK Level/sign_finish via Load<Sprite> rect=64x320  ppu=100 native=0,64x3,2m RGBA32
+ART-IMPORT-CHECK OK Art/skin ... Art/leaf  tex=512x512 readable=True
+ART-IMPORT-CHECK OK LevelArt.HasFill/HasCap/HasSign/Sky()/Fill()/Cap()/Sign()
+ART-IMPORT-CHECK TILE ground_cap  box=8x0,14m period=164px colourDiffAtOneTile=0,0030 -> REPEATS
+ART-IMPORT-CHECK TILE ground_fill box=32x2m   period=256px colourDiffAtOneTile=0,0000 -> REPEATS
+```
+
+`RGBA32` on `ground_cap` and `sign_finish` and `RGB24` on the two opaque pictures is the correct
+split: Unity keeps alpha only where the art uses it. `readable=True` is what `ArtLibrary.SoftMap` /
+`TileMap` need on the material path; `isReadable: 0` on the four level pictures is fine, `LevelArt`
+only ever takes the Sprite.
+
+Offline check of the same bytes (`PIL` + `numpy`, no Unity): every file decodes, every picture is
+painted rather than blank (ground_fill 3430 distinct colours, sky 219, ground_cap 72, sign_finish 7 -
+a flat sign), alpha sits where it belongs (fill/sky 100% opaque, cap 20.6% clear, sign 61.6% clear), and
+none of the 222 `.meta` files in the project shares a guid (222 distinct - the metas were copied from
+an existing sprite, so a duplicated guid was the real risk here).
+
+Seam control experiment (source `LegacyArt/<key>.png` vs the shipped 512 vs a wrap-aware control
+resize): the 512 LANCZOS downscale is **not** what makes a tile non-seamless - mean pixel distance to
+the wrap-aware control is 0.00-0.02 of 255 and the seam figures barely move. Residual seams are in the
+legacy source art.
+
 ## Left as a labelled gap (not delivered, deliberately)
 
 1. **Per-part sprites for the creatures and the human.** The pre-stub `ArtLibrary` keys are
@@ -87,6 +122,16 @@ The sprite's texture reports `wrapMode = Clamp` at runtime even though the impor
    shows `ground_fill` already tiles seamlessly at its 8 m period, so the art is ready for it.
 4. **Sky/ground look in other scenes changes** as soon as these files exist (`LevelArt.Sky() != null`
    switches `DayNightCycle` to its textured branch). Pictures only - no code, no physics, no collider.
+5. **The material tiles tile only approximately.** Copy cost across the wrap seam vs the natural
+   neighbour cost inside the tile (0-255, measured on the shipped 512s): `ground_fill` 6.23/6.25 and
+   `ground_cap` 0.04/1.91 read seamless, `fabric` 4.29/2.04, `dirt` 10.36/8.49, `denim` 16.90/15.39,
+   `grass` 22.63/19.65, `bark` 20.52/14.27, `leaf` 12.62/9.40, `skin` X 4.42/3.01 **Y 18.53/3.40**. A 2x2
+   repeat of `skin`, `fabric`, `bark` and `leaf` shows a light cross through the boundary by eye. The
+   legacy sources measure the same way (`skin` Y 19.22/4.35), so this is the incoming art, not the
+   downscale - repairing it means a wrap blend on the tile edges, which is an art decision and is left
+   open. Nothing draws these tiles yet (`ArtLibrary` is a stub), so no scene shows the seam today.
+6. **`ground_fill` is seamless in X only** (Y 10.05/6.37). It matters only if a slab is drawn taller
+   than the native 2 m; `ArtImportCheck` tiles the widest slab it has (32x2 m, horizontal only).
 
 ## Physics
 
