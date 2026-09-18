@@ -445,6 +445,80 @@ public partial class BalanceController
     public float CaptureWalkFootTargetX => capturePlan.valid ? capturePlan.targetX : 0f;
     public float CaptureWalkBStar => capturePlan.valid ? capturePlan.bStar : 0f;
     public float CaptureWalkOmega0 => captureLastOmega0;
+
+    // ─── WALK-1 per-frame command tap (instrumentation only) ───
+    // What the walker COMMANDED this frame, which drive method wrote it, and
+    // how the gait machine got there. Nothing in the controller reads a field
+    // of this struct: no gain, limit, threshold or sign depends on it, and the
+    // codes below are frozen so an old CSV stays readable.
+    // Owner codes, per joint and side, of the LAST writer this frame.
+    public const int TapOwnerNone = 0;
+    public const int TapOwnerStancePlant = 1;
+    public const int TapOwnerHoldMeasured = 2;
+    public const int TapOwnerHoldKnee = 3;
+    public const int TapOwnerSwingKneeLift = 4;
+    public const int TapOwnerSwingLeg = 5;
+    public const int TapOwnerLandingHip = 6;
+    public const int TapOwnerRestoreHip = 7;
+    public const int TapOwnerLegLengthKnee = 8;
+    public const int TapOwnerTrailHipHold = 9;
+    public const int TapOwnerLandingKnee = 10;
+    public const int TapOwnerDirtFoldAnkle = 11;
+    public const int TapOwnerSwingAnkle = 12;
+    public const int TapOwnerCopAnkle = 13;
+    public const int TapOwnerZero = 14;
+
+    // Abort codes: why TickCaptureWalk handed the joints back this frame.
+    public const int TapAbortNone = 0;
+    public const int TapAbortCollapsed = 1;
+    public const int TapAbortPoseHold = 2;
+    public const int TapAbortReturnPlant = 3;
+    public const int TapAbortBothAir = 4;
+    public const int TapAbortHeap = 5;
+    public const int TapAbortTiltPast = 6;
+
+    // Role codes for the tap: what the gait machine says each side is.
+    public const int TapRoleStance = 1;
+    public const int TapRoleSwing = 2;
+
+    public struct CaptureWalkTap
+    {
+        public int tick;               // Time.frameCount of the last publish
+        public int active;             // 1 = the walker ticked on that frame
+        public long walkTicks;         // how many times the walker has ticked
+        public int abortCode;          // why the tick handed the joints back
+        public int ownerHipL, ownerHipR, ownerKneeL, ownerKneeR;
+        public int ownerAnkleL, ownerAnkleR;
+        // Requested TARGET ANGLE, degrees, per joint. NaN = this joint was
+        // not commanded as an angle this frame (the CoP ankle loop is a
+        // torque command, so it fills copCmd* instead).
+        public float reqHipL, reqHipR, reqKneeL, reqKneeR, reqAnkleL, reqAnkleR;
+        public float copCmdL, copCmdR;
+        public int roleL, roleR;       // TapRoleStance / TapRoleSwing
+        public int gaitState;          // (int)captureGait.State: 0 DS, 1 Swing,
+                                       // 2 TouchdownBlend, 3 RecoveryStep
+        public float gaitStateAge;     // captureGait.StateAge, seconds
+        public int dualSupport;        // 1 = gait in DualSupport / TouchdownBlend
+        public int swapReason;         // GaitStateMachine.Reason* of the last swap
+        public int swapMode;           // 1 paired, 2 catchOwns
+        public float swapAge;          // gait StateAge when the swap fired
+        public int gaitSteps;          // GaitStateMachine.StepCount
+        public int entryReason;        // this frame's phase-entry reason
+        public int gateMask;           // first-step gate bits (GaitStateMachine.Gate*)
+        public int rejectCode;         // why no step opened this frame
+        public int planValid;          // the frozen footstep plan was accepted
+        public int touchL, touchR;     // ContactSensor.Touching
+        public int loadedL, loadedR;   // ContactSensor.Loaded
+        public int supportL, supportR; // ContactSensor supporting / CaptureFootSupporting
+    }
+
+    public CaptureWalkTap walkTap;
+
+    // Owner standing by to write the next hip / knee / ankle target. Set by
+    // each drive method on entry, cleared every tick.
+    private int tapWriterHip;
+    private int tapWriterKnee;
+    private int tapWriterAnkle;
     public bool CaptureWalkRecovering => captureState == CaptureWalkState.RecoveryStep;
     // Last World.collapsed / World.posed handed to GaitStateMachine.
     // TrialRecorder copies the first 3 s of walk into walkOnsetLog.
@@ -822,6 +896,22 @@ public partial class BalanceController
     private void TickCaptureWalk(float comOffset)
     {
         _ = comOffset;
+        // WALK-1: fresh tap. Every owner starts at None, so a joint no drive
+        // method writes this frame is visibly unowned instead of stale.
+        walkTap.walkTicks++;
+        walkTap.tick = Time.frameCount;
+        walkTap.active = 1;
+        walkTap.abortCode = TapAbortNone;
+        walkTap.ownerHipL = walkTap.ownerHipR = TapOwnerNone;
+        walkTap.ownerKneeL = walkTap.ownerKneeR = TapOwnerNone;
+        walkTap.ownerAnkleL = walkTap.ownerAnkleR = TapOwnerNone;
+        walkTap.reqHipL = walkTap.reqHipR = float.NaN;
+        walkTap.reqKneeL = walkTap.reqKneeR = float.NaN;
+        walkTap.reqAnkleL = walkTap.reqAnkleR = float.NaN;
+        walkTap.copCmdL = walkTap.copCmdR = float.NaN;
+        tapWriterHip = TapOwnerNone;
+        tapWriterKnee = TapOwnerNone;
+        tapWriterAnkle = TapOwnerNone;
         float dt = Time.fixedDeltaTime;
         ResolveLegLinkOnce();
         captureMixer.activationSpeed = muscleActivationSpeed;
@@ -918,6 +1008,7 @@ public partial class BalanceController
         // the first freeze — that test would abort the trail-up.
         if (firstDs && collapsed)
         {
+            walkTap.abortCode = TapAbortCollapsed;
             ReturnCaptureWalkToStandingPlant();
             return;
         }
@@ -936,6 +1027,7 @@ public partial class BalanceController
             && stepPhaseDriver.walkRecoverAnyPose > 0.5f
             && !stepPhaseDriver.StandingPlantHoldReady)
         {
+            walkTap.abortCode = TapAbortPoseHold;
             ReturnCaptureWalkToStandingPlant();
             return;
         }
@@ -959,6 +1051,7 @@ public partial class BalanceController
             float plantLead = (com.x - plantFootX) * dir;
             if (stepPhaseDriver.StandingPlantHeap(plantLead))
             {
+                walkTap.abortCode = TapAbortHeap;
                 ReturnCaptureWalkToStandingPlant();
                 return;
             }
@@ -975,6 +1068,7 @@ public partial class BalanceController
             && Mathf.Abs(vestibularSystem.GetBodyTilt())
                 >= Mathf.Max(20f, getUpFallenAbsTilt))
         {
+            walkTap.abortCode = TapAbortTiltPast;
             ReturnCaptureWalkToStandingPlant();
             return;
         }
@@ -1088,6 +1182,15 @@ public partial class BalanceController
                 leftSupporting = CaptureFootSupporting(true),
                 rightSupporting = CaptureFootSupporting(false)
             });
+        // WALK-1: what the soles were doing, straight off the contact sensor.
+        walkTap.touchL = captureContact.Touching(true) ? 1 : 0;
+        walkTap.touchR = captureContact.Touching(false) ? 1 : 0;
+        walkTap.loadedL = captureContact.Loaded(true) ? 1 : 0;
+        walkTap.loadedR = captureContact.Loaded(false) ? 1 : 0;
+        walkTap.supportL = CaptureFootSupporting(true) ? 1 : 0;
+        walkTap.supportR = CaptureFootSupporting(false) ? 1 : 0;
+        walkTap.roleL = captureGait.IsStanceFoot(true) ? TapRoleStance : TapRoleSwing;
+        walkTap.roleR = captureGait.IsStanceFoot(false) ? TapRoleStance : TapRoleSwing;
         // p_auto 19:42: DecideSwing late used freeze age (0.415) while
         // the curve tracks air age (0.380). Recovery of that still-
         // pressing periodic sole is the chair (getUpFallTime 6.225,
@@ -1154,6 +1257,23 @@ public partial class BalanceController
             captureDirtLiftAge = -1f;
             ClearDirtFoldLatch();
         }
+        // WALK-1: gait evidence, published after Apply so the swap latch is
+        // this frame's. roleL/R are re-read below; these are the machine's.
+        walkTap.dualSupport = captureGait.IsDualSupport ? 1 : 0;
+        walkTap.swapReason = captureGait.LastSwapReason;
+        walkTap.swapMode = captureGait.LastSwapMode;
+        walkTap.swapAge = captureGait.LastSwapStateAge;
+        walkTap.gaitSteps = captureGait.StepCount;
+        walkTap.entryReason = captureGait.LastEntryReason;
+        walkTap.gateMask = captureGait.LastGateMask;
+        walkTap.rejectCode = captureGait.LastRejectCode;
+        walkTap.planValid = capturePlan.valid ? 1 : 0;
+        // The walker's own state, so the CSV's walkPhase column can be told
+        // apart from the StepPhaseDriver fallback (they share the 0..3 codes).
+        walkTap.gaitState = (int)captureGait.State;
+        walkTap.gaitStateAge = captureGait.StateAge;
+        walkTap.roleL = captureGait.IsStanceFoot(true) ? TapRoleStance : TapRoleSwing;
+        walkTap.roleR = captureGait.IsStanceFoot(false) ? TapRoleStance : TapRoleSwing;
 
         // The switch may have swapped roles: re-read the sides before any
         // joint is written, so no hinge gets last frame's owner.
@@ -1169,11 +1289,13 @@ public partial class BalanceController
         // collapsed = hip | BodyCollapsed; column is onset log only.
         if (collapsed && !firstDs)
         {
+            walkTap.abortCode = TapAbortCollapsed;
             ReturnCaptureWalkToStandingPlant();
             return;
         }
         if (CaptureWalkShouldReturnToStandingPlant(collapsed))
         {
+            walkTap.abortCode = TapAbortReturnPlant;
             ReturnCaptureWalkToStandingPlant();
             return;
         }
@@ -1187,6 +1309,7 @@ public partial class BalanceController
             && stepPhaseDriver != null
             && stepPhaseDriver.walkRecoverAnyPose > 0.5f)
         {
+            walkTap.abortCode = TapAbortBothAir;
             ReturnCaptureWalkToStandingPlant();
             return;
         }
@@ -1626,6 +1749,8 @@ public partial class BalanceController
     // of the dump. Not global toe-off, not scissor, not heel-plant latch.
     private void DriveCaptureSwingLeg()
     {
+        tapWriterHip = TapOwnerSwingLeg;
+        tapWriterKnee = TapOwnerSwingLeg;
         bool left = capturePlan.swingSide < 0;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         float pelvisTilt = vestibularSystem != null ? vestibularSystem.GetPelvisTilt() : 0f;
@@ -1796,6 +1921,17 @@ public partial class BalanceController
                       * Mathf.Clamp01((phase - 0.5f) * 2f);
         if (!captureSwingLeftGround)
             toeUp = Mathf.Max(0f, captureFootPitchDeg);
+        // WALK-1: the ankle target this method asks for, before the PD.
+        if (left)
+        {
+            walkTap.reqAnkleL = shinDeg - toeUp;
+            walkTap.ownerAnkleL = TapOwnerSwingAnkle;
+        }
+        else
+        {
+            walkTap.reqAnkleR = shinDeg - toeUp;
+            walkTap.ownerAnkleR = TapOwnerSwingAnkle;
+        }
         if (left)
             captureMixer.JointStable(joint, shinDeg - toeUp, hipPGain, hipDGain,
                 errorReferenceDegrees, flexor, extensor, ref leftAnkleEffectiveInertia);
@@ -1833,6 +1969,17 @@ public partial class BalanceController
         float u = Mathf.Clamp01(foldU * 3f);
         if (u < 0.35f) u = 0.35f;
         float target = Mathf.LerpAngle(held, want, u);
+        // WALK-1: the folded ankle target this method asks for.
+        if (left)
+        {
+            walkTap.reqAnkleL = target;
+            walkTap.ownerAnkleL = TapOwnerDirtFoldAnkle;
+        }
+        else
+        {
+            walkTap.reqAnkleR = target;
+            walkTap.ownerAnkleR = TapOwnerDirtFoldAnkle;
+        }
         if (left)
             captureMixer.JointStable(joint, target, hipPGain, hipDGain,
                 errorReferenceDegrees, flexor, extensor, ref leftAnkleEffectiveInertia);
@@ -1907,6 +2054,7 @@ public partial class BalanceController
     // pelvis +8→+21° in 0.1 s (capwalk14) or sits it plus (capwalk3).
     private void DriveCaptureRestoreHip(bool left, bool loadedCap)
     {
+        tapWriterHip = TapOwnerRestoreHip;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         if (hip == null || hip.attachedRigidbody == null) return;
         ApplyCaptureHip(left,
@@ -1918,6 +2066,18 @@ public partial class BalanceController
     private void DriveCaptureLandingHip(bool left)
     {
         DriveCaptureRestoreHip(left, CaptureFootLoaded(left));
+        // WALK-1: LandingHip IS a restore of the landing thigh's angle, so
+        // relabel the write this call just made; the two callers then differ
+        // in the table.
+        if (left)
+        {
+            if (walkTap.ownerHipL == TapOwnerRestoreHip)
+                walkTap.ownerHipL = TapOwnerLandingHip;
+        }
+        else if (walkTap.ownerHipR == TapOwnerRestoreHip)
+        {
+            walkTap.ownerHipR = TapOwnerLandingHip;
+        }
     }
 
     // Dirt-lift clock in DualSupport. take = stance extend toward 0
@@ -2185,6 +2345,8 @@ public partial class BalanceController
     // toe-off (stance MTP is 0).
     private void DriveCaptureSwingKneeLift(bool left, bool allowFold = true)
     {
+        tapWriterHip = TapOwnerSwingKneeLift;
+        tapWriterKnee = TapOwnerSwingKneeLift;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         HingeJoint2D ankle = left ? leftAnkleJoint : rightAnkleJoint;
         float quiet = float.IsNaN(captureEntryKneeDeg) ? kneeBaseAngle : captureEntryKneeDeg;
@@ -2246,6 +2408,7 @@ public partial class BalanceController
     // Later steps cap live IK at that walking chord.
     private void DriveCaptureStancePlant(bool left)
     {
+        tapWriterKnee = TapOwnerStancePlant;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         HingeJoint2D knee = left ? leftKneeJoint : rightKneeJoint;
         DriveCaptureRestoreHip(left, true);
@@ -2286,6 +2449,7 @@ public partial class BalanceController
     // must keep the thigh it landed with until CoM leaves its plate.
     private void DriveCaptureHoldMeasuredHip(bool left, bool loadedCap)
     {
+        tapWriterHip = TapOwnerHoldMeasured;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         if (hip == null) return;
         ApplyCaptureHip(left, hip.jointAngle, loadedCap);
@@ -2297,6 +2461,7 @@ public partial class BalanceController
     // KneeLift then shortens about this same angle.
     private void DriveCaptureTrailHipHold(bool left)
     {
+        tapWriterHip = TapOwnerTrailHipHold;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         if (float.IsNaN(captureDirtFoldHipDeg))
             captureDirtFoldHipDeg = hip != null ? hip.jointAngle : 0f;
@@ -2312,6 +2477,22 @@ public partial class BalanceController
             left ? leftHipExtensor : rightHipExtensor,
             left ? leftKneeFlexor : rightKneeFlexor,
             left ? leftKneeExtensor : rightKneeExtensor);
+        // WALK-1: the muscles are snapped to zero, so the target this frame is
+        // that zero, and no drive method owns the joint.
+        if (left)
+        {
+            walkTap.ownerHipL = TapOwnerZero;
+            walkTap.ownerKneeL = TapOwnerZero;
+            walkTap.reqHipL = float.NaN;
+            walkTap.reqKneeL = float.NaN;
+        }
+        else
+        {
+            walkTap.ownerHipR = TapOwnerZero;
+            walkTap.ownerKneeR = TapOwnerZero;
+            walkTap.reqHipR = float.NaN;
+            walkTap.reqKneeR = float.NaN;
+        }
     }
 
     // The plant is a point on the SLAB, not a point on the foot, and not a
@@ -2363,6 +2544,7 @@ public partial class BalanceController
     // there is a taut yank that peels the loaded rear.
     private void DriveCaptureLegLengthKnee(bool left)
     {
+        tapWriterKnee = TapOwnerLegLengthKnee;
         ApplyCaptureKnee(left, CaptureStanceKneeDeg());
     }
 
@@ -2371,6 +2553,7 @@ public partial class BalanceController
     // the slab. Do not length-servo it to mid-stance.
     private void DriveCaptureHoldKnee(bool left, bool limitPush = true)
     {
+        tapWriterKnee = TapOwnerHoldKnee;
         HingeJoint2D joint = left ? leftKneeJoint : rightKneeJoint;
         if (joint == null) return;
         float target = joint.jointAngle;
@@ -2395,6 +2578,7 @@ public partial class BalanceController
     // the same clock, so it is a schedule, not a second regulator.
     private void DriveCaptureLandingKnee(bool left, float blend)
     {
+        tapWriterKnee = TapOwnerLandingKnee;
         float b = Mathf.Clamp01(blend);
         float target = Mathf.Lerp(captureLastIkKneeDeg, CaptureStanceKneeDeg(), b)
                        + Mathf.Max(0f, captureLandKneeFlex) * (1f - b);
@@ -2496,6 +2680,18 @@ public partial class BalanceController
         if ((com.x - toeX) * dir > 0f)
             command = Mathf.Min(command, 0f);
         captureMixer.ApplyAnkle(joint, command, flexor, extensor, ankleLimitMargin);
+        // WALK-1: the CoP loop commands TORQUE, not an angle; record which
+        // joint it took and the command, and leave reqAnkle* NaN.
+        if (left)
+        {
+            walkTap.copCmdL = command;
+            walkTap.ownerAnkleL = TapOwnerCopAnkle;
+        }
+        else
+        {
+            walkTap.copCmdR = command;
+            walkTap.ownerAnkleR = TapOwnerCopAnkle;
+        }
     }
 
     // MTP pose for the capture walker. Zero is a flat plate in mid-stance.
@@ -2594,6 +2790,18 @@ public partial class BalanceController
                     errorRef = errorReferenceDegrees
                 });
         }
+        // WALK-1: the target actually handed to the PD, after the load cap,
+        // next to the method that asked for it.
+        if (left)
+        {
+            walkTap.reqHipL = targetDeg;
+            walkTap.ownerHipL = tapWriterHip;
+        }
+        else
+        {
+            walkTap.reqHipR = targetDeg;
+            walkTap.ownerHipR = tapWriterHip;
+        }
         if (left)
             captureMixer.JointStable(joint, targetDeg, hipPGain, hipDGain,
                 errorReferenceDegrees, flexor, extensor, ref leftHipEffectiveInertia);
@@ -2609,6 +2817,17 @@ public partial class BalanceController
         Muscle extensor = left ? leftKneeExtensor : rightKneeExtensor;
         if (joint == null || flexor == null || extensor == null) return;
         targetDeg = CaptureSupportKneeTarget(left, joint, targetDeg, limitPush);
+        // WALK-1: the target after the loaded-knee bounds.
+        if (left)
+        {
+            walkTap.reqKneeL = targetDeg;
+            walkTap.ownerKneeL = tapWriterKnee;
+        }
+        else
+        {
+            walkTap.reqKneeR = targetDeg;
+            walkTap.ownerKneeR = tapWriterKnee;
+        }
         if (left)
             captureMixer.JointStable(joint, targetDeg, kneePGain, kneeDGain,
                 errorReferenceDegrees, flexor, extensor, ref leftKneeEffectiveInertia);

@@ -246,6 +246,9 @@ public class TrialRecorder
     private int samplesOnsetWindow;
     private int samplesOnsetCollapsed;
     private int samplesOnsetPosed;
+    // WALK-1: the walker's tick counter at the previous row, so tapFresh can
+    // tell a live command from a frozen last one.
+    private long lastTapTicks = -1;
 
     public TrialRecorder(Human human, string label)
         : this(human, new TrialRunInfo { Label = label })
@@ -396,7 +399,81 @@ public class TrialRecorder
             // down = on the ground this frame, fell = latched at the first
             // down frame, so the frame the flag turns true is in the CSV.
             .Append("down").Append(';')
-            .Append("fell").AppendLine();
+            .Append("fell").Append(';')
+            // ─── WALK-1 command tap: APPEND-ONLY ───
+            // Every column above keeps its name: probes parse them. These are
+            // added at the end, one row per frame, on the walk trial only.
+            // ownerHip*/Knee*/Ankle* — which drive method wrote that joint
+            // this frame (0 = nobody, see BalanceController.TapOwner*).
+            // reqHip*/Knee* — the target ANGLE it handed to the PD, degrees,
+            // after the loaded caps. reqAnkle* is NaN when the CoP loop owned
+            // the ankle, because that loop commands torque (copCmd*).
+            // appTorque* — activation * maxTorque * direction of the pair,
+            // i.e. the torque the actuators really applied.
+            // swapReason/swapMode/swapAge — why the last role swap fired
+            // (1 contact, 2 clock, 3 lead, 4 watchdog, 5 emergency, 6 late;
+            // 1 paired / 2 catchOwns) and the gait age when it did.
+            // gateMask/rejectCode — the first-step gates that passed, and the
+            // first one that did not. planValid — the frozen plan accepted.
+            // soleClear*/footLoaded* — measured sole clearance above the slab
+            // and the contact sensor's own load flags.
+            .Append("tapActive").Append(';')
+            .Append("tapAge").Append(';')
+            .Append("tapFresh").Append(';')
+            .Append("tapTicks").Append(';')
+            .Append("walkTapAbort").Append(';')
+            .Append("ownerHipL").Append(';')
+            .Append("ownerHipR").Append(';')
+            .Append("ownerKneeL").Append(';')
+            .Append("ownerKneeR").Append(';')
+            .Append("ownerAnkleL").Append(';')
+            .Append("ownerAnkleR").Append(';')
+            .Append("reqHipL").Append(';')
+            .Append("reqHipR").Append(';')
+            .Append("reqKneeL").Append(';')
+            .Append("reqKneeR").Append(';')
+            .Append("reqAnkleL").Append(';')
+            .Append("reqAnkleR").Append(';')
+            .Append("copCmdL").Append(';')
+            .Append("copCmdR").Append(';')
+            .Append("appTorqueHipL").Append(';')
+            .Append("appTorqueHipR").Append(';')
+            .Append("appTorqueKneeL").Append(';')
+            .Append("appTorqueKneeR").Append(';')
+            .Append("appTorqueAnkleL").Append(';')
+            .Append("appTorqueAnkleR").Append(';')
+            .Append("roleL").Append(';')
+            .Append("roleR").Append(';')
+            .Append("gaitState").Append(';')
+            .Append("gaitStateAge").Append(';')
+            .Append("stepWalkActive").Append(';')
+            .Append("stepPhaseCode").Append(';')
+            .Append("stepSwapCount").Append(';')
+            .Append("dualSupport").Append(';')
+            .Append("swapReason").Append(';')
+            .Append("swapMode").Append(';')
+            .Append("swapAge").Append(';')
+            .Append("gaitSteps").Append(';')
+            .Append("entryReason").Append(';')
+            .Append("gateMask").Append(';')
+            .Append("rejectCode").Append(';')
+            .Append("planValid").Append(';')
+            .Append("footTouchL").Append(';')
+            .Append("footTouchR").Append(';')
+            .Append("footLoadedL").Append(';')
+            .Append("footLoadedR").Append(';')
+            .Append("footSupportL").Append(';')
+            .Append("footSupportR").Append(';')
+            .Append("soleClearL").Append(';')
+            .Append("soleClearR").Append(';')
+            // Who owned the BODY after the walker stopped. The walker is
+            // dropped when StepPhaseDriver.StandingRestore/Surrender is armed
+            // or the locomotion state leaves Standing/Walking, and
+            // BalanceController then falls through to the standing Plant that
+            // holds the last leg command. locoState = (int)balance.locomotionState.
+            .Append("stepStandingRestore").Append(';')
+            .Append("stepStandingSurrender").Append(';')
+            .Append("locoState").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -789,6 +866,24 @@ public class TrialRecorder
         SampleDampingWatch(elbowWatch);
         SampleDampingWatch(wristWatch);
 
+        // ─── WALK-1 command tap ───
+        // The walker's own per-frame record. tapAge is the frame gap between
+        // the publish and this sample: 0-1 is the same physics step, a larger
+        // number means the walker did NOT tick (its rows are then stale).
+        BalanceController.CaptureWalkTap tap = balance != null
+            ? balance.walkTap
+            : default(BalanceController.CaptureWalkTap);
+        int tapAge = tap.active == 1 ? Time.frameCount - tap.tick : -1;
+        int tapActive = tap.active == 1 && tapAge >= 0 && tapAge <= 1 ? 1 : 0;
+        // Time.frameCount does not advance one-for-one with the physics in the
+        // headless loop, so freshness is judged on the walker's OWN counter:
+        // tapFresh 1 = the walker ticked since the previous row. A run of
+        // tapFresh 0 means every tap value below is a frozen last command.
+        int tapFresh = lastTapTicks < 0 || tap.walkTicks != lastTapTicks ? 1 : 0;
+        lastTapTicks = tap.walkTicks;
+        float soleClearL = state != null ? state.leftFootGroundClearance : float.NaN;
+        float soleClearR = state != null ? state.rightFootGroundClearance : float.NaN;
+
         // The same column set, without new[] and Join on every 200 Hz step.
         rows.Append(F(time)).Append(';')
             .Append(((int)currentState).ToString(CultureInfo.InvariantCulture)).Append(';')
@@ -874,7 +969,66 @@ public class TrialRecorder
             .Append(F(armDrive != null ? armDrive.PressRestL : 0f)).Append(';')
             .Append(F(armDrive != null ? armDrive.PressRestR : 0f)).Append(';')
             .Append(downNow ? "1" : "0").Append(';')
-            .Append(physicalFallTime >= 0f ? "1" : "0").AppendLine();
+            .Append(physicalFallTime >= 0f ? "1" : "0").Append(';')
+            // ─── WALK-1 command tap. Appended last, never reordered: the
+            // numbers are only meaningful next to the artifact that produced
+            // them (label + sourceFingerprint), and tapAge 0-1 means the
+            // walker ticked on this very frame.
+            .Append(tapActive).Append(';')
+            .Append(tapAge).Append(';')
+            .Append(tapFresh).Append(';')
+            .Append(tap.walkTicks).Append(';')
+            .Append(tap.abortCode).Append(';')
+            .Append(tap.ownerHipL).Append(';')
+            .Append(tap.ownerHipR).Append(';')
+            .Append(tap.ownerKneeL).Append(';')
+            .Append(tap.ownerKneeR).Append(';')
+            .Append(tap.ownerAnkleL).Append(';')
+            .Append(tap.ownerAnkleR).Append(';')
+            .Append(F(tap.reqHipL)).Append(';')
+            .Append(F(tap.reqHipR)).Append(';')
+            .Append(F(tap.reqKneeL)).Append(';')
+            .Append(F(tap.reqKneeR)).Append(';')
+            .Append(F(tap.reqAnkleL)).Append(';')
+            .Append(F(tap.reqAnkleR)).Append(';')
+            .Append(F(tap.copCmdL)).Append(';')
+            .Append(F(tap.copCmdR)).Append(';')
+            .Append(F(AppliedTorque(balance?.leftHipFlexor, balance?.leftHipExtensor))).Append(';')
+            .Append(F(AppliedTorque(balance?.rightHipFlexor, balance?.rightHipExtensor))).Append(';')
+            .Append(F(AppliedTorque(balance?.leftKneeFlexor, balance?.leftKneeExtensor))).Append(';')
+            .Append(F(AppliedTorque(balance?.rightKneeFlexor, balance?.rightKneeExtensor))).Append(';')
+            .Append(F(AppliedTorque(balance?.leftAnkleFlexor, balance?.leftAnkleExtensor))).Append(';')
+            .Append(F(AppliedTorque(balance?.rightAnkleFlexor, balance?.rightAnkleExtensor))).Append(';')
+            .Append(tap.roleL).Append(';')
+            .Append(tap.roleR).Append(';')
+            // gaitState* is the capture walker's own state; step* is the
+            // StepPhaseDriver the walkPhase/walkSwap columns fall back to
+            // when its walkActive goes false. Two counters, one row.
+            .Append(tap.gaitState).Append(';')
+            .Append(F(tap.gaitStateAge)).Append(';')
+            .Append(stepDriver != null && stepDriver.walkActive ? 1 : 0).Append(';')
+            .Append(stepDriver != null ? stepDriver.PhaseCode : -99).Append(';')
+            .Append(stepDriver != null ? stepDriver.SwapCount : -99).Append(';')
+            .Append(tap.dualSupport).Append(';')
+            .Append(tap.swapReason).Append(';')
+            .Append(tap.swapMode).Append(';')
+            .Append(F(tap.swapAge)).Append(';')
+            .Append(tap.gaitSteps).Append(';')
+            .Append(tap.entryReason).Append(';')
+            .Append(tap.gateMask).Append(';')
+            .Append(tap.rejectCode).Append(';')
+            .Append(tap.planValid).Append(';')
+            .Append(tap.touchL).Append(';')
+            .Append(tap.touchR).Append(';')
+            .Append(tap.loadedL).Append(';')
+            .Append(tap.loadedR).Append(';')
+            .Append(tap.supportL).Append(';')
+            .Append(tap.supportR).Append(';')
+            .Append(F(soleClearL)).Append(';')
+            .Append(F(soleClearR)).Append(';')
+            .Append(stepDriver != null && stepDriver.StandingRestore ? 1 : 0).Append(';')
+            .Append(stepDriver != null && stepDriver.StandingSurrender ? 1 : 0).Append(';')
+            .Append(balance != null ? (int)balance.locomotionState : -1).AppendLine();
     }
 
     private static float WatchAngle(JointDampingWatch watch, int index)
@@ -1818,6 +1972,19 @@ public class TrialRecorder
         float a = flexor != null ? flexor.activation : 0f;
         float b = extensor != null ? extensor.activation : 0f;
         return Mathf.Max(a, b);
+    }
+
+    // WALK-1: the torque a flexor/extensor pair is really applying. Muscle.Apply
+    // adds activation * maxTorque * direction to the body, so this sum is the
+    // APPLIED torque, next to the requested target angle in the same row.
+    private static float AppliedTorque(Muscle flexor, Muscle extensor)
+    {
+        float torque = 0f;
+        if (flexor != null)
+            torque += flexor.activation * flexor.maxTorque * flexor.direction;
+        if (extensor != null)
+            torque += extensor.activation * extensor.maxTorque * extensor.direction;
+        return torque;
     }
 
     private string FormatCaptureOnsetLog()

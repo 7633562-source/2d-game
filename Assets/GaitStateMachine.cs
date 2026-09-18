@@ -97,6 +97,44 @@ public sealed class GaitStateMachine
     public Contacts LastContacts { get; private set; }
     private bool rollLatched;
 
+    // ─── WALK-1 instrumentation: evidence only, nothing below reads it ───
+    // Why the last phase entry fired and what the first-step gates said. The
+    // recorder publishes these per frame; the state machine's own behaviour
+    // does not depend on any of them.
+    public const int ReasonNone = 0;
+    public const int ReasonContact = 1;
+    public const int ReasonClock = 2;
+    public const int ReasonLead = 3;
+    public const int ReasonWatchdog = 4;
+    public const int ReasonEmergency = 5;
+    public const int ReasonLate = 6;
+
+    // Role-swap mode: 1 = paired (both soles down for doubleSupportHold),
+    // 2 = catchOwns (the landing sole is the only support).
+    public const int SwapModeNone = 0;
+    public const int SwapModePaired = 1;
+    public const int SwapModeCatchOwns = 2;
+
+    // First-step gate bits, one bit per gate DecideDoubleSupport tests:
+    // 1 clock (StateAge >= doubleSupportMin), 2 trail heel up, 4 posed,
+    // 8 !collapsed, 16 suppressEmergency, 32 paired (roll/first/stacked),
+    // 64 canStep. The mask says which gates passed this frame.
+    public const int GateClock = 1;
+    public const int GateTrailUp = 2;
+    public const int GatePosed = 4;
+    public const int GateNotCollapsed = 8;
+    public const int GateSuppress = 16;
+    public const int GatePaired = 32;
+    public const int GateCanStep = 64;
+
+    public int LastEntryReason { get; private set; }
+    public float LastEntryStateAge { get; private set; }
+    public int LastSwapReason { get; private set; }
+    public int LastSwapMode { get; private set; }
+    public float LastSwapStateAge { get; private set; }
+    public int LastGateMask { get; private set; }
+    public int LastRejectCode { get; private set; }
+
     public bool IsDualSupport =>
         State == CaptureWalkState.DoubleSupport
         || State == CaptureWalkState.TouchdownBlend;
@@ -161,6 +199,10 @@ public sealed class GaitStateMachine
         float dt = Mathf.Max(0f, world.dt);
         StateAge += dt;
         LastContacts = contacts;
+        // WALK-1: the reason is per-frame evidence, so it is cleared here.
+        LastEntryReason = ReasonNone;
+        LastGateMask = 0;
+        LastRejectCode = 0;
 
         bool stanceLeft = StanceFoot < 0;
         bool swingTouching = Touching(contacts, !stanceLeft);
@@ -198,10 +240,14 @@ public sealed class GaitStateMachine
     public void Apply(Decision decision)
     {
         if (!decision.enter) return;
+        // WALK-1: latch why the phase changed, and why the last swap fired.
+        LastEntryStateAge = StateAge;
         if (decision.swapRoles)
         {
             StanceFoot = decision.newStanceSign >= 0 ? 1 : -1;
             StepCount++;
+            LastSwapReason = LastEntryReason;
+            LastSwapStateAge = StateAge;
             rollLatched = false;
         }
         Enter(decision.next);
@@ -278,6 +324,16 @@ public sealed class GaitStateMachine
         // Emergency already bypasses collapsed.
         bool canStep = ready && world.posed
                        && (!world.collapsed || StepCount > 0);
+        // WALK-1: publish the gate state of the step that is (not) opening.
+        int gateMask = 0;
+        if (StateAge >= minHold) gateMask |= GateClock;
+        if (trailUp) gateMask |= GateTrailUp;
+        if (world.posed) gateMask |= GatePosed;
+        if (!world.collapsed) gateMask |= GateNotCollapsed;
+        if (world.suppressEmergency) gateMask |= GateSuppress;
+        if (paired) gateMask |= GatePaired;
+        if (canStep) gateMask |= GateCanStep;
+        LastGateMask = gateMask;
         // CoM past the lead toe is statically unsupported — that is the
         // 6.3 s transfer stall (c125adbd / burn_walk onset +1.30 s).
         // Label 6.300 = BalanceController.UpdateState fallCoMOffset 0.30
@@ -299,6 +355,7 @@ public sealed class GaitStateMachine
             decision.emergency = false;
             decision.next = CaptureWalkState.Swing;
             decision.swingSide = -StanceFoot;
+            LastEntryReason = ReasonLead;
         }
         else if (overdueComPastToe
                  && StepCount > 0
@@ -310,6 +367,7 @@ public sealed class GaitStateMachine
             decision.emergency = true;
             decision.next = CaptureWalkState.RecoveryStep;
             decision.swingSide = -StanceFoot;
+            LastEntryReason = ReasonLead;
         }
         else if (paired && canStep)
         {
@@ -318,6 +376,11 @@ public sealed class GaitStateMachine
             decision.enter = true;
             decision.next = CaptureWalkState.Swing;
             decision.swingSide = -StanceFoot;
+            // Which of the four paired terms opened this step.
+            LastEntryReason = firstAir ? ReasonContact
+                : firstPosed ? ReasonClock
+                : rolledAir ? ReasonLead
+                : ReasonLead;
         }
         else if (emergency && trailUp)
         {
@@ -326,6 +389,17 @@ public sealed class GaitStateMachine
             decision.enter = true;
             decision.next = CaptureWalkState.RecoveryStep;
             decision.swingSide = -StanceFoot;
+            LastEntryReason = ReasonEmergency;
+        }
+        else
+        {
+            // WALK-1: the controller's own reason for NOT opening a step.
+            LastRejectCode = StateAge < minHold ? 1
+                : !trailUp ? 2
+                : !world.posed ? 3
+                : world.collapsed && StepCount == 0 ? 4
+                : !paired && !overdueComPastToe ? 5
+                : 6;
         }
     }
 
@@ -365,6 +439,7 @@ public sealed class GaitStateMachine
             {
                 decision.enter = true;
                 decision.next = CaptureWalkState.TouchdownBlend;
+                LastEntryReason = ReasonContact;
                 return;
             }
         }
@@ -379,6 +454,7 @@ public sealed class GaitStateMachine
             {
                 decision.enter = true;
                 decision.next = CaptureWalkState.TouchdownBlend;
+                LastEntryReason = ReasonContact;
                 return;
             }
         }
@@ -456,6 +532,7 @@ public sealed class GaitStateMachine
             decision.enter = true;
             decision.next = CaptureWalkState.Swing;
             decision.swingSide = world.planValid ? world.planSwingSide : -StanceFoot;
+            LastEntryReason = ReasonLate;
             return;
         }
         if (late || lostFwd || lostBack)
@@ -466,6 +543,7 @@ public sealed class GaitStateMachine
             decision.enter = true;
             decision.next = CaptureWalkState.RecoveryStep;
             decision.swingSide = world.planValid ? world.planSwingSide : -StanceFoot;
+            LastEntryReason = late ? ReasonLate : ReasonLead;
         }
     }
 
@@ -519,6 +597,9 @@ public sealed class GaitStateMachine
             decision.next = CaptureWalkState.DoubleSupport;
             decision.swapRoles = true;
             decision.newStanceSign = world.planSwingSide;
+            // WALK-1: which support state the swap was made from.
+            LastSwapMode = paired ? SwapModePaired : SwapModeCatchOwns;
+            LastEntryReason = ReasonContact;
         }
     }
 
@@ -572,6 +653,7 @@ public sealed class GaitStateMachine
         decision.enter = true;
         decision.next = CaptureWalkState.RecoveryStep;
         decision.swingSide = world.planValid ? world.planSwingSide : -StanceFoot;
+        LastEntryReason = ReasonWatchdog;
         return true;
     }
 
