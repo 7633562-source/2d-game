@@ -249,7 +249,7 @@ public static class ChickenArt
         sr.color = Tint(name);
     }
 
-    // VIS-BIRD: hen silhouette from stacked rectangles on Visual. Comb
+    // ART-BIRD: hen silhouette from stacked rectangles on Visual. Comb
     // and wattle get serration plates; the red square is hidden.
     // Collider size unchanged.
     public static void Dress(Transform root)

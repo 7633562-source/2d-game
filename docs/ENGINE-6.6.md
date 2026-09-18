@@ -1,6 +1,8 @@
 # Engine channel 6.6 — deferred upgrade record
 
 Status: **DEFERRED**. Do not start without Hermes/Yury. Owner: Hermes (orchestrator).
+Lanes tracked here: 6.5 patch (6000.5.11f1), 6.6 (6000.6.1f1), 6.7 beta (6000.7.0b1/b2). Everything
+below is verified against unity.com or the project files on the date named.
 Created 2026-09-17 from the H_Scout "Unity 2D" digest (cron `58988890f9e7`, run 03:04).
 
 ## Why deferred
@@ -77,6 +79,32 @@ Verified against unity.com on 2026-09-17 (whats-new/6000.5.11 answers HTTP 200; 
   the lower-risk lane of the two: same minor, URP and packages untouched, no asset upgrade pass.
   After the campaign: 6.5.11 first, re-run the baselines, then decide 6.6 on its own.
 
+## 6.7 beta lane (6000.7.0b1, 2026-09-17)
+
+Verified on 2026-09-18 (whats-new/6000.7.0b1 = HTTP 200; 6000.7.0b2 and 6000.5.12 = 404):
+
+- UUM-150232 (our Bloom + 2D Renderer black screen) is now root-caused on the official page:
+  "URP: Fixed the 2D Renderer creating a depth and stencil buffer in players when Disable Depth and
+  Stencil Buffers is enabled in Player Settings" - and it is marked *Fixed in 6000.7.0b2*, so it is in
+  no 6.5 and no 6.6 build. Exposure check on our project - both preconditions are absent:
+  `ProjectSettings/ProjectSettings.asset:71` holds `disableDepthAndStencilBuffers: 0` (the option is
+  OFF) and Bloom intensity is 0 (see above). Keep both as they are; if an art pass raises Bloom
+  intensity, re-check the Player Settings flag first.
+- UUM-138419: SpriteMask not rendering on Android/iOS/Web when Strip Engine Code is on and the Tilemap
+  package is disabled in Package Manager. Exposure check: `stripEngineCode: 1`
+  (`ProjectSettings.asset:186`, precondition present) but `SpriteMask` appears 0 times in `Assets`, so
+  it is not our bug - and it stays that way while we do not adopt SpriteMask.
+- Light2D memory leak on scene unload (mobile/WebGL memory): we have 9 scenes and 8 files referencing
+  Light2D, so measure it together with UUM-149540 after the campaign.
+- New in 6.7 and on our path: Physics Core 2D Profiler module, `EntityIDTile`/`Base` for Tilemap with
+  Burst, Light2D and ShadowCaster2D ShaderGraph targets, custom Light2D materials, and
+  `performance.measureUserAgentSpecificMemory` in the web diagnostics overlay.
+- Learning (free, do it while the campaign runs): Unity Learn Monthly Update, September 2026 -
+  https://discussions.unity.com/t/unity-learn-monthly-update-september-2026/1736869 - the Input System
+  series is the relevant part. Note our actual exposure: only 2 files in `Assets` reference
+  `UnityEngine.InputSystem` and there are 0 legacy `Input.*` calls, so this is reading material, not a
+  migration task.
+
 ## Re-evaluation trigger
 
 After the burn campaign closes (deadline file `%LOCALAPPDATA%\Temp\grok-burn\campaign.deadline`):
@@ -86,6 +114,8 @@ After the burn campaign closes (deadline file `%LOCALAPPDATA%\Temp\grok-burn\cam
 3. If yes: upgrade in a quiet window, re-bake shaders, re-run stance + walk baselines,
    compare against `Trials/Baselines/stable-pd/`, and only then let agents touch gameplay code.
 4. Test a WebGL/WebGPU build against the current one for size and load time.
+5. Then the 6.7 lane: our UUM-150232 fix ships in `6000.7.0b2` (17.09 b1 only carries the note), so
+   wait for b2 before treating 6.7 as a fix for us.
 
 ## Note to H_Scout
 

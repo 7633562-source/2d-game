@@ -15,6 +15,11 @@ public sealed class ActuatorMixer
 {
     public float activationSpeed = 20f;
     public float speedReference = 200f;
+    // WALK-1 recorder completeness: the pre-clamp demand the last JointStable
+    // call computed, in units of the acting muscle's ceiling (|value| > 1 means
+    // the owner asked for more torque than the muscle can deliver). Recorder
+    // only: it is written, never read, by the control math.
+    public float lastDemand;
 
     public struct HipCap
     {
@@ -99,7 +104,9 @@ public sealed class ActuatorMixer
             damping = k * dt / cachedInertia;
         }
 
-        float signal = Mathf.Clamp(raw / (1f + damping), -1f, 1f);
+        float demand = raw / (1f + damping);
+        float signal = Mathf.Clamp(demand, -1f, 1f);
+        lastDemand = demand;
         ApplySignal(signal, flexor, extensor);
         return signal;
     }

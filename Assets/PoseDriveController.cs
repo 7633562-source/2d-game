@@ -166,6 +166,34 @@ public class PoseDriveController : MonoBehaviour
         ankleBalanceD = GetFloat("-poseAnkleD", ankleBalanceD);
     }
 
+    // ─── ARENA-1 genome entry ──────────────────────────────────────────────
+    // The parameter-sweep arena writes its 13 search genes through this one call
+    // instead of reflecting into the private fields. The clamps are the same ones
+    // ReadSwitches applies, so a genome can never leave the box the command-line
+    // switches accept. `enable` turns the pose drive on the way -poseDrive 1
+    // -poseWalk 1 would: active is the drive, walkEnabled is the gait.
+    public const int ArenaGeneCount = 13;
+
+    public void ApplyArenaGenome(float[] g, bool enable)
+    {
+        if (g == null || g.Length < ArenaGeneCount) return;
+        active = enable;
+        walkEnabled = enable;
+        swingDuration = Mathf.Max(0.05f, g[0]);
+        stanceDuration = Mathf.Max(0.05f, g[1]);
+        swingLiftMeters = Mathf.Max(0f, g[2]);
+        swingLandShare = Mathf.Clamp(g[3], 0.3f, 0.98f);
+        heightGainDegPerMeter = g[4];
+        heightDampDegPerMeterPerSecond = g[5];
+        placementMarginMeters = g[6];
+        comLeadSwapMeters = Mathf.Max(0.01f, g[7]);
+        stepMinMeters = Mathf.Max(0f, g[8]);
+        stepMaxMeters = Mathf.Max(stepMinMeters + 0.01f, g[9]);
+        armSwingDeg = g[10];
+        ankleBalanceP = g[11];
+        ankleBalanceD = g[12];
+    }
+
     // ─── one physics step ──────────────────────────────────────────────────
     public void Tick(float comOffset)
     {

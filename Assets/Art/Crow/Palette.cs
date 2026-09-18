@@ -245,7 +245,7 @@ public static class CrowArt
 
     // MakeHenMark skips BindPicture, so the crow lid stayed the yellow
     // debug box. One LateUpdate after Start (birds exist), then destroy —
-    // not a 200 Hz Find, not FindObjectOfType. Dress stacks VIS-BIRD
+    // not a 200 Hz Find, not FindObjectOfType. Dress stacks ART-BIRD
     // silhouette plates after the tint (HumanSegment is a rectangle).
     sealed class MarkPass : MonoBehaviour
     {

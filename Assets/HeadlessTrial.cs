@@ -22,6 +22,12 @@ using UnityEngine.Rendering;
 //     / -marchComDelay / -marchPoseHip / -marchPoseKnee
 //     — vertical pelvis; ankle cap after true air; toe/heel after pose-up
 //   -dog 1 — run a dog instead of a human (humanCount = 0, flat ground)
+//   -arena 1 — ARENA-1 parameter sweep: ground only, one human every 500 ms at one
+//     spawn point, genomes of the pose-drive walk parameters, distance at 15 s.
+//     -arenaSeed 1 (genome stream), -arenaSeconds 90 (sim length),
+//     -arenaWallLimit 3000 (s of wall time before the run is cut short),
+//     -arenaNumber 0.34 (digit height on the head, m), -arenaCamera 5 (wide lens),
+//     -arenaPhoto 2.2 -arenaPhotoTime 12 (zoomed photo frames), -arenaGroundMeters 200
 //   -dog 1 -bird 1 — both bodies in one scene (bird is not dropped)
 //   -dogBird 1 — dog trial also spawns a live bird inside DogDrive.noticeRange
 //   -dogBirdX 2 — bird X from the dog, m (clamped inside noticeRange; default 2)
@@ -314,6 +320,20 @@ public class HeadlessTrial : MonoBehaviour
     private Human human;
     private TrialRecorder recorder;
     private TrialRunInfo runInfo;
+    // ARENA-1: the parameter-sweep arena (ArenaRunner.cs). In this mode the trial
+    // player builds ground only and the arena spawns its own bodies.
+    private bool spawnArena;
+    private ArenaRunner arena;
+    private int arenaSeed = 1;
+    private float arenaSeconds = 90f;
+    private float arenaWallLimit = 3000f;
+    private float arenaNumberHeight = 0.34f;
+    private float arenaCameraSize = 5f;
+    private float arenaCameraOffsetX = 2.5f;
+    private float arenaPhotoSize = 2.2f;
+    private float arenaPhotoOffsetX = 1.2f;
+    private float arenaPhotoTime = 12f;
+    private float arenaGroundMeters = 200f;
     private bool spawnBird;
     private bool spawnTree;
     private bool spawnFlower;
@@ -418,6 +438,17 @@ public class HeadlessTrial : MonoBehaviour
             Debug.LogWarning("HeadlessTrial: -visual skipped under -nographics.");
             visual = false;
         }
+        spawnArena = GetFloatArg("-arena", 0f) > 0.5f;
+        arenaSeed = Mathf.RoundToInt(GetFloatArg("-arenaSeed", arenaSeed));
+        arenaSeconds = GetFloatArg("-arenaSeconds", arenaSeconds);
+        arenaWallLimit = GetFloatArg("-arenaWallLimit", arenaWallLimit);
+        arenaNumberHeight = GetFloatArg("-arenaNumber", arenaNumberHeight);
+        arenaCameraSize = GetFloatArg("-arenaCamera", arenaCameraSize);
+        arenaCameraOffsetX = GetFloatArg("-arenaCamX", arenaCameraOffsetX);
+        arenaPhotoSize = GetFloatArg("-arenaPhoto", arenaPhotoSize);
+        arenaPhotoOffsetX = GetFloatArg("-arenaPhotoX", arenaPhotoOffsetX);
+        arenaPhotoTime = GetFloatArg("-arenaPhotoTime", arenaPhotoTime);
+        arenaGroundMeters = GetFloatArg("-arenaGroundMeters", arenaGroundMeters);
         spawnBird = GetFloatArg("-bird", 0f) > 0.5f;
         spawnTree = GetFloatArg("-tree", 0f) > 0.5f;
         spawnFlower = GetFloatArg("-flower", 0f) > 0.5f;
@@ -711,10 +742,20 @@ public class HeadlessTrial : MonoBehaviour
         bool dogBirdScene = spawnDog && spawnBird;
         float packSpan = Mathf.Max(0, birdDriveCount - 1) * BirdPackSpacing;
         float birdGroundWidth = Mathf.Max(48f, packSpan + 16f);
-        ground.groundSize = new Vector2(wideBird || dogBirdScene ? birdGroundWidth : 20f, 2f);
+        ground.groundSize = new Vector2(spawnArena
+            ? Mathf.Max(40f, arenaGroundMeters)
+            : (wideBird || dogBirdScene ? birdGroundWidth : 20f), 2f);
         ground.groundPosition = new Vector2(0f, -3f);
         ground.groundFriction = GetFloatArg("-groundFriction", ground.groundFriction);
         ground.BuildGround();
+
+        // ARENA-1: ground and nothing else. The rig is not built here - the arena
+        // spawns one human every 500 ms from ArenaRunner.
+        if (spawnArena)
+        {
+            BuildArenaScene();
+            return;
+        }
 
         if (spawnDog)
         {
@@ -820,6 +861,36 @@ public class HeadlessTrial : MonoBehaviour
 
         Transform torso = human.transform.Find("Torso");
         torsoBody = torso != null ? torso.GetComponent<Rigidbody2D>() : null;
+    }
+
+    // ARENA-1: the arena lives on its own host. The ground is already built by
+    // BuildTrialScene, so the runner must not build a second one.
+    private void BuildArenaScene()
+    {
+        GameObject host = new GameObject("ArenaRunner");
+        arena = host.AddComponent<ArenaRunner>();
+        arena.seed = arenaSeed;
+        arena.label = label;
+        arena.runId = label + "_s" + arenaSeed.ToString(CultureInfo.InvariantCulture);
+        arena.sourceFingerprint = runInfo != null ? runInfo.SourceFingerprint : "";
+        arena.buildGuid = runInfo != null ? runInfo.ManifestBuildGuid : "";
+        arena.spawnInterval = 0.5f;
+        arena.measureSeconds = 15f;
+        arena.cullSeconds = 30f;
+        arena.aliveCap = 60;
+        arena.durationSeconds = arenaSeconds;
+        arena.spawnX = 0f;
+        arena.spawnY = startY;
+        arena.groundWidth = arenaGroundMeters;
+        arena.numberHeight = arenaNumberHeight;
+        arena.cameraSize = arenaCameraSize;
+        arena.cameraOffsetX = arenaCameraOffsetX;
+        arena.photoCameraSize = arenaPhotoSize;
+        arena.photoOffsetX = arenaPhotoOffsetX;
+        arena.externalTick = true;
+        arena.headless = true;
+        arena.outputFolder = outputFolder;
+        arena.buildGroundOnBegin = false;
     }
 
     private void BuildDogScene()
@@ -3187,6 +3258,12 @@ public class HeadlessTrial : MonoBehaviour
         // Skip the first step: the body is still settling in the joints.
         yield return FixedStep;
 
+        if (spawnArena)
+        {
+            yield return RunArenaTrial();
+            yield break;
+        }
+
         if (spawnDog)
         {
             yield return RunDogTrial();
@@ -3274,6 +3351,68 @@ public class HeadlessTrial : MonoBehaviour
         }
 
         Finish(simulated, Time.realtimeSinceStartup - trialWallStart);
+    }
+
+    // ARENA-1: the sweep loop. The arena owns the bodies, this owns the clock, the
+    // video frames and the real-time guard. The arena has no single human body, so
+    // no TrialRecorder is created here.
+    private IEnumerator RunArenaTrial()
+    {
+        if (arena == null)
+        {
+            Debug.LogError("HeadlessTrial: -arena 1 without an ArenaRunner");
+            yield break;
+        }
+
+        arena.Begin(Time.fixedDeltaTime);
+        if (visual)
+            arena.EnsureArenaCamera(arenaCameraSize, arenaCameraOffsetX);
+
+        float wallStart = Time.realtimeSinceStartup;
+        float simulated = 0f;
+        int lastShot = -1;
+        int photoStage = 0;
+        float[] photoTimes = { arenaPhotoTime, arenaPhotoTime + 8f, arenaPhotoTime + 16f, arenaPhotoTime + 24f };
+
+        while (!arena.Done)
+        {
+            yield return FixedStep;
+
+            simulated += Time.fixedDeltaTime;
+            arena.Tick(simulated);
+
+            if (visual)
+            {
+                int shotIdx = (int)(simulated / 0.2f);
+                if (shotIdx != lastShot)
+                {
+                    lastShot = shotIdx;
+                    string shotPath = Path.Combine(outputFolder,
+                        "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
+                    yield return CaptureVisualFrame(shotPath);
+                }
+
+                // The zoomed frames exist so the numbers on the heads are readable
+                // at 1x: the wide lens is restored right after each one.
+                if (photoStage < photoTimes.Length && simulated >= photoTimes[photoStage])
+                {
+                    arena.SetLens(arenaPhotoSize, arena.spawnX + arenaPhotoOffsetX);
+                    yield return CaptureVisualFrame(Path.Combine(outputFolder,
+                        "photo_" + label + "_" + photoStage.ToString("00") + ".png"));
+                    arena.SetLens(arenaCameraSize, arena.spawnX + arenaCameraOffsetX);
+                    photoStage++;
+                }
+            }
+
+            if (Time.realtimeSinceStartup - wallStart > arenaWallLimit)
+            {
+                Debug.LogWarning("HeadlessTrial: arena wall limit " + arenaWallLimit + " s hit at sim "
+                    + simulated.ToString("0.##", CultureInfo.InvariantCulture) + " s, run cut short.");
+                break;
+            }
+        }
+
+        Finish(simulated, Time.realtimeSinceStartup - wallStart);
     }
 
     private IEnumerator RunDogTrial()
@@ -3792,6 +3931,11 @@ public class HeadlessTrial : MonoBehaviour
             {
                 File.WriteAllText(csvPath, "t\n");
                 summary = flowerRecorder.BuildSummaryJson(simulated, wallSeconds);
+            }
+            else if (spawnArena)
+            {
+                File.WriteAllText(csvPath, arena.BuildHumanCsv());
+                summary = arena.WriteFiles(simulated, wallSeconds);
             }
             else
             {

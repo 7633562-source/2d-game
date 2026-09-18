@@ -25,7 +25,7 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 | physics | **VEST-2**: per-foot quiet ankle coded (`quietAnklePerFoot` 1). Next: `pf23v2` +23 N·s. | `.cursor/tasks/VEST-2-balance.md` |
 | physics | ONELEG-1 accepted (Yury): `oneleg_sym` / `oneleg_sym_l`, both 30 s, span 0.75° / 0.79°. | `.cursor/tasks/ONELEG-1-physics.md` |
 | physics | ONELEG-2 **wall**: 90° pose holds; CoM ankle loop is bistable. Do not reopen. | `.cursor/tasks/ONELEG-2-march.md` |
-| physics | WALK-2: the walk never steps (single support 0 %, walkSwap 0, folds 1.3 s after the walk start). Vestibular first; switch surface frozen. | this file, Walk front |
+| physics | WALK-2: recorder complete + the demanded-vs-applied question answered 18.09 (run `walk1_own1`): hips = (b) the demand is wrong (17-24 % of the muscle while the collapse is created, then an unreachable 35° target at 3.5-15x the ceiling); ankle = (a) the ceiling binds (22 vs 65 N·m). Next: the targets/reference, not the ceilings. | `Trials/Runs/walk1_own1-report.md`, this file, Walk front |
 | physics | deep crouch WIP intentionally leaves code defaults 98/28 after `crouch_accept`; accepted journal remains 55/12 until the physics work closes | HumanPhysics continuation |
 | artist | code hand is `0.06×0.16`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/ART-HAND.md` |
 | docs | pointers and baselines; do not clean Runs | `DOCS.md` |
@@ -43,6 +43,22 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 ## Walk front — WALK-2 (Hermes 16.09)
 
 Yury 15.09: **vestibular first, not swing lift** — still the line.
+
+**WALK-1 instrumentation cycle closed 18.09 (walk worker, build `33e423c3` == manifest,
+run `walk1_own1`)**: `check-owners.py` and `walk-nan-audit.py` now report OK - every leg
+joint on every row of the walk window has a finite request and a named owner, and the
+pre-clamp demand is a recorded column. Physics unchanged (bit-identical to `walk1_tap4`,
+fell 6.37 s, 2 swaps). The answer to the cycle's question: **the hips are (b) - the demand
+itself is wrong** (in 5.00-5.60 s, where the collapse is created, the hip target tracks the
+measured angle within 1.8° and asks 17-24 % of the muscle, 0/121 frames at the ceiling;
+after the 5.915 s handover the request is an unreachable 35° against a measured hip
+swinging -38 → +45°, demand 3.5-15x, pinned at ±100 N·m and flipping sign inside 100 ms;
+in the last 12 walker frames the left hip asks 4.08x while the right asks 0.19x).
+**The ankle is (a) - its ceiling binds** (full 22 N·m dorsiflexor in 19/121 frames of
+5.00-5.60 against a 126 N·m gravity moment), but its raw demand is 5-69x the ceiling and
+after 5.915 s the loop is switched off entirely. The ±100/±130 saturation the earlier
+cycle reported is GET-UP saturation, not walk saturation. Details, tables and scripts:
+`Trials/Runs/walk1_own1-report.md`.
 
 **Two controllers, one of them dead (Hermes 17.09).** Measured in the window before the fall: the default path (WalkLift / Stance clock) never lifts a foot — single support 0.0 %, both feet grounded 100 %, first single support never. The capture walker (`-captureWalk 1`) does step: single support 34 %, both feet 62 %, first single support at 5.22 s, 2-3 swaps, fall at 5.8 s. Fresh data (Hermes 17.09, Yury's eye check): at the walk start kneeL 6.5 / kneeR 3.4 deg, by 5.6 s BOTH knees reach 120 deg, the pelvis drops 0.456 m and the body topples forward. The launch squats both legs instead of lifting one: the swing knee must flex, the stance knee must stay extended, pelvis drop under 3 cm. So `BalanceControllerCaptureWalk.cs` is the canonical walk now; the WalkLift families own the dead path and must not be tuned. The hourly trial runs `-captureWalk 1`.
 
@@ -249,3 +265,106 @@ starts). Also: the arm-swing parameter is NOT inert (0 vs 60 changed the trace).
 Stale numbers are worse than no numbers: check `sourceFingerprint` in the JSON
 against the build manifest before quoting anything, and never test a build older
 than the sources.
+
+
+## Walk instrumentation results - verified by independent CSV parse 18.09 (run walk1_tap4)
+
+Run: Trials/Runs/walk1_tap4, fingerprint 6a1aeb82a547bfed == Build/Headless/build-manifest.json.
+Check any run mechanically with: python F:/hermes-data/scripts/check-owners.py <label>
+(it exits 1 with the offending columns and frame counts, 0 when every joint is owned and finite).
+
+- The ankle IS driven: appTorqueAnkleL/R are finite in every walk-window frame. But the
+  REQUEST is not recorded - reqAnkleL NaN in 6927 frames (from 5.205 s), reqAnkleR NaN in
+  6978 - and ownerAnkleL reads 0 in 7845 of 8001 frames; copCmdL is NaN in 236 of 321
+  walk-window frames. So: not "nobody commands support" (the earlier reading was wrong),
+  but control runs with no recorded author.
+- The demand SATURATES: appTorqueKneeL hits exactly +130/-130 N*m, hipL/R exactly +-100 N*m
+  in 5.0-6.6 s while the body sinks.
+- The body pitches forward while BOTH feet are still grounded: torsoTilt -25.8 deg at
+  5.60 s, -74.6 deg at 5.96 s, walkSwap frozen at 2.
+- Three builds (efc9d7f7, 0f59d4c7, 6a1aeb82) all returned fell 6.37 s / 2 swaps: the
+  recent edits did not reach the behaviour. Treat an unmoved number after a landed edit as
+  "the path is not executed", not as "the fix did not help".
+
+Next cycle: complete the recorder (finite request and a named owner for every joint in the
+walk window), then answer ONE question with that evidence - is the ceiling too small, or
+is the demand itself wrong? No gain tuning until that is answered.
+
+
+## ARENA-1 - parameter sweep arena (Yury's new order 18.09, additive)
+
+A separate scene with ONLY ground: a human spawns every 500 ms, each with a different genome
+of the pose-drive walk parameters, its number on its head, walking at once; 15 s after each
+spawn its distance in metres is recorded from its own spawn x; the parameters of the further
+walkers appear more often later (0.75 of spawns copy a parent from the best quartile, then
+jitter, with the parent id and mutation seed logged); 30 s after spawn the human is destroyed
+so RAM stays bounded (about 60 alive). Upright/fallen comes from the physical criterion, never
+from the `fell` flag. Card: .cursor/tasks/ARENA-1-param-sweep.md. This does NOT cancel the
+walk, dog, tree or apple work.
+
+## Walk recorder complete + the demanded-vs-applied answer (walk worker, 18.09, run walk1_own1)
+
+Full report: `Trials/Runs/walk1_own1-report.md`. Run `walk1_own1`, fingerprint
+`33e423c31515fcf27aa9657ba5357f01421d5310d183136d7a881461cf6de789` ==
+`Build/Headless/build-manifest.json`, buildGuid `6ea0e9d9...` == manifest.
+Gains/ceilings/limits/masses/friction UNCHANGED: physics columns are bit-identical to
+`walk1_tap4` (only `tapAge`, a real-frame counter, differs), `fell True`,
+`survivedSeconds 6.37`, `walkSwapCount 2.0`, `comTravelX 2.0002` - same as before.
+
+Recorder (recorder-only, nothing feeds the control math): every leg joint on every row
+now has a finite request and a named owner - walker code while it wrote the joint, else
+the layer that held it (16 StanceLayer, 17 StandingPlant, 18 GetUp, 19 Falling,
+20 PoseDrive, 21 CaptureWalker, 15 IDLE = nobody). A joint commanded as a TORQUE has no
+angle request: the cell holds the MEASURED angle and `reqFallbackMask` flags it. New
+append-only columns: `legLayer`, `reqFallbackMask`, `demandHipL/R`, `demandKneeL/R`,
+`demandAnkleL/R` (121 -> 145); `demand*` is the PRE-CLAMP demand in units of the muscle
+ceiling. `check-owners.py walk1_own1` -> OK, `walk-nan-audit.py walk1_own1` -> OK
+(`walk1_tap4` fails both: reqAnkleL NaN in 246 window frames, ownerAnkleL zero in 165).
+
+The answer (5.0-6.6 s, owner split: walker 5.00-5.915, GetUp 5.915-6.60):
+
+- **(b) the demand itself is wrong - the HIPS.** In 5.00-5.60 s, while the pelvis sinks
+  80 mm and the trunk pitches to -25.8 deg, the hip target TRACKS the measured hip
+  (median error 1.8 deg) and asks only 17-24 % of the 100 N*m muscle; 0/121 frames touch
+  the ceiling. An infinite ceiling on a target equal to the current angle still yields no
+  corrective torque - the binding limit is the controller's own loaded-hip cap (45/130
+  N*m) plus the target law. Once the walker hands over, the request is an unreachable
+  posture (35 deg constant against a measured hip swinging -38 -> +45 deg) with a demand
+  of 3.5-15x the ceiling, applied pinned at +-100 N*m in 67-71 % of frames and flipping
+  full scale inside 100 ms. In the last 12 walker frames the left hip asks 4.08x (408
+  N*m) and sits on -100 N*m in all 12, while the right hip asks 0.19x (19 N*m) and never
+  approaches the ceiling: a 21x left/right asymmetry, so the demand is not load-derived.
+- **(a) the ceiling is too small - the ANKLE only.** The loop asks dorsiflexion
+  (`copCmd < -0.5` in 41/121 frames of 5.00-5.60) to hold a CoM 0.077-0.184 m ahead of
+  the origin and applies exactly the full 22 N*m dorsiflexor in 19/121 frames - never 65.
+  The gravity moment there is m*g*comX = 70*9.81*0.184 = 126 N*m, i.e. 5.7x its muscle.
+  Caveats: its raw demand is 5-69x the ceiling (a saturated bang-bang, magnitude carries
+  no information), and after 5.915 s the loop is switched OFF entirely (0 demand, <= 4.5
+  N*m applied while the trunk pitches another 40 cm). Once the CoM is past the toe no
+  ankle torque can hold the body, so raising this ceiling alone cannot restore the
+  support.
+- The saturation quoted by the earlier cycle is GET-UP saturation, not walk saturation: in
+  the walker phase the hip touches 100 N*m in 13 frames of one third of a second and the
+  knee never reaches 130; the +-100/+-130 pins belong to the layer that takes the legs
+  after the walker has surrendered (locomotion Walking -> GettingUp at 5.915 s).
+
+**Next cycle: the targets/reference, not the ceilings.** The hips - the only joint with
+the torque to arrest a forward pitch - are never asked for the load in the window where
+the failure is created, and the layer that inherits them commands an unreachable pose and
+oscillates at full scale. The undersized ankle dorsiflexor (22 vs 65 N*m) is a real but
+separate defect, and the ankle loop's gate must be fixed before its ceiling matters.
+
+
+## Delivery rule for the ARENA scene (Yury 18.09)
+
+Yury checks the arena scene in Unity HIMSELF. When Assets/Scenes/WalkArena.unity is done:
+1. verify it before announcing - the scene file exists, it is in the build scene list, the
+   spawner runs, the head numbers are readable in a frame, and a fresh run produced the
+   arena JSON + the append-only parameter log;
+2. then tell him it is ready, with the exact scene path and what to click (open the scene,
+   press Play), plus the run label and the video from the same build;
+3. never announce "ready" from the worker's own summary - announce it from the verified
+   artefacts.
+While his editor is open the compile gate SKIPS (a live editor holds the project lock), so
+automatic rebuilds pause until he closes it - that is expected, not a failure. Do not open,
+close or kill his editor.

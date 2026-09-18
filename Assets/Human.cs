@@ -405,20 +405,33 @@ public class Human : MonoBehaviour
         HumanSegment upper = CreateSegment(sideName + "Upper", upperArmSize, UPPER_ARM_MASS_FRACTION, upperColor, upperOrder);
         upper.transform.localPosition = new Vector3(shoulderX, shoulderRootY - upperArmSize.y * 0.5f, 0);
         upper.SetVisualOffset(visualShift);
+        // Shoulder range -160..90, not the former symmetric +-90. A real shoulder
+        // swings about 180 deg (flexion to overhead), and the fall press needs all
+        // of it: measured p_arms23, with the body lying down the arm's rest
+        // direction sits at 85-120 deg world and the floor lies 90-130 deg below
+        // that, so a +-90 hinge cannot even aim the arm at the palm it has to
+        // press on — the aim flipped between its two stops every frame and the
+        // arm hung in the air (handY -1.36 against a -1.99 slab).
         upper.ConnectTo(torso,
             new Vector2(0, upperArmSize.y * 0.5f),
             new Vector2(shoulderX, shoulderY),
-            -90f, 90f);
+            -160f, 90f);
         AddFriction(upper, shoulderFriction);
         AddMuscles(upper, shoulderMuscleTorque);
 
         HumanSegment lower = CreateSegment(sideName + "Lower", lowerArmSize, LOWER_ARM_MASS_FRACTION, lowerColor, lowerOrder);
         lower.transform.localPosition = new Vector3(shoulderX, shoulderRootY - upperArmSize.y - lowerArmSize.y * 0.5f, 0);
         lower.SetVisualOffset(visualShift);
+        // Elbow flexion to -150, not -140. A real elbow folds to about 150 deg,
+        // and the fall press needs the last 10: with the link chord at the -140
+        // stop the arm cannot fold short enough for the palm to come down under
+        // the shoulder, so the press was forced out sideways. Measured p_arms21:
+        // at -140 the plant point had to sit 0.30 m to the side and the push went
+        // 57 deg off vertical (the palm slid, the shoulder rose 70 mm).
         lower.ConnectTo(upper,
             new Vector2(0, lowerArmSize.y * 0.5f),
             new Vector2(0, -upperArmSize.y * 0.5f),
-            -140f, 0f);
+            -150f, 0f);
         AddFriction(lower, elbowFriction);
         AddMuscles(lower, elbowMuscleTorque);
 

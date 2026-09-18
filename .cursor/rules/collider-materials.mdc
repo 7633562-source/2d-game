@@ -1,0 +1,17 @@
+# Collider materials (project rule, Yury 18.09)
+
+EVERY object in the game that carries a collider MUST get an explicit
+PhysicsMaterial2D with a chosen friction and bounciness 0. Never rely on the
+engine default: Unity's default is 0.4 and Box2D combines a pair as
+sqrt(mu1 * mu2), so an unset material silently loses grip against a 1.2 surface.
+
+- Ground: GroundBuilder builds `GroundDirt` from `groundFriction` (0.4).
+- Human: Human.cs SoleMaterial (footFriction 1.2) and PalmMaterial (handFriction).
+- Dog: has NOTHING today. `Dog.AddFriction` adds a `JointFriction` component, i.e.
+  JOINT (angular) friction in the hinge - not contact. Give the chest, pelvis, head,
+  tail and every paw an explicit material; the paw matches the human sole, the body
+  lower. `pawFriction` under "Joint friction K" has nothing to do with grip.
+- Anything added later (bird, tree, flower, campfire, platforms) needs the same.
+- Values are chosen per part on purpose and live in code, never left implicit.
+- Audit: for every `*Collider2D` in Assets check that `sharedMaterial` is assigned.
+  A collider without a material is a bug.

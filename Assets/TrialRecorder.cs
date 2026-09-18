@@ -249,6 +249,14 @@ public class TrialRecorder
     // WALK-1: the walker's tick counter at the previous row, so tapFresh can
     // tell a live command from a frozen last one.
     private long lastTapTicks = -1;
+    // WALK-1 recorder completeness: one owner, one finite request and one
+    // pre-clamp demand per leg joint per row (hipL, hipR, kneeL, kneeR,
+    // ankleL, ankleR). Preallocated: this runs at 200 Hz.
+    private readonly int[] legOwnerOut = new int[BalanceController.LegJointCount];
+    private readonly float[] legReqOut = new float[BalanceController.LegJointCount];
+    private readonly float[] legDemandOut = new float[BalanceController.LegJointCount];
+    private int legFallbackMask;
+    private int legLayerOut;
 
     public TrialRecorder(Human human, string label)
         : this(human, new TrialRunInfo { Label = label })
@@ -473,7 +481,31 @@ public class TrialRecorder
             // holds the last leg command. locoState = (int)balance.locomotionState.
             .Append("stepStandingRestore").Append(';')
             .Append("stepStandingSurrender").Append(';')
-            .Append("locoState").AppendLine();
+            .Append("locoState").Append(';')
+            // ─── WALK-1 recorder completeness (append-only) ───
+            // ownerHipL..copCmdR above are now filled on EVERY row: the
+            // capture walker's own drive code (1..14) while it wrote that joint
+            // this frame, else the layer that held it (15 idle, 16 quiet
+            // stance / stance clock, 17 standing Plant, 18 get-up, 19 fallen /
+            // relaxed, 20 pose library, 21 the capture walker as a layer).
+            // req* is the angle that owner handed the PD, degrees. When the
+            // owner commands TORQUE instead of an angle (CoP / CoM ankle, a
+            // world-upright hip, a zero snap) or nobody asked, req* is the
+            // MEASURED joint angle - a held value, not an ask - and the
+            // matching bit of reqFallbackMask is 1 (bit0 hipL .. bit5 ankleR).
+            // demand* is that owner's demand BEFORE its own clamp, in units of
+            // the acting muscle's ceiling (hip 100, knee 130, ankle 65 ext /
+            // 22 flex N*m), so |demand| > 1 = it asked for more torque than the
+            // muscle can deliver. 0 with an idle owner = no demand recorded.
+            // legLayer = the layer code that drove the legs on that step.
+            .Append("legLayer").Append(';')
+            .Append("reqFallbackMask").Append(';')
+            .Append("demandHipL").Append(';')
+            .Append("demandHipR").Append(';')
+            .Append("demandKneeL").Append(';')
+            .Append("demandKneeR").Append(';')
+            .Append("demandAnkleL").Append(';')
+            .Append("demandAnkleR").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -881,6 +913,9 @@ public class TrialRecorder
         // tapFresh 0 means every tap value below is a frozen last command.
         int tapFresh = lastTapTicks < 0 || tap.walkTicks != lastTapTicks ? 1 : 0;
         lastTapTicks = tap.walkTicks;
+        // WALK-1 completeness: one owner + one finite request per leg joint,
+        // whatever layer held it (see CompleteLegRequestRecord).
+        CompleteLegRequestRecord(tap, tapActive);
         float soleClearL = state != null ? state.leftFootGroundClearance : float.NaN;
         float soleClearR = state != null ? state.rightFootGroundClearance : float.NaN;
 
@@ -979,20 +1014,27 @@ public class TrialRecorder
             .Append(tapFresh).Append(';')
             .Append(tap.walkTicks).Append(';')
             .Append(tap.abortCode).Append(';')
-            .Append(tap.ownerHipL).Append(';')
-            .Append(tap.ownerHipR).Append(';')
-            .Append(tap.ownerKneeL).Append(';')
-            .Append(tap.ownerKneeR).Append(';')
-            .Append(tap.ownerAnkleL).Append(';')
-            .Append(tap.ownerAnkleR).Append(';')
-            .Append(F(tap.reqHipL)).Append(';')
-            .Append(F(tap.reqHipR)).Append(';')
-            .Append(F(tap.reqKneeL)).Append(';')
-            .Append(F(tap.reqKneeR)).Append(';')
-            .Append(F(tap.reqAnkleL)).Append(';')
-            .Append(F(tap.reqAnkleR)).Append(';')
-            .Append(F(tap.copCmdL)).Append(';')
-            .Append(F(tap.copCmdR)).Append(';')
+            // WALK-1 completeness: these twelve columns are filled for EVERY
+            // row (walker code while it wrote the joint, else the layer that
+            // held it - see CompleteLegRequestRecord). req* is an angle
+            // request in degrees; when the owner commands torque instead, it
+            // is the measured joint angle and the row's reqFallbackMask bit
+            // is set. copCmd* is finite on every row: 0 = the CoP loop did
+            // not command that ankle this frame (ownerAnkle* names who did).
+            .Append(legOwnerOut[0]).Append(';')
+            .Append(legOwnerOut[1]).Append(';')
+            .Append(legOwnerOut[2]).Append(';')
+            .Append(legOwnerOut[3]).Append(';')
+            .Append(legOwnerOut[4]).Append(';')
+            .Append(legOwnerOut[5]).Append(';')
+            .Append(F(legReqOut[0])).Append(';')
+            .Append(F(legReqOut[1])).Append(';')
+            .Append(F(legReqOut[2])).Append(';')
+            .Append(F(legReqOut[3])).Append(';')
+            .Append(F(legReqOut[4])).Append(';')
+            .Append(F(legReqOut[5])).Append(';')
+            .Append(F(IsFinite(tap.copCmdL) ? tap.copCmdL : 0f)).Append(';')
+            .Append(F(IsFinite(tap.copCmdR) ? tap.copCmdR : 0f)).Append(';')
             .Append(F(AppliedTorque(balance?.leftHipFlexor, balance?.leftHipExtensor))).Append(';')
             .Append(F(AppliedTorque(balance?.rightHipFlexor, balance?.rightHipExtensor))).Append(';')
             .Append(F(AppliedTorque(balance?.leftKneeFlexor, balance?.leftKneeExtensor))).Append(';')
@@ -1028,7 +1070,18 @@ public class TrialRecorder
             .Append(F(soleClearR)).Append(';')
             .Append(stepDriver != null && stepDriver.StandingRestore ? 1 : 0).Append(';')
             .Append(stepDriver != null && stepDriver.StandingSurrender ? 1 : 0).Append(';')
-            .Append(balance != null ? (int)balance.locomotionState : -1).AppendLine();
+            .Append(balance != null ? (int)balance.locomotionState : -1).Append(';')
+            // WALK-1 completeness: the layer that held the legs this step, the
+            // per-joint "req* is a held angle" mask, and the per-joint demand
+            // before the owner's own clamp (see the header comment).
+            .Append(legLayerOut).Append(';')
+            .Append(legFallbackMask).Append(';')
+            .Append(F(legDemandOut[0])).Append(';')
+            .Append(F(legDemandOut[1])).Append(';')
+            .Append(F(legDemandOut[2])).Append(';')
+            .Append(F(legDemandOut[3])).Append(';')
+            .Append(F(legDemandOut[4])).Append(';')
+            .Append(F(legDemandOut[5])).AppendLine();
     }
 
     private static float WatchAngle(JointDampingWatch watch, int index)
@@ -2066,6 +2119,92 @@ public class TrialRecorder
         }
 
         return sb.ToString();
+    }
+
+    // ─── WALK-1 recorder completeness ───
+    // One owner and one finite request per leg joint on EVERY row. The rule:
+    //   1. the capture walker's own drive code for that joint, while it wrote
+    //      the joint this very frame (tapActive 1 and a non-zero tap owner);
+    //   2. else the layer that held the joint this step, from the controller's
+    //      own per-step registry (BalanceController.LegRequest*);
+    //   3. else a documented IDLE (15) - a joint no layer wrote.
+    // A joint whose owner commands TORQUE rather than an angle (the CoP / CoM
+    // ankle, a world-upright hip, a zero snap) or that nobody asked for is
+    // recorded with the MEASURED joint angle and its reqFallbackMask bit set:
+    // the column is then a held angle, not an ask, and it is never NaN.
+    private void CompleteLegRequestRecord(BalanceController.CaptureWalkTap tap,
+                                          int tapActive)
+    {
+        legFallbackMask = 0;
+        legLayerOut = balance != null
+            ? balance.LegRequestLayer
+            : BalanceController.TapOwnerIdle;
+        for (int i = 0; i < BalanceController.LegJointCount; i++)
+        {
+            int owner = BalanceController.TapOwnerNone;
+            float req = float.NaN;
+            if (tapActive == 1)
+            {
+                switch (i)
+                {
+                    case 0: owner = tap.ownerHipL; req = tap.reqHipL; break;
+                    case 1: owner = tap.ownerHipR; req = tap.reqHipR; break;
+                    case 2: owner = tap.ownerKneeL; req = tap.reqKneeL; break;
+                    case 3: owner = tap.ownerKneeR; req = tap.reqKneeR; break;
+                    case 4: owner = tap.ownerAnkleL; req = tap.reqAnkleL; break;
+                    default: owner = tap.ownerAnkleR; req = tap.reqAnkleR; break;
+                }
+            }
+            if (owner == BalanceController.TapOwnerNone && balance != null
+                && balance.LegRequestOwner(i) != BalanceController.TapOwnerNone)
+            {
+                owner = balance.LegRequestOwner(i);
+                req = balance.LegRequestDeg(i);
+            }
+            float demand = balance != null ? balance.LegRequestDemand(i) : float.NaN;
+            if (owner == BalanceController.TapOwnerNone)
+                owner = BalanceController.TapOwnerIdle;
+            if (!IsFinite(req) || OwnerCommandsTorque(owner))
+            {
+                req = MeasuredLegAngle(i);
+                legFallbackMask |= 1 << i;
+            }
+            if (!IsFinite(demand))
+                demand = 0f;
+            legOwnerOut[i] = owner;
+            legReqOut[i] = req;
+            legDemandOut[i] = demand;
+        }
+    }
+
+    // ownerHipL..ownerAnkleR order: hipL, hipR, kneeL, kneeR, ankleL, ankleR.
+    private float MeasuredLegAngle(int i)
+    {
+        if (state == null) return 0f;
+        switch (i)
+        {
+            case 0: return state.leftHipAngle;
+            case 1: return state.rightHipAngle;
+            case 2: return state.leftKneeAngle;
+            case 3: return state.rightKneeAngle;
+            case 4: return state.leftAnkleAngle;
+            default: return state.rightAnkleAngle;
+        }
+    }
+
+    // Owners whose "request" is a torque, not an angle: their req* column is a
+    // held (measured) angle, and the row's reqFallbackMask bit says so.
+    private static bool OwnerCommandsTorque(int owner)
+    {
+        return owner == BalanceController.TapOwnerCopAnkle
+               || owner == BalanceController.TapOwnerZero
+               || owner == BalanceController.TapOwnerIdle
+               || owner == BalanceController.TapOwnerFalling;
+    }
+
+    private static bool IsFinite(float v)
+    {
+        return !float.IsNaN(v) && !float.IsInfinity(v);
     }
 
     private static string F(float value)

@@ -5,7 +5,7 @@ using UnityEngine;
 // Visual. No PNG, no Resources, no localScale on a Rigidbody2D.
 public static class DogArt
 {
-    // VIS-DOG: one sable coat, not a hedgehog-brown spare limb. Chest,
+    // ART-DOG: one sable coat, not a hedgehog-brown spare limb. Chest,
     // pelvis, both thighs, and both front uppers share the saddle.
     // Distal bones (shin + front lower) darken toward the paw — not a
     // pale sock and not a second species on the front. Neck ruff and
@@ -13,7 +13,7 @@ public static class DogArt
     // reads at 1x (Head==Lid was an invisible box). Far side is DimFar.
     // Dog.cs already tints marks at spawn — no Find.
     //
-    // VIS-DOG look verdict (01.09 PNG gens): pelvis read as a limb, thigh
+    // ART-DOG look verdict (01.09 PNG gens): pelvis read as a limb, thigh
     // as a furred human arm. HumanSegment ignores Ellipse, so the silhouette
     // is stacked rectangles on Visual (same trick as tree bark plates).
     // 11:52: Fan2 |x|≥0.36, FingerR 0.68. Artist 11:59 / 12:14:
@@ -217,6 +217,102 @@ public static class DogArt
     static readonly Color Stifle = new Color(0.28f, 0.17f, 0.09f, 0.90f);
     static readonly Color Brisket = new Color(0.30f, 0.18f, 0.08f, 0.88f);
 
+    // ART-DOG box look: the human's language on the dog.
+    //
+    // The human is drawn by HumanSegment alone — one flat translucent
+    // rectangle per bone, one dark joint marker, far side dimmed. The dog
+    // had exactly that under the coat and then hid it (HideSlab) to stack
+    // plates. BoxLook keeps the rectangle and skips the plates, so both
+    // species read the same way in a still frame at 1x. Roll back to the
+    // plated look with -dogCoatLook (or BoxLook = false). Read once, at
+    // BeforeSceneLoad; a mid-run flip is not a supported path.
+    public static bool BoxLook = true;
+
+    // HumanSegment draws every human bone at alpha 0.5 (Human.cs:
+    // PelvisColor, TorsoColor, every limb). The dog box look uses the same
+    // 0.5 so both species sit in the same translucent family; the rollback
+    // to the plated coat stays on -dogCoatLook (or BoxLook = false).
+    //
+    // The dog cannot spend 0.5 on a *grey* sable: the coat palette is a
+    // low-chroma natural brown, the sky behind it is bright and blue
+    // (140/199/240), and a 50 % composite of a red-dominant brown over a
+    // blue-dominant backdrop cancels to neutral. The first box frames at
+    // 0.5 measured 0.49/0.51/0.52 on the chest - slate, and the dog stopped
+    // being sable. The human never hits that because its palette is
+    // near-primary. So the box look spends the human's alpha on a
+    // chroma-boosted bone colour (BoxChromaBoost below): same hues, same
+    // light-to-dark order (cream muzzle, light head, sable trunk, dark
+    // distal legs, near-black paw), chroma only. Sweep with
+    // -dogBoxAlpha <float>.
+    public static float BoxAlpha = 0.5f;
+
+    // Detail thinner than ~2 px at 1x (brow 0.005 m, mouth 0.007,
+    // whisker slices) or a fur plate stack (hackle) is noise, not
+    // silhouette. Eye, lid, nose, ear, tongue, fang and the breath puffs
+    // stay: they are single flat rectangles and they carry the acting.
+    // Coat* is insurance — in the box look the pass never builds one.
+    static bool IsBoxLookNoise(string goName)
+    {
+        if (string.IsNullOrEmpty(goName))
+            return false;
+        if (goName == "Mouth")
+            return true;
+        return goName.StartsWith("Coat", System.StringComparison.Ordinal)
+            || goName.StartsWith("Brow", System.StringComparison.Ordinal)
+            || goName.StartsWith("Whisker", System.StringComparison.Ordinal)
+            || goName.StartsWith("Hackle", System.StringComparison.Ordinal);
+    }
+
+    // Bone tint at the human alpha, far side dimmed. Same Base() roles
+    // as the coat look, so a rolled-back frame is the same sable dog.
+    //
+    // The coat palette is a low-chroma natural brown. Behind it the sky is
+    // bright and blue, and a 50 % composite of a red-dominant brown over a
+    // blue-dominant backdrop cancels to neutral: the first box frames
+    // measured 0.49/0.51/0.52 on the chest, i.e. slate, and the dog stopped
+    // being sable. The human never hits that because its palette is
+    // near-primary. So push each bone colour away from grey around its own
+    // luminance: same hues, same light-to-dark order (cream muzzle, light
+    // head, sable trunk, dark distal legs, near-black paw), chroma only.
+    public const float BoxChroma = 2.2f;
+
+    static Color BoxChromaBoost(Color c)
+    {
+        float luma = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
+        return new Color(
+            Mathf.Clamp01(luma + (c.r - luma) * BoxChroma),
+            Mathf.Clamp01(luma + (c.g - luma) * BoxChroma),
+            Mathf.Clamp01(luma + (c.b - luma) * BoxChroma),
+            c.a);
+    }
+
+    public static Color BoxTint(string objectName)
+    {
+        Color c = BoxChromaBoost(Base(objectName));
+        c.a = BoxAlpha;
+        return IsFar(objectName) ? ArtLibrary.DimFar(c) : c;
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    static void ReadLookSwitch()
+    {
+        string[] args = System.Environment.GetCommandLineArgs();
+        if (System.Array.IndexOf(args, "-dogBoxLook") >= 0)
+            BoxLook = true;
+        else if (System.Array.IndexOf(args, "-dogCoatLook") >= 0)
+            BoxLook = false;
+        for (int i = 0; i + 1 < args.Length; i++)
+        {
+            if (args[i] != "-dogBoxAlpha")
+                continue;
+            float parsed;
+            if (float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out parsed)
+                && parsed > 0.02f && parsed <= 1f)
+                BoxAlpha = parsed;
+        }
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void InstallPass()
     {
@@ -279,6 +375,11 @@ public static class DogArt
             return;
         if (HeadlessTrial.Active && !HeadlessTrial.VisualCapture)
             return;
+        if (BoxLook)
+        {
+            DressBoxLook(root);
+            return;
+        }
         SpriteRenderer[] srs = root.GetComponentsInChildren<SpriteRenderer>(true);
         for (int i = 0; i < srs.Length; i++)
         {
@@ -314,6 +415,44 @@ public static class DogArt
                 continue;
             DressBone(visual, sr.sortingOrder, bone.name, BoxOf(visual));
             HideSlab(sr);
+        }
+    }
+
+    // Box look: the rectangle HumanSegment already baked stays the whole
+    // picture. No plates and no HideSlab — the flat box IS the bone, which
+    // is what the coat look threw away. Head, neck, chest, pelvis, every
+    // tail segment and every leg upper/lower/paw get one flat colour at
+    // the human alpha; the marks that read at 1x keep their own
+    // rectangles, the sub-pixel detail goes.
+    static void DressBoxLook(Transform root)
+    {
+        SpriteRenderer[] srs = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null)
+                continue;
+            if (IsBoxLookNoise(sr.gameObject.name))
+            {
+                sr.gameObject.SetActive(false);
+                continue;
+            }
+            // JointMarker and the face marks keep the tint Dog.cs gave
+            // them; only the bone slabs take the box alpha.
+            if (sr.gameObject.name == "HipBridge")
+            {
+                // Picture-only bridge over the rear hip (Dog.AddHipBridge):
+                // the human attaches every limb on the torso box edge and has
+                // no seam, the dog's hip anchor sits under the pelvis box.
+                sr.color = BoxTint("Pelvis");
+                continue;
+            }
+            if (sr.gameObject.name != "Visual")
+                continue;
+            Transform bone = sr.transform.parent;
+            if (bone == null)
+                continue;
+            sr.color = BoxTint(bone.name);
         }
     }
 

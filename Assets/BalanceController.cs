@@ -4411,6 +4411,10 @@ public partial class BalanceController : MonoBehaviour
     {
         float comOffset = comCalculator != null ? comCalculator.GetCoMOffsetX() : 0f;
         float angularVelocity = vestibularSystem != null ? vestibularSystem.GetBodyAngularVelocity() : 0f;
+        // WALK-1 completeness: clear the leg-joint request record for this step
+        // BEFORE anything may return early. Whatever no layer writes is sealed
+        // by TrialRecorder (measured angle + a named owner) - never NaN.
+        BeginLegRequestRecord();
         // Before anything may return early (startup hold, Falling): a filter
         // that skips steps is a filter with an unknown time constant.
         UpdateWalkComVelocityFilter();
@@ -4431,6 +4435,7 @@ public partial class BalanceController : MonoBehaviour
         // step of a pose run). The old path still runs with -poseDrive 0.
         if (PoseDriveActive())
         {
+            legReqLayer = TapOwnerPoseDrive;
             poseDrive.Tick(comOffset);
             return;
         }
@@ -4442,11 +4447,13 @@ public partial class BalanceController : MonoBehaviour
         // CaptureWalk can resume; that path must not eat GETUP-1.
         if (locomotionState == LocomotionState.GettingUp)
         {
+            legReqLayer = TapOwnerGetUp;
             TickGetUp(comOffset);
             return;
         }
         if (locomotionState == LocomotionState.Fallen)
         {
+            legReqLayer = TapOwnerFalling;
             RelaxAllMuscles();
             return;
         }
@@ -4456,6 +4463,7 @@ public partial class BalanceController : MonoBehaviour
         // -walk 1 is this walker. -captureWalk 0 restores WalkLift.
         if (CaptureWalkActive())
         {
+            legReqLayer = TapOwnerCaptureWalk;
             TickCaptureWalk(comOffset);
             // DualSupport dump arms StandingRestore inside TickCaptureWalk.
             // Returning here left the walk commands as leftover activation
@@ -4469,6 +4477,10 @@ public partial class BalanceController : MonoBehaviour
         }
 
         bool walkRequested = stepPhaseDriver != null && stepPhaseDriver.walkActive;
+        // WALK-1 completeness: from here down the legs belong to the quiet
+        // stance / stance-clock (WalkLift) layer unless a branch below names
+        // itself more precisely.
+        legReqLayer = TapOwnerStanceLayer;
         // Standing Plant: TiltSettled + CoM-to-stance is still shut, so
         // the joints belong to quiet two-foot stance. walkRequested stays
         // true so Tick can resume; walkSoft must not, or moveX=1 keeps
@@ -4489,6 +4501,7 @@ public partial class BalanceController : MonoBehaviour
         // owns that. Happy path never raises restore (tilt 2.1°, |lead| ~0).
         if (standingPlant && !stepPhaseDriver.StandingPlantHoldReady)
         {
+            legReqLayer = TapOwnerStandingPlant;
             TickStandingPlantRestore(comOffset);
             return;
         }
@@ -9963,6 +9976,112 @@ public partial class BalanceController : MonoBehaviour
             UpdateMuscle(extensor, 0f);
             UpdateMuscle(flexor, -signal);
         }
+        // WALK-1 completeness: a torque loop wrote a leg pair (world-upright
+        // hips, CoM ankle, a zero snap). Name the joint's owner on this step;
+        // keep an angle request a PD already recorded, and take this signal as
+        // the demand when nothing else asked for the joint.
+        int legJoint = LegJointFromMuscles(flexor, extensor);
+        if (legJoint >= 0)
+        {
+            legReqOwner[legJoint] = legReqLayer;
+            if (float.IsNaN(legReqDemand[legJoint]))
+                legReqDemand[legJoint] = signal;
+        }
+    }
+
+    // ─── WALK-1 recorder completeness: who asked for each leg joint ───
+    // Recorder-only. Nothing below feeds the control math: these arrays are the
+    // record of the last angle request handed to a leg joint's PD on THIS
+    // FixedUpdate, the raw (pre-clamp) demand that request produced in units of
+    // the acting muscle's ceiling, and the layer that wrote it. Cleared at the
+    // top of FixedUpdate; TrialRecorder seals whatever no layer wrote
+    // (owner = TapOwnerIdle, req = the MEASURED joint angle, flagged in
+    // reqFallbackMask) so no CSV row is ever NaN or unowned again.
+    public const int LegJointHipL = 0;
+    public const int LegJointHipR = 1;
+    public const int LegJointKneeL = 2;
+    public const int LegJointKneeR = 3;
+    public const int LegJointAnkleL = 4;
+    public const int LegJointAnkleR = 5;
+    public const int LegJointCount = 6;
+
+    private readonly float[] legReqDeg = new float[LegJointCount];
+    private readonly int[] legReqOwner = new int[LegJointCount];
+    private readonly float[] legReqDemand = new float[LegJointCount];
+    private int legReqLayer;
+
+    // Which layer owns the legs on this step (a TapOwner* code). Stamped by
+    // FixedUpdate before each branch; a drive method may pass a more precise
+    // code instead (the capture walker names its own drive methods).
+    public int LegRequestLayer => legReqLayer;
+    public float LegRequestDeg(int i) => legReqDeg[i];
+    public int LegRequestOwner(int i) => legReqOwner[i];
+    public float LegRequestDemand(int i) => legReqDemand[i];
+
+    // Side/kind of a leg joint from the cached hinge references. -1 = this
+    // joint is not one of the six the walk tap records.
+    public int LegJointIndex(HingeJoint2D joint)
+    {
+        if (joint == null) return -1;
+        if (joint == leftHipJoint) return LegJointHipL;
+        if (joint == rightHipJoint) return LegJointHipR;
+        if (joint == leftKneeJoint) return LegJointKneeL;
+        if (joint == rightKneeJoint) return LegJointKneeR;
+        if (joint == leftAnkleJoint) return LegJointAnkleL;
+        if (joint == rightAnkleJoint) return LegJointAnkleR;
+        return -1;
+    }
+
+    private int LegJointFromMuscles(Muscle flexor, Muscle extensor)
+    {
+        if (flexor == null && extensor == null) return -1;
+        if (flexor == leftHipFlexor || extensor == leftHipExtensor) return LegJointHipL;
+        if (flexor == rightHipFlexor || extensor == rightHipExtensor) return LegJointHipR;
+        if (flexor == leftKneeFlexor || extensor == leftKneeExtensor) return LegJointKneeL;
+        if (flexor == rightKneeFlexor || extensor == rightKneeExtensor) return LegJointKneeR;
+        if (flexor == leftAnkleFlexor || extensor == leftAnkleExtensor) return LegJointAnkleL;
+        if (flexor == rightAnkleFlexor || extensor == rightAnkleExtensor) return LegJointAnkleR;
+        return -1;
+    }
+
+    public void BeginLegRequestRecord()
+    {
+        legReqLayer = TapOwnerStanceLayer;
+        for (int i = 0; i < LegJointCount; i++)
+        {
+            legReqDeg[i] = float.NaN;
+            legReqOwner[i] = TapOwnerNone;
+            legReqDemand[i] = float.NaN;
+        }
+    }
+
+    // An angle PD was handed a target for this leg joint. owner 0 = use the
+    // layer stamped for this step.
+    public void NoteLegAngle(HingeJoint2D joint, float targetDeg, float demand,
+                             int owner = TapOwnerNone)
+    {
+        NoteLegAngle(LegJointIndex(joint), targetDeg, demand, owner);
+    }
+
+    public void NoteLegAngle(int index, float targetDeg, float demand, int owner)
+    {
+        if (index < 0 || index >= LegJointCount) return;
+        legReqDeg[index] = targetDeg;
+        legReqDemand[index] = demand;
+        legReqOwner[index] = owner != TapOwnerNone ? owner : legReqLayer;
+    }
+
+    // A torque loop owns this joint (CoP ankle, quiet CoM ankle, a world-upright
+    // hip): no angle request outstanding, so the request stays NaN here and
+    // TrialRecorder records the measured angle with the fallback flag.
+    public void NoteLegTorque(HingeJoint2D joint, float demand,
+                              int owner = TapOwnerNone)
+    {
+        int index = LegJointIndex(joint);
+        if (index < 0) return;
+        legReqDeg[index] = float.NaN;
+        legReqDemand[index] = demand;
+        legReqOwner[index] = owner != TapOwnerNone ? owner : legReqLayer;
     }
 
     // Kept for compatibility; every call has moved to Stable PD.
@@ -11529,7 +11648,11 @@ public partial class BalanceController : MonoBehaviour
             damping = k * dt / cachedInertia;
         }
 
-        float signal = Mathf.Clamp(raw / (1f + damping), -1f, 1f);
+        float demand = raw / (1f + damping);
+        float signal = Mathf.Clamp(demand, -1f, 1f);
+        // WALK-1 completeness: this joint's owner, its angle request and the
+        // demand it produced. Sample only - the same demand is clamped next.
+        NoteLegAngle(joint, targetAngle, demand);
         ApplySignal(signal, flexor, extensor);
         return signal;
     }
@@ -14174,8 +14297,12 @@ public partial class BalanceController : MonoBehaviour
             float velX = bodyState != null ? bodyState.comVelocity.x : 0f;
             float offsetN = comOffset / Mathf.Max(0.01f, comOffsetReference);
             float velN = velX / Mathf.Max(0.05f, comVelocityReference);
-            ankleBalance = Mathf.Clamp(
-                ankleComP * offsetN + ankleComD * velN, -1f, 1f);
+            float ankleRaw = ankleComP * offsetN + ankleComD * velN;
+            // WALK-1 completeness: the loop's demand BEFORE the ±1 clamp, so
+            // the CSV can tell a saturated ceiling from a wrong demand.
+            NoteLegTorque(leftAnkleJoint, ankleRaw);
+            NoteLegTorque(rightAnkleJoint, ankleRaw);
+            ankleBalance = Mathf.Clamp(ankleRaw, -1f, 1f);
         }
         ControlAnkleForBalance(leftAnkleJoint, ankleBalance, leftAnkleFlexor, leftAnkleExtensor);
         ControlAnkleForBalance(rightAnkleJoint, ankleBalance, rightAnkleFlexor, rightAnkleExtensor);
@@ -14360,8 +14487,12 @@ public partial class BalanceController : MonoBehaviour
             float velX = bodyState != null ? bodyState.comVelocity.x : 0f;
             float offsetN = comOffset / Mathf.Max(0.01f, comOffsetReference);
             float velN = velX / Mathf.Max(0.05f, comVelocityReference);
-            ankleBalance = Mathf.Clamp(
-                ankleComP * offsetN + ankleComD * velN, -1f, 1f);
+            float ankleRaw = ankleComP * offsetN + ankleComD * velN;
+            // WALK-1 completeness: the loop's demand BEFORE the ±1 clamp, so
+            // the CSV can tell a saturated ceiling from a wrong demand.
+            NoteLegTorque(leftAnkleJoint, ankleRaw);
+            NoteLegTorque(rightAnkleJoint, ankleRaw);
+            ankleBalance = Mathf.Clamp(ankleRaw, -1f, 1f);
         }
         ControlAnkleForBalance(leftAnkleJoint, ankleBalance, leftAnkleFlexor, leftAnkleExtensor);
         ControlAnkleForBalance(rightAnkleJoint, ankleBalance, rightAnkleFlexor, rightAnkleExtensor);

@@ -467,6 +467,17 @@ public partial class BalanceController
     public const int TapOwnerSwingAnkle = 12;
     public const int TapOwnerCopAnkle = 13;
     public const int TapOwnerZero = 14;
+    // WALK-1 recorder completeness: the codes below name the LAYER that held a
+    // joint on a frame the capture walker did not write it (the walker's own
+    // drive-method codes 1..14 above stay the precise record while it runs).
+    // They are append-only: 1..14 keep their meaning for every existing probe.
+    public const int TapOwnerIdle = 15;          // no layer wrote it: no request
+    public const int TapOwnerStanceLayer = 16;   // quiet stance / stance clock (WalkLift)
+    public const int TapOwnerStandingPlant = 17; // TickStandingPlantRestore (Plant)
+    public const int TapOwnerGetUp = 18;         // TickGetUp
+    public const int TapOwnerFalling = 19;       // Fallen: RelaxAllMuscles, no drive
+    public const int TapOwnerPoseDrive = 20;     // LEVEL 2 pose library
+    public const int TapOwnerCaptureWalk = 21;   // the capture walker as a layer
 
     // Abort codes: why TickCaptureWalk handed the joints back this frame.
     public const int TapAbortNone = 0;
@@ -1938,6 +1949,9 @@ public partial class BalanceController
         else
             captureMixer.JointStable(joint, shinDeg - toeUp, hipPGain, hipDGain,
                 errorReferenceDegrees, flexor, extensor, ref rightAnkleEffectiveInertia);
+        // WALK-1 completeness: the swing-ankle request into the registry.
+        NoteLegAngle(joint, shinDeg - toeUp, captureMixer.lastDemand,
+            TapOwnerSwingAnkle);
     }
 
     // Dirt-fold ankle. jointAngle = shin − foot, so shinDeg is a
@@ -1986,6 +2000,8 @@ public partial class BalanceController
         else
             captureMixer.JointStable(joint, target, hipPGain, hipDGain,
                 errorReferenceDegrees, flexor, extensor, ref rightAnkleEffectiveInertia);
+        // WALK-1 completeness: the dirt-fold ankle request into the registry.
+        NoteLegAngle(joint, target, captureMixer.lastDemand, TapOwnerDirtFoldAnkle);
     }
 
     // 1 at step onset (DS and early swing): the forward lean that actually
@@ -2477,21 +2493,26 @@ public partial class BalanceController
             left ? leftHipExtensor : rightHipExtensor,
             left ? leftKneeFlexor : rightKneeFlexor,
             left ? leftKneeExtensor : rightKneeExtensor);
-        // WALK-1: the muscles are snapped to zero, so the target this frame is
-        // that zero, and no drive method owns the joint.
+        // WALK-1: the muscles are snapped to zero, so there is no angle request
+        // outstanding. The request column carries the MEASURED joint angle (a
+        // held value, not an ask) instead of NaN, and the owner says Zero.
         if (left)
         {
             walkTap.ownerHipL = TapOwnerZero;
             walkTap.ownerKneeL = TapOwnerZero;
-            walkTap.reqHipL = float.NaN;
-            walkTap.reqKneeL = float.NaN;
+            walkTap.reqHipL = leftHipJoint != null ? leftHipJoint.jointAngle : 0f;
+            walkTap.reqKneeL = leftKneeJoint != null ? leftKneeJoint.jointAngle : 0f;
+            NoteLegTorque(leftHipJoint, 0f, TapOwnerZero);
+            NoteLegTorque(leftKneeJoint, 0f, TapOwnerZero);
         }
         else
         {
             walkTap.ownerHipR = TapOwnerZero;
             walkTap.ownerKneeR = TapOwnerZero;
-            walkTap.reqHipR = float.NaN;
-            walkTap.reqKneeR = float.NaN;
+            walkTap.reqHipR = rightHipJoint != null ? rightHipJoint.jointAngle : 0f;
+            walkTap.reqKneeR = rightKneeJoint != null ? rightKneeJoint.jointAngle : 0f;
+            NoteLegTorque(rightHipJoint, 0f, TapOwnerZero);
+            NoteLegTorque(rightKneeJoint, 0f, TapOwnerZero);
         }
     }
 
@@ -2692,6 +2713,10 @@ public partial class BalanceController
             walkTap.copCmdR = command;
             walkTap.ownerAnkleR = TapOwnerCopAnkle;
         }
+        // WALK-1 completeness: the loop's OWN demand before the cap and the
+        // weight scale, so the CSV can tell a ceiling that is too small from a
+        // demand that is wrong. Recorded as a torque request (no angle).
+        NoteLegTorque(joint, raw, TapOwnerCopAnkle);
     }
 
     // MTP pose for the capture walker. Zero is a flat plate in mid-stance.
@@ -2808,6 +2833,9 @@ public partial class BalanceController
         else
             captureMixer.JointStable(joint, targetDeg, hipPGain, hipDGain,
                 errorReferenceDegrees, flexor, extensor, ref rightHipEffectiveInertia);
+        // WALK-1 completeness: the same request into the controller registry,
+        // so the row still names the owner on a frame the walker does not tick.
+        NoteLegAngle(joint, targetDeg, captureMixer.lastDemand, tapWriterHip);
     }
 
     private void ApplyCaptureKnee(bool left, float targetDeg, bool limitPush = true)
@@ -2834,6 +2862,8 @@ public partial class BalanceController
         else
             captureMixer.JointStable(joint, targetDeg, kneePGain, kneeDGain,
                 errorReferenceDegrees, flexor, extensor, ref rightKneeEffectiveInertia);
+        // WALK-1 completeness: the knee request into the controller registry.
+        NoteLegAngle(joint, targetDeg, captureMixer.lastDemand, tapWriterKnee);
     }
 
     // Everything this walker is allowed to do to a LOADED knee. Two bounds,
