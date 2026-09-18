@@ -21,6 +21,12 @@ public sealed class TrialRunInfo
     public float RequestedStandLeg;
     public float RequestedStandLegTime = 5f;
     public float RequestedStandLegHold = 10f;
+    public float RequestedMarch;
+    public float RequestedMarchTime = 5f;
+    public float RequestedMarchDuration = 24f;
+    public float RequestedMarchHold = 2.5f;
+    public float RequestedMarchPlant = 1.5f;
+    public float RequestedMarchFirst = -1f;
     public float RequestedWalk;
     public float RequestedWalkTime = 5f;
     public float RequestedWalkDuration = 30f;
@@ -88,6 +94,9 @@ public class TrialRecorder
     private int samplesBalancing;
     private int samplesRecovery;
     private int samplesFalling;
+    private int samplesGettingUp;
+    private int samplesFallenLoco;
+    private int samplesGetUpWalk;
     private int samplesSaturated;
     private int samplesBothFeet;
     private float startHeadY;
@@ -124,6 +133,31 @@ public class TrialRecorder
     private int samplesStanceGrounded;
     private int samplesLeftGrounded;
     private int samplesRightGrounded;
+    // Cold one-leg hold quality (after the swing is airborne + 2 s settle).
+    // maxAbsPelvisTilt is the whole run, including lift; acceptance is
+    // the settled band and CoM drift during the hold.
+    private const float OneLegHoldSettleSeconds = 2f;
+    private float oneLegAirStartTime = -1f;
+    private float oneLegHoldStartTime = -1f;
+    private int samplesOneLegHold;
+    private int marchSwapCount;
+    private float lastMarchStandCmd;
+    private int samplesMarchAir;
+    private float sumMarchSwingKnee;
+    private float maxMarchSwingKnee = float.MinValue;
+    private float sumMarchSwingHip;
+    private float minMarchSwingHip = float.MaxValue;
+    private float marchPelvisMin = float.MaxValue;
+    private float marchPelvisMax = float.MinValue;
+    private float marchAirAge;
+    private float oneLegPelvisMin = float.MaxValue;
+    private float oneLegPelvisMax = float.MinValue;
+    private float oneLegComXMin = float.MaxValue;
+    private float oneLegComXMax = float.MinValue;
+    private float oneLegLastPelvisDelta;
+    private float oneLegLastPelvis;
+    private bool oneLegHasPrevPelvis;
+    private int oneLegPelvisReversals;
     private float lastTilt;
     private float lastComOffset;
     // Distance travelled by the CoM along X. Without it a support swap counted
@@ -135,6 +169,15 @@ public class TrialRecorder
     private float lastLumbarAngle;
     private float maxAbsLumbarAngle;
     private float maxAbsPelvisTilt;
+    private int samplesWalkLiftOwns;
+    private int samplesWalkLiftAdvance;
+    private int samplesWalkLiftPlantOverFloor;
+    private float sumWalkLiftComLead;
+    private float maxAbsWalkLiftComLead;
+    private float maxWalkLiftCaptureStep;
+    private float maxWalkLiftXiLead;
+    private int samplesWalkAnkleFwdClip;
+    private int samplesWalkAnkleDorsiFade;
 
     private float pushTime = -1f;
     private float pushImpulse;
@@ -154,7 +197,20 @@ public class TrialRecorder
     private MotionIntent motionIntent;
     private int maxWalkSwapCount;
     private int lastWalkPhase;
+    private int lastFallCatchPhase = -1;
+    private int maxFallCatchCycleCount;
     private float lastStandLegCmd;
+    private int lastSensorTick;
+    private int comBodyCount;
+    private float sensorComXMin = float.MaxValue;
+    private float sensorComXMax = float.MinValue;
+    private float sensorMarginMin = float.MaxValue;
+    private float sensorMarginMax = float.MinValue;
+    private float sensorPelvisYMin = float.MaxValue;
+    private float sensorPelvisYMax = float.MinValue;
+    private int samplesOnsetWindow;
+    private int samplesOnsetCollapsed;
+    private int samplesOnsetPosed;
 
     public TrialRecorder(Human human, string label)
         : this(human, new TrialRunInfo { Label = label })
@@ -234,11 +290,15 @@ public class TrialRecorder
             .Append("standLegCmd").Append(';')
             .Append("walkPhase").Append(';')
             .Append("walkSwap").Append(';')
+            .Append("fallCatchPhase").Append(';')
+            .Append("fallCatchCycle").Append(';')
             .Append("dualSoft").Append(';')
             .Append("neckAngle").Append(';')
             .Append("headAngle").Append(';')
             .Append("shoulderAngle").Append(';')
-            .Append("elbowAngle").AppendLine();
+            .Append("elbowAngle").Append(';')
+            .Append("walkCollapsed").Append(';')
+            .Append("walkPosed").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -308,9 +368,29 @@ public class TrialRecorder
         standLegCmd = motionIntent != null ? motionIntent.standLeg : standLegCmd;
         int walkPhase = stepDriver != null && stepDriver.walkActive ? stepDriver.PhaseCode : -1;
         int walkSwap = stepDriver != null ? stepDriver.SwapCount : 0;
+        if (balance != null && balance.useCaptureWalker != 0 && stepDriver != null
+            && stepDriver.walkActive)
+        {
+            walkSwap = balance.CaptureWalkStepCount;
+            walkPhase = balance.CaptureWalkStateCode;
+        }
+        int fallCatchPhase = stepDriver != null ? stepDriver.FallCatchPhaseCode : -1;
+        int fallCatchCycle = stepDriver != null ? stepDriver.FallCatchCycleCount : 0;
         maxWalkSwapCount = Mathf.Max(maxWalkSwapCount, walkSwap);
+        maxFallCatchCycleCount = Mathf.Max(maxFallCatchCycleCount, fallCatchCycle);
         lastWalkPhase = walkPhase;
+        lastFallCatchPhase = fallCatchPhase;
         lastStandLegCmd = standLegCmd;
+
+        float march = motionIntent != null ? motionIntent.march : 0f;
+        if (march > 0.5f)
+        {
+            if (Mathf.Abs(standLegCmd) > 0.5f
+                && (Mathf.Abs(lastMarchStandCmd) < 0.5f
+                    || standLegCmd * lastMarchStandCmd < 0f))
+                marchSwapCount++;
+            lastMarchStandCmd = standLegCmd;
+        }
 
         float supportMargin = state != null ? state.supportMargin : 0f;
         bool leftGrounded = state != null && state.leftFootGrounded;
@@ -347,6 +427,20 @@ public class TrialRecorder
         lastTilt = tilt;
         lastComOffset = comOffset;
 
+        if (state != null)
+        {
+            lastSensorTick = state.sensorTick;
+            float sensorX = state.comPosition.x;
+            if (sensorX < sensorComXMin) sensorComXMin = sensorX;
+            if (sensorX > sensorComXMax) sensorComXMax = sensorX;
+            if (supportMargin < sensorMarginMin) sensorMarginMin = supportMargin;
+            if (supportMargin > sensorMarginMax) sensorMarginMax = supportMargin;
+        }
+        if (com != null)
+            comBodyCount = com.TrackedBodyCount;
+        if (pelvisY < sensorPelvisYMin) sensorPelvisYMin = pelvisY;
+        if (pelvisY > sensorPelvisYMax) sensorPelvisYMax = pelvisY;
+
         float hipL = state != null ? state.leftHipAngle : 0f;
         float hipR = state != null ? state.rightHipAngle : 0f;
         float kneeL = state != null ? state.leftKneeAngle : 0f;
@@ -374,23 +468,51 @@ public class TrialRecorder
         // Walk: support window — Stance phases (not transfer), sign from standLegCmd.
         bool inWalkStanceWindow = stepDriver != null && stepDriver.walkActive
             && walkPhase == 0 && Mathf.Abs(standLegCmd) > 0.5f;
-        if (inStandLegWindow || inWalkStanceWindow)
+        bool inCaptureWalkWindow = balance != null && balance.useCaptureWalker != 0
+            && stepDriver != null && stepDriver.walkActive;
+        if (inStandLegWindow || inWalkStanceWindow || inCaptureWalkWindow)
         {
             samplesStandLegWindow++;
             if (leftGrounded && rightGrounded) samplesBothFeetStandLeg++;
-            float stanceSign = inStandLegWindow ? requestedStandLeg : standLegCmd;
-            bool leftIsStance = stanceSign < -0.5f;
-            bool rightIsStance = stanceSign > 0.5f;
-            if (leftIsStance)
+            if (inCaptureWalkWindow)
             {
-                if (leftGrounded) samplesStanceGrounded++;
-                if (rightGrounded) samplesSwingGrounded++;
+                bool leftIsStance = balance.CaptureStanceFootSign < 0;
+                if (leftIsStance)
+                {
+                    if (leftGrounded) samplesStanceGrounded++;
+                    if (rightGrounded) samplesSwingGrounded++;
+                }
+                else
+                {
+                    if (rightGrounded) samplesStanceGrounded++;
+                    if (leftGrounded) samplesSwingGrounded++;
+                }
             }
-            else if (rightIsStance)
+            else
             {
-                if (rightGrounded) samplesStanceGrounded++;
-                if (leftGrounded) samplesSwingGrounded++;
+                float stanceSign = inStandLegWindow ? requestedStandLeg : standLegCmd;
+                bool leftIsStance = stanceSign < -0.5f;
+                bool rightIsStance = stanceSign > 0.5f;
+                if (leftIsStance)
+                {
+                    if (leftGrounded) samplesStanceGrounded++;
+                    if (rightGrounded) samplesSwingGrounded++;
+                }
+                else if (rightIsStance)
+                {
+                    if (rightGrounded) samplesStanceGrounded++;
+                    if (leftGrounded) samplesSwingGrounded++;
+                }
             }
+        }
+
+        if (inCaptureWalkWindow && stepDriver.WalkStartTime >= 0f
+            && time >= stepDriver.WalkStartTime
+            && time <= stepDriver.WalkStartTime + 3f)
+        {
+            samplesOnsetWindow++;
+            if (balance.CaptureWalkCollapsed) samplesOnsetCollapsed++;
+            if (balance.CaptureWalkPosed) samplesOnsetPosed++;
         }
 
         if (leftGrounded) samplesLeftGrounded++;
@@ -401,6 +523,90 @@ public class TrialRecorder
         lastPelvisTilt = pelvisTilt;
         maxAbsLumbarAngle = Mathf.Max(maxAbsLumbarAngle, Mathf.Abs(lumbar));
         maxAbsPelvisTilt = Mathf.Max(maxAbsPelvisTilt, Mathf.Abs(pelvisTilt));
+
+        if (march > 0.5f && Mathf.Abs(standLegCmd) > 0.5f)
+        {
+            bool leftIsSwingNow = standLegCmd > 0.5f;
+            bool swingAirNow = leftIsSwingNow ? !leftGrounded : !rightGrounded;
+            if (swingAirNow)
+            {
+                marchAirAge += Time.fixedDeltaTime;
+                if (marchAirAge >= 0.4f)
+                {
+                    samplesMarchAir++;
+                    float swingKnee = leftIsSwingNow ? kneeL : kneeR;
+                    float swingHip = leftIsSwingNow ? hipL : hipR;
+                    sumMarchSwingKnee += swingKnee;
+                    maxMarchSwingKnee = Mathf.Max(maxMarchSwingKnee, swingKnee);
+                    sumMarchSwingHip += swingHip;
+                    minMarchSwingHip = Mathf.Min(minMarchSwingHip, swingHip);
+                    marchPelvisMin = Mathf.Min(marchPelvisMin, pelvisTilt);
+                    marchPelvisMax = Mathf.Max(marchPelvisMax, pelvisTilt);
+                }
+            }
+            else
+                marchAirAge = 0f;
+        }
+        else
+            marchAirAge = 0f;
+
+        bool walkActiveNow = stepDriver != null && stepDriver.walkActive;
+        if (inStandLegWindow && !walkActiveNow && Mathf.Abs(requestedStandLeg) > 0.5f)
+        {
+            bool swingAir = requestedStandLeg > 0.5f ? !leftGrounded : !rightGrounded;
+            if (swingAir)
+            {
+                if (oneLegAirStartTime < 0f)
+                    oneLegAirStartTime = time;
+                if (time >= oneLegAirStartTime + OneLegHoldSettleSeconds)
+                {
+                    if (oneLegHoldStartTime < 0f)
+                        oneLegHoldStartTime = time;
+                    samplesOneLegHold++;
+                    oneLegPelvisMin = Mathf.Min(oneLegPelvisMin, pelvisTilt);
+                    oneLegPelvisMax = Mathf.Max(oneLegPelvisMax, pelvisTilt);
+                    oneLegComXMin = Mathf.Min(oneLegComXMin, comPosition.x);
+                    oneLegComXMax = Mathf.Max(oneLegComXMax, comPosition.x);
+                    if (oneLegHasPrevPelvis)
+                    {
+                        float d = pelvisTilt - oneLegLastPelvis;
+                        if (oneLegLastPelvisDelta * d < 0f && Mathf.Abs(d) > 0.0001f)
+                            oneLegPelvisReversals++;
+                        oneLegLastPelvisDelta = d;
+                    }
+                    oneLegLastPelvis = pelvisTilt;
+                    oneLegHasPrevPelvis = true;
+                }
+            }
+        }
+
+        if (balance != null)
+        {
+            if (balance.WalkLiftPhaseCode > 0)
+                samplesWalkLiftOwns++;
+            float lead = balance.lastWalkLiftComLeadApplied;
+            sumWalkLiftComLead += lead;
+            maxAbsWalkLiftComLead = Mathf.Max(maxAbsWalkLiftComLead, Mathf.Abs(lead));
+            if (balance.WalkLiftPhaseCode == 3)
+            {
+                samplesWalkLiftAdvance++;
+                float plant = balance.lastWalkLiftCaptureStep;
+                if (plant > maxWalkLiftCaptureStep)
+                    maxWalkLiftCaptureStep = plant;
+                float vel = balance.lastWalkLiftComVelX;
+                float h = Mathf.Max(0.20f, balance.walkXCoMHeight);
+                float omega = Mathf.Sqrt(9.81f / h);
+                float xiNowLead = Mathf.Abs(vel) / Mathf.Max(0.1f, omega);
+                if (xiNowLead > maxWalkLiftXiLead)
+                    maxWalkLiftXiLead = xiNowLead;
+                if (plant > balance.walkLiftStepLength + 0.001f)
+                    samplesWalkLiftPlantOverFloor++;
+            }
+            if (Mathf.Abs(balance.lastWalkAnkleFwdRaw - balance.lastWalkAnkleFwdDrive) > 0.0001f)
+                samplesWalkAnkleFwdClip++;
+            if (balance.lastWalkAnkleDorsiFade < 0.999f)
+                samplesWalkAnkleDorsiFade++;
+        }
 
         if (pushTime >= 0f && time >= pushTime)
         {
@@ -414,6 +620,23 @@ public class TrialRecorder
             case BalanceController.BalanceState.Balancing: samplesBalancing++; break;
             case BalanceController.BalanceState.Recovery: samplesRecovery++; break;
             case BalanceController.BalanceState.Falling: samplesFalling++; break;
+        }
+
+        if (balance != null)
+        {
+            switch (balance.locomotionState)
+            {
+                case BalanceController.LocomotionState.GettingUp:
+                    samplesGettingUp++;
+                    break;
+                case BalanceController.LocomotionState.Fallen:
+                    samplesFallenLoco++;
+                    break;
+                case BalanceController.LocomotionState.Walking:
+                    if (balance.getUpSuccess)
+                        samplesGetUpWalk++;
+                    break;
+            }
         }
 
         if (currentState == BalanceController.BalanceState.Falling && fallTime < 0f)
@@ -461,11 +684,15 @@ public class TrialRecorder
             .Append(F(standLegCmd)).Append(';')
             .Append(walkPhase.ToString(CultureInfo.InvariantCulture)).Append(';')
             .Append(walkSwap.ToString(CultureInfo.InvariantCulture)).Append(';')
+            .Append(fallCatchPhase.ToString(CultureInfo.InvariantCulture)).Append(';')
+            .Append(fallCatchCycle.ToString(CultureInfo.InvariantCulture)).Append(';')
             .Append(F(dualSoft)).Append(';')
             .Append(F(WatchAngle(neckWatch))).Append(';')
             .Append(F(WatchAngle(headWatch))).Append(';')
             .Append(F(WatchAngle(shoulderWatch))).Append(';')
-            .Append(F(WatchAngle(elbowWatch))).AppendLine();
+            .Append(F(WatchAngle(elbowWatch))).Append(';')
+            .Append(inCaptureWalkWindow && balance.CaptureWalkCollapsed ? "1" : "0").Append(';')
+            .Append(inCaptureWalkWindow && balance.CaptureWalkPosed ? "1" : "0").AppendLine();
     }
 
     private static float WatchAngle(JointDampingWatch watch)
@@ -586,7 +813,102 @@ public class TrialRecorder
         AppendNum(json, "standLegTime", standLegStartTime);
         AppendNum(json, "standLegReleaseTime", standLegReleaseTime);
         AppendNum(json, "requestedStandLeg", requestedStandLeg);
+        float oneLegHoldSeconds = samplesOneLegHold * Time.fixedDeltaTime;
+        float oneLegPelvisSpan = samplesOneLegHold > 0
+            ? oneLegPelvisMax - oneLegPelvisMin
+            : 0f;
+        float oneLegComDriftX = samplesOneLegHold > 0
+            ? oneLegComXMax - oneLegComXMin
+            : 0f;
+        float oneLegPelvisReversalHz = oneLegHoldSeconds > 0.001f
+            ? oneLegPelvisReversals / oneLegHoldSeconds
+            : 0f;
+        AppendNum(json, "oneLegHoldSeconds", oneLegHoldSeconds);
+        AppendNum(json, "oneLegHoldStartTime", oneLegHoldStartTime);
+        AppendNum(json, "oneLegPelvisMin", samplesOneLegHold > 0 ? oneLegPelvisMin : 0f);
+        AppendNum(json, "oneLegPelvisMax", samplesOneLegHold > 0 ? oneLegPelvisMax : 0f);
+        AppendNum(json, "oneLegPelvisSpan", oneLegPelvisSpan);
+        AppendNum(json, "oneLegComDriftX", oneLegComDriftX);
+        AppendNum(json, "oneLegPelvisReversalHz", oneLegPelvisReversalHz);
+        AppendNum(json, "marchSwapCount", marchSwapCount);
+        AppendNum(json, "marchAirSeconds", samplesMarchAir * Time.fixedDeltaTime);
+        AppendNum(json, "marchSwingKneeMean",
+            samplesMarchAir > 0 ? sumMarchSwingKnee / samplesMarchAir : 0f);
+        AppendNum(json, "marchSwingKneeMax",
+            samplesMarchAir > 0 ? maxMarchSwingKnee : 0f);
+        AppendNum(json, "marchSwingHipMean",
+            samplesMarchAir > 0 ? sumMarchSwingHip / samplesMarchAir : 0f);
+        AppendNum(json, "marchSwingHipMin",
+            samplesMarchAir > 0 ? minMarchSwingHip : 0f);
+        AppendNum(json, "marchPelvisSpan",
+            samplesMarchAir > 0 ? marchPelvisMax - marchPelvisMin : 0f);
         AppendNum(json, "walkSwapCount", maxWalkSwapCount);
+        AppendNum(json, "captureWalkStepCount",
+            balance != null ? balance.CaptureWalkStepCount : 0f);
+        AppendNum(json, "sensorTick", lastSensorTick);
+        AppendNum(json, "comBodyCount", comBodyCount);
+        AppendNum(json, "sensorComXMin",
+            samples > 0 && sensorComXMin < float.MaxValue * 0.5f ? sensorComXMin : 0f);
+        AppendNum(json, "sensorComXMax",
+            samples > 0 && sensorComXMax > float.MinValue * 0.5f ? sensorComXMax : 0f);
+        AppendNum(json, "sensorSupportMarginMin",
+            samples > 0 && sensorMarginMin < float.MaxValue * 0.5f ? sensorMarginMin : 0f);
+        AppendNum(json, "sensorSupportMarginMax",
+            samples > 0 && sensorMarginMax > float.MinValue * 0.5f ? sensorMarginMax : 0f);
+        AppendNum(json, "sensorPelvisYMin",
+            samples > 0 && sensorPelvisYMin < float.MaxValue * 0.5f ? sensorPelvisYMin : 0f);
+        AppendNum(json, "sensorPelvisYMax",
+            samples > 0 && sensorPelvisYMax > float.MinValue * 0.5f ? sensorPelvisYMax : 0f);
+        AppendNum(json, "walkOnsetSeconds", samplesOnsetWindow * Time.fixedDeltaTime);
+        AppendNum(json, "walkOnsetCollapsedFraction",
+            samplesOnsetWindow > 0 ? samplesOnsetCollapsed / (float)samplesOnsetWindow : 0f);
+        AppendNum(json, "walkOnsetPosedFraction",
+            samplesOnsetWindow > 0 ? samplesOnsetPosed / (float)samplesOnsetWindow : 0f);
+        json.Append(",\"walkOnsetCollapsed\":")
+            .Append(samplesOnsetCollapsed > 0 ? "true" : "false");
+        json.Append(",\"walkOnsetPosed\":")
+            .Append(samplesOnsetPosed > 0 ? "true" : "false");
+        AppendNum(json, "locomotionState",
+            balance != null ? (float)(int)balance.locomotionState : 0f);
+        AppendNum(json, "getUpAttempts",
+            balance != null ? balance.getUpAttempts : 0f);
+        json.Append(",\"getUpSuccess\":")
+            .Append(balance != null && balance.getUpSuccess ? "true" : "false");
+        AppendNum(json, "getUpSeconds",
+            balance != null ? balance.getUpSeconds : -1f);
+        AppendNum(json, "getUpFallTime",
+            balance != null ? balance.getUpFallTime : -1f);
+        AppendNum(json, "getUpPose",
+            balance != null ? balance.getUpPose : 0f);
+        AppendNum(json, "getUpPoseMax",
+            balance != null ? balance.getUpPoseMax : 0f);
+        json.Append(",\"getUpReachedLying\":")
+            .Append(balance != null && balance.getUpPoseMax >= 1 ? "true" : "false");
+        json.Append(",\"getUpReachedSitting\":")
+            .Append(balance != null && balance.getUpPoseMax >= 2 ? "true" : "false");
+        json.Append(",\"getUpReachedKneesTucked\":")
+            .Append(balance != null && balance.getUpPoseMax >= 3 ? "true" : "false");
+        json.Append(",\"getUpReachedStanding\":")
+            .Append(balance != null && balance.getUpPoseMax >= 4 ? "true" : "false");
+        AppendNum(json, "gettingUpSeconds", samplesGettingUp * Time.fixedDeltaTime);
+        AppendNum(json, "fallenLocoSeconds", samplesFallenLoco * Time.fixedDeltaTime);
+        AppendNum(json, "getUpWalkSeconds", samplesGetUpWalk * Time.fixedDeltaTime);
+        AppendStr(json, "walkOnsetLog", FormatCaptureOnsetLog());
+        AppendNum(json, "walkLiftOwnsFraction", Fraction(samplesWalkLiftOwns));
+        AppendNum(json, "walkLiftAdvanceFraction", Fraction(samplesWalkLiftAdvance));
+        AppendNum(json, "walkLiftPlantOverFloorFraction",
+            samplesWalkLiftAdvance > 0
+                ? samplesWalkLiftPlantOverFloor / (float)samplesWalkLiftAdvance
+                : 0f);
+        AppendNum(json, "maxWalkLiftCaptureStep", maxWalkLiftCaptureStep);
+        AppendNum(json, "maxWalkLiftXiLead", maxWalkLiftXiLead);
+        AppendNum(json, "walkAnkleFwdClipFraction", Fraction(samplesWalkAnkleFwdClip));
+        AppendNum(json, "walkAnkleDorsiFadeFraction", Fraction(samplesWalkAnkleDorsiFade));
+        AppendNum(json, "meanWalkLiftComLead",
+            samples > 0 ? sumWalkLiftComLead / samples : 0f);
+        AppendNum(json, "maxAbsWalkLiftComLead", maxAbsWalkLiftComLead);
+        AppendNum(json, "fallCatchCycleCount", maxFallCatchCycleCount);
+        AppendNum(json, "finalFallCatchPhase", lastFallCatchPhase);
         AppendNum(json, "walkTransferReadyFrames",
             stepDriver != null ? stepDriver.TransferReadyFrames : 0f);
         AppendNum(json, "finalWalkPhase", lastWalkPhase);
@@ -654,6 +976,12 @@ public class TrialRecorder
         AppendNum(json, "standLeg", info.RequestedStandLeg);
         AppendNum(json, "standLegTime", info.RequestedStandLegTime);
         AppendNum(json, "standLegHold", info.RequestedStandLegHold);
+        AppendNum(json, "march", info.RequestedMarch);
+        AppendNum(json, "marchTime", info.RequestedMarchTime);
+        AppendNum(json, "marchDuration", info.RequestedMarchDuration);
+        AppendNum(json, "marchHold", info.RequestedMarchHold);
+        AppendNum(json, "marchPlant", info.RequestedMarchPlant);
+        AppendNum(json, "marchFirst", info.RequestedMarchFirst);
         AppendNum(json, "walk", info.RequestedWalk);
         AppendNum(json, "walkTime", info.RequestedWalkTime);
         AppendNum(json, "walkDuration", info.RequestedWalkDuration);
@@ -725,6 +1053,9 @@ public class TrialRecorder
         AppendVec2(json, "thighSize", h.thighSize);
         AppendVec2(json, "shinSize", h.shinSize);
         AppendVec2(json, "footSize", h.footSize);
+        AppendNum(json, "footHeelShare", h.footHeelShare);
+        AppendNum(json, "toeFriction", h.toeFriction);
+        AppendNum(json, "toeMuscleTorque", h.toeMuscleTorque);
         // Check contact, not intent: the pair is
         // sqrt(µ_foot · µ_ground); one foot does not set grip by itself.
         AppendNum(json, "footFriction", h.footFriction);
@@ -776,6 +1107,22 @@ public class TrialRecorder
             AppendNum(json, "crouchHandBalanceSpread", b.crouchHandBalanceSpread);
             AppendNum(json, "swingHipFlex", b.swingHipFlex);
             AppendNum(json, "swingKneeFlex", b.swingKneeFlex);
+            AppendNum(json, "marchHipFlex", b.marchHipFlex);
+            AppendNum(json, "marchKneeFlex", b.marchKneeFlex);
+            AppendNum(json, "marchPrepareTilt", b.marchPrepareTilt);
+            AppendNum(json, "marchLiftTilt", b.marchLiftTilt);
+            AppendNum(json, "marchTiltRate", b.marchTiltRate);
+            AppendNum(json, "marchPelvisHold", b.marchPelvisHold);
+            AppendNum(json, "marchComPelvisGain", b.marchComPelvisGain);
+            AppendNum(json, "marchPelvisComClamp", b.marchPelvisComClamp);
+            AppendNum(json, "marchAnkleRefScale", b.marchAnkleRefScale);
+            AppendNum(json, "marchStancePelvisP", b.marchStancePelvisP);
+            AppendNum(json, "marchAnkleCap", b.marchAnkleCap);
+            AppendNum(json, "marchAnkleToeGate", b.marchAnkleToeGate);
+            AppendNum(json, "marchAnkleHeelGate", b.marchAnkleHeelGate);
+            AppendNum(json, "marchComDelay", b.marchComDelay);
+            AppendNum(json, "marchPoseHip", b.marchPoseHip);
+            AppendNum(json, "marchPoseKnee", b.marchPoseKnee);
             AppendNum(json, "swingKneeGroundedFraction", b.swingKneeGroundedFraction);
             AppendNum(json, "swingHipUnloadBias", b.swingHipUnloadBias);
             AppendNum(json, "forwardSwingHipUnloadScale", b.forwardSwingHipUnloadScale);
@@ -785,8 +1132,12 @@ public class TrialRecorder
             AppendNum(json, "backPelvisTiltFraction", b.backPelvisTiltFraction);
             AppendNum(json, "swingAnkleGroundedToeOff", b.swingAnkleGroundedToeOff);
             AppendNum(json, "standLegPelvisTilt", b.standLegPelvisTilt);
+            AppendNum(json, "oneLegPelvisPBoost", b.oneLegPelvisPBoost);
+            AppendNum(json, "oneLegPelvisDBoost", b.oneLegPelvisDBoost);
             AppendNum(json, "dualSupportSwingScale", b.dualSupportSwingScale);
             AppendNum(json, "dualSupportStandCap", b.dualSupportStandCap);
+            AppendNum(json, "walkAirReleaseAuthority", b.walkAirReleaseAuthority);
+            AppendNum(json, "walkReachAirSwingSeconds", b.walkReachAirSwingSeconds);
             AppendNum(json, "walkSwingLiftScale", b.walkSwingLiftScale);
             AppendNum(json, "walkStanceLiftDelay", b.walkStanceLiftDelay);
             AppendNum(json, "walkStanceLiftRamp", b.walkStanceLiftRamp);
@@ -799,10 +1150,30 @@ public class TrialRecorder
             AppendNum(json, "walkLiftUnloadBias", b.walkLiftUnloadBias);
             AppendNum(json, "walkKneePeelMax", b.walkKneePeelMax);
             AppendNum(json, "walkStancePush", b.walkStancePush);
+            AppendNum(json, "walkPlantStancePushFirst", b.walkPlantStancePushFirst);
             AppendNum(json, "runStancePushScale", b.runStancePushScale);
+            AppendNum(json, "walkStanceHipExtend", b.walkStanceHipExtend);
+            AppendNum(json, "walkStanceHipExtendMax", b.walkStanceHipExtendMax);
+            AppendNum(json, "walkStancePushOnLead", b.walkStancePushOnLead);
+            AppendNum(json, "walkPlantPushScale", b.walkPlantPushScale);
+            AppendNum(json, "walkPlantPushLeadWindow", b.walkPlantPushLeadWindow);
+            AppendNum(json, "walkPlantRockLead", b.walkPlantRockLead);
+            AppendNum(json, "walkScrapeAnkleDrive", b.walkScrapeAnkleDrive);
+            AppendNum(json, "walkPushToeFade", b.walkPushToeFade);
+            AppendNum(json, "walkFallComRollToe", b.walkFallComRollToe);
             AppendNum(json, "walkTargetSpeed", b.walkTargetSpeed);
             AppendNum(json, "walkSpeedPushGain", b.walkSpeedPushGain);
             AppendNum(json, "walkSpeedPushMax", b.walkSpeedPushMax);
+            AppendNum(json, "walkPushCounterAllowance", b.walkPushCounterAllowance);
+            AppendNum(json, "walkPropulsionGain", b.walkPropulsionGain);
+            AppendNum(json, "walkPropulsionMax", b.walkPropulsionMax);
+            AppendNum(json, "walkPropulsionStart", b.walkPropulsionStart);
+            AppendNum(json, "walkPropulsionPeak", b.walkPropulsionPeak);
+            AppendNum(json, "walkPropulsionEnd", b.walkPropulsionEnd);
+            AppendNum(json, "walkPropulsionTiltGuardDeg", b.walkPropulsionTiltGuardDeg);
+            AppendNum(json, "walkPropulsionComWindow", b.walkPropulsionComWindow);
+            AppendNum(json, "walkPropulsionMinWeight", b.walkPropulsionMinWeight);
+            AppendNum(json, "walkPropulsionCounterAllowance", b.walkPropulsionCounterAllowance);
             AppendNum(json, "walkSpeedPushComGateScale", b.walkSpeedPushComGateScale);
             AppendNum(json, "walkXCoMWeight", b.walkXCoMWeight);
             AppendNum(json, "walkXCoMHeight", b.walkXCoMHeight);
@@ -822,26 +1193,135 @@ public class TrialRecorder
             AppendNum(json, "walkStepPlacementGain", b.walkStepPlacementGain);
             AppendNum(json, "walkStepPlacementMax", b.walkStepPlacementMax);
             AppendNum(json, "walkStepPlacementGroundFraction", b.walkStepPlacementGroundFraction);
+            AppendNum(json, "walkStepPlaceOnFold", b.walkStepPlaceOnFold);
+            AppendNum(json, "walkStepComMargin", b.walkStepComMargin);
+            AppendNum(json, "walkStepCaptureTarget", b.walkStepCaptureTarget);
+            AppendNum(json, "walkStepMinLength", b.walkStepMinLength);
+            AppendNum(json, "walkStepCatchLeadSync", b.walkStepCatchLeadSync);
+            AppendNum(json, "walkStepCatchLeadPad", b.walkStepCatchLeadPad);
             AppendNum(json, "walkPlacementSyncStart", b.walkPlacementSyncStart);
             AppendNum(json, "walkTouchdownSyncClearance", b.walkTouchdownSyncClearance);
             AppendNum(json, "walkStanceKneeBend", b.walkStanceKneeBend);
+            AppendNum(json, "walkStanceKneeRecoveryFlex", b.walkStanceKneeRecoveryFlex);
             AppendNum(json, "walkForwardPelvisLean", b.walkForwardPelvisLean);
             AppendNum(json, "walkForwardTorsoLean", b.walkForwardTorsoLean);
             AppendNum(json, "walkStanceExtend", b.walkStanceExtend);
             AppendNum(json, "walkComLeadX", b.walkComLeadX);
+            AppendNum(json, "walkFirstLiftLead", b.walkFirstLiftLead);
+            AppendNum(json, "walkFirstLeadSeconds", b.walkFirstLeadSeconds);
+            AppendNum(json, "useWalkLift", b.useWalkLift);
+            AppendNum(json, "walkLiftUnloadFromDirt", b.walkLiftUnloadFromDirt);
+            AppendNum(json, "useCaptureWalker", b.useCaptureWalker);
+            AppendNum(json, "getUpFallenAbsTilt", b.getUpFallenAbsTilt);
+            AppendNum(json, "getUpStandTiltDeg", b.getUpStandTiltDeg);
+            AppendNum(json, "getUpHipFlex", b.getUpHipFlex);
+            AppendNum(json, "getUpKneeFlex", b.getUpKneeFlex);
+            AppendNum(json, "getUpTuckMinSeconds", b.getUpTuckMinSeconds);
+            AppendNum(json, "getUpSquatAbsTilt", b.getUpSquatAbsTilt);
+            AppendNum(json, "getUpTuckMaxSeconds", b.getUpTuckMaxSeconds);
+            AppendNum(json, "getUpRiseSeconds", b.getUpRiseSeconds);
+            AppendNum(json, "captureStepDuration", b.captureStepDuration);
+            AppendNum(json, "captureSwingXShare", b.captureSwingXShare);
+            AppendNum(json, "captureTargetSpeed", b.captureTargetSpeed);
+            AppendNum(json, "captureLandLegLength", b.captureLandLegLength);
+            AppendNum(json, "captureStanceLegLength", b.captureStanceLegLength);
+            AppendNum(json, "captureTrunkLeanDeg", b.captureTrunkLeanDeg);
+            AppendNum(json, "capturePelvisLeanDeg", b.capturePelvisLeanDeg);
+            AppendNum(json, "captureLeanPlantFraction", b.captureLeanPlantFraction);
+            AppendNum(json, "captureDoubleSupportMin", b.captureDoubleSupportMin);
+            AppendNum(json, "captureCopTravelBias", b.captureCopTravelBias);
+            AppendNum(json, "captureLaunchSeconds", b.captureLaunchSeconds);
+            AppendNum(json, "captureLaunchAnkleCap", b.captureLaunchAnkleCap);
+            AppendNum(json, "captureLaunchSpeed", b.captureLaunchSpeed);
+            AppendNum(json, "captureLaunchLead", b.captureLaunchLead);
+            AppendNum(json, "captureCatchPast", b.captureCatchPast);
+            AppendNum(json, "walkLiftKneeFlex", b.walkLiftKneeFlex);
+            AppendNum(json, "walkLiftStepLength", b.walkLiftStepLength);
+            AppendNum(json, "walkLiftStepMax", b.walkLiftStepMax);
+            AppendNum(json, "walkLiftAnkleFwdDriveMax", b.walkLiftAnkleFwdDriveMax);
+            AppendNum(json, "walkAnkleDorsiHold", b.walkAnkleDorsiHold);
+            AppendNum(json, "walkAnkleDorsiFade", b.walkAnkleDorsiFade);
+            AppendNum(json, "walkLiftCaptureLookahead", b.walkLiftCaptureLookahead);
+            AppendNum(json, "walkLiftLandX", b.lastWalkLiftLandX);
+            AppendNum(json, "walkLiftCaptureX", b.lastWalkLiftCaptureX);
+            AppendNum(json, "walkLiftCaptureStep", b.lastWalkLiftCaptureStep);
+            AppendNum(json, "walkLiftXiNow", b.lastWalkLiftXiNow);
+            AppendNum(json, "walkLiftComVelX", b.lastWalkLiftComVelX);
+            AppendNum(json, "walkAnkleFwdRaw", b.lastWalkAnkleFwdRaw);
+            AppendNum(json, "walkAnkleFwdDrive", b.lastWalkAnkleFwdDrive);
+            AppendNum(json, "walkAnkleDorsiFadeNow", b.lastWalkAnkleDorsiFade);
+            AppendNum(json, "walkLiftPhase", b.WalkLiftPhaseCode);
+            AppendNum(json, "walkLiftCoupleHipShare", b.walkLiftCoupleHipShare);
+            AppendNum(json, "walkLiftReactionCap", b.walkLiftReactionCap);
+            AppendNum(json, "walkLiftAdvanceSeconds", b.walkLiftAdvanceSeconds);
+            AppendNum(json, "walkLiftAdvanceHipRamp", b.walkLiftAdvanceHipRamp);
+            AppendNum(json, "walkLiftTauSw", b.lastWalkLiftTauSw);
+            AppendNum(json, "walkLiftCoupleRamp", b.lastWalkLiftCoupleRamp);
+            AppendNum(json, "walkLiftAdvanceScale", b.lastWalkLiftAdvanceScale);
+            AppendNum(json, "walkLiftComLead", b.lastWalkLiftComLead);
+            AppendNum(json, "walkLiftComLeadApplied", b.lastWalkLiftComLeadApplied);
             AppendNum(json, "walkSwingScissorLevel", b.walkSwingScissorLevel);
             AppendNum(json, "walkSwingScissorFlex", b.walkSwingScissorFlex);
+            AppendNum(json, "walkSwingLiftCouple", b.walkSwingLiftCouple);
+            AppendNum(json, "walkSwingLiftCoupleMax", b.walkSwingLiftCoupleMax);
+            AppendNum(json, "walkSwingLiftCoupleCapScale", b.walkSwingLiftCoupleCapScale);
             if (stepDriver != null)
             {
+                AppendNum(json, "useFallCatchWalk", stepDriver.useFallCatchWalk);
+                AppendNum(json, "fallComLeadTrigger", stepDriver.fallComLeadTrigger);
+                AppendNum(json, "fallPelvisLean", stepDriver.fallPelvisLean);
+                AppendNum(json, "fallForwardLeanScale", stepDriver.fallForwardLeanScale);
+                AppendNum(json, "catchKneeFlex", stepDriver.catchKneeFlex);
+                AppendNum(json, "catchLeadCapture", stepDriver.catchLeadCapture);
+                AppendNum(json, "catchFootLeadMin", stepDriver.catchFootLeadMin);
+                AppendNum(json, "catchLeadCaptureMargin", stepDriver.catchLeadCaptureMargin);
+                AppendNum(json, "plantMinDuration", stepDriver.plantMinDuration);
+                AppendNum(json, "plantLeadWaitSeconds", stepDriver.plantLeadWaitSeconds);
+                AppendNum(json, "plantCaughtLeadMax", stepDriver.plantCaughtLeadMax);
+                AppendNum(json, "plantArrestCopScale", stepDriver.plantArrestCopScale);
+                AppendNum(json, "walkRunawayKeepStepping", stepDriver.walkRunawayKeepStepping);
+                AppendNum(json, "plantRunawayStepSeconds", stepDriver.plantRunawayStepSeconds);
+                AppendNum(json, "reachTimeout", stepDriver.reachTimeout);
+                AppendNum(json, "fallAbortDeg", stepDriver.fallAbortDeg);
+                AppendNum(json, "plantStallReseatSeconds", stepDriver.plantStallReseatSeconds);
+                AppendNum(json, "plantReseatLeadMargin", stepDriver.plantReseatLeadMargin);
+                AppendNum(json, "plantStallStandSeconds", stepDriver.plantStallStandSeconds);
+                AppendNum(json, "plantClearRestoreOnGate", stepDriver.plantClearRestoreOnGate);
+                AppendNum(json, "reachGroundStallSeconds", stepDriver.reachGroundStallSeconds);
+                AppendNum(json, "fallCatchBounceMax", stepDriver.fallCatchBounceMax);
+                AppendNum(json, "sinkAbortDrop", stepDriver.sinkAbortDrop);
+                json.Append(",\"spawnStandHeightValid\":")
+                    .Append(stepDriver.SpawnStandHeightValid ? "true" : "false");
+                AppendNum(json, "spawnStandHeight", stepDriver.SpawnStandHeight);
+                json.Append(",\"standComHeightValid\":")
+                    .Append(stepDriver.StandComHeightValid ? "true" : "false");
+                AppendNum(json, "standComHeight", stepDriver.StandComHeight);
+                AppendNum(json, "pelvisStandSlack", stepDriver.pelvisStandSlack);
+                AppendNum(json, "plantAirLowestFoot", stepDriver.plantAirLowestFoot);
+                AppendNum(json, "walkRecoverAnyPose", stepDriver.walkRecoverAnyPose);
                 AppendNum(json, "stanceComTrigger", stepDriver.stanceComTrigger);
                 AppendNum(json, "stanceComMinAge", stepDriver.stanceComMinAge);
                 AppendNum(json, "stanceComTriggerPerSpeed", stepDriver.stanceComTriggerPerSpeed);
+                AppendNum(json, "walkComTriggerMinStanceFraction", stepDriver.walkComTriggerMinStanceFraction);
+                AppendNum(json, "walkTiltAbortDeg", stepDriver.walkTiltAbortDeg);
+                AppendNum(json, "walkTiltRecoverDeg", stepDriver.walkTiltRecoverDeg);
                 AppendNum(json, "walkCadenceStanceGain", stepDriver.walkCadenceStanceGain);
                 AppendNum(json, "walkCadenceMinStance", stepDriver.walkCadenceMinStance);
                 AppendNum(json, "transferMinDuration", stepDriver.transferMinDuration);
+                AppendNum(json, "transferTouchdownMaxAge", stepDriver.transferTouchdownMaxAge);
                 AppendNum(json, "walkCadenceTransferGain", stepDriver.walkCadenceTransferGain);
                 AppendNum(json, "walkCadenceMinTransfer", stepDriver.walkCadenceMinTransfer);
             }
+            AppendNum(json, "walkSwingRetractGain", b.walkSwingRetractGain);
+            AppendNum(json, "walkSwingRetractMax", b.walkSwingRetractMax);
+            AppendNum(json, "walkSwingPlaceGeometry", b.walkSwingPlaceGeometry);
+            AppendNum(json, "walkSwingPlaceGeoOnly", b.walkSwingPlaceGeoOnly);
+            AppendNum(json, "walkSwingLandKneeGeometry", b.walkSwingLandKneeGeometry);
+            AppendNum(json, "walkLandKneeMinDeg", b.walkLandKneeMinDeg);
+            AppendNum(json, "walkGeoSwingLift", b.walkGeoSwingLift);
+            AppendNum(json, "walkGeoSwingLiftClearance", b.walkGeoSwingLiftClearance);
+            AppendNum(json, "walkStanceGeoFriction", b.walkStanceGeoFriction);
+            AppendNum(json, "walkSwingLegFrictionTau", b.walkSwingLegFrictionTau);
             AppendNum(json, "walkSwingAirHold", b.walkSwingAirHold);
             AppendNum(json, "walkSwingHeelPlant", b.walkSwingHeelPlant);
             AppendNum(json, "walkSwingUnlatchPlant", b.walkSwingUnlatchPlant);
@@ -901,6 +1381,11 @@ public class TrialRecorder
             AppendNum(json, "wristDGain", b.wristDGain);
             AppendNum(json, "wristBaseAngle", b.wristBaseAngle);
             AppendNum(json, "wristErrorReferenceDegrees", b.wristErrorReferenceDegrees);
+            AppendNum(json, "toePGain", b.toePGain);
+            AppendNum(json, "toeDGain", b.toeDGain);
+            AppendNum(json, "toeClearanceDeg", b.toeClearanceDeg);
+            AppendNum(json, "captureToePushDeg", b.captureToePushDeg);
+            AppendNum(json, "captureToeLeanGain", b.captureToeLeanGain);
             AppendNum(json, "armShoulderBalanceGain", b.armShoulderBalanceGain);
             AppendNum(json, "armElbowBalanceGain", b.armElbowBalanceGain);
             AppendNum(json, "armWristBalanceGain", b.armWristBalanceGain);
@@ -1018,7 +1503,8 @@ public class TrialRecorder
         first = AppendSymmetricJoint(json, "wrist", FindJoint(h, "LeftArmHand"), FindJoint(h, "RightArmHand"), first);
         first = AppendSymmetricJoint(json, "hip", FindJoint(h, "LeftLegThigh"), FindJoint(h, "RightLegThigh"), first);
         first = AppendSymmetricJoint(json, "knee", FindJoint(h, "LeftLegShin"), FindJoint(h, "RightLegShin"), first);
-        AppendSymmetricJoint(json, "ankle", FindJoint(h, "LeftLegFoot"), FindJoint(h, "RightLegFoot"), first);
+        first = AppendSymmetricJoint(json, "ankle", FindJoint(h, "LeftLegFoot"), FindJoint(h, "RightLegFoot"), first);
+        AppendSymmetricJoint(json, "toe", FindJoint(h, "LeftLegToe"), FindJoint(h, "RightLegToe"), first);
         json.Append("}");
     }
 
@@ -1106,6 +1592,41 @@ public class TrialRecorder
         float a = flexor != null ? flexor.activation : 0f;
         float b = extensor != null ? extensor.activation : 0f;
         return Mathf.Max(a, b);
+    }
+
+    private string FormatCaptureOnsetLog()
+    {
+        if (balance == null || balance.CaptureOnsetLogCount <= 0)
+            return "";
+        var log = new StringBuilder();
+        for (int i = 0; i < BalanceController.CaptureOnsetLogCapacity; i++)
+        {
+            float age;
+            bool collapsed;
+            bool posed;
+            float comX;
+            float margin;
+            float hipDrop;
+            float comDrop;
+            bool columnStanding;
+            byte reason;
+            if (!balance.TryGetCaptureOnsetSample(i, out age, out collapsed,
+                    out posed, out comX, out margin, out hipDrop, out comDrop,
+                    out columnStanding, out reason))
+                continue;
+            if (log.Length > 0)
+                log.Append('|');
+            log.Append(age.ToString("0.00", CultureInfo.InvariantCulture));
+            log.Append(",c").Append(collapsed ? "1" : "0");
+            log.Append(",p").Append(posed ? "1" : "0");
+            log.Append(",x").Append(comX.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",m").Append(margin.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",hd").Append(hipDrop.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",cd").Append(comDrop.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",col").Append(columnStanding ? "1" : "0");
+            log.Append(",r").Append(reason.ToString(CultureInfo.InvariantCulture));
+        }
+        return log.ToString();
     }
 
     private static void AppendNum(StringBuilder json, string key, float value, bool comma = true)

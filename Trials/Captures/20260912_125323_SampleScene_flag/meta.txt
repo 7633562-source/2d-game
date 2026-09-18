@@ -1,0 +1,11 @@
+state=stopped
+reason=maxFrames
+capturedUtc=2026-09-12T12:55:13.9410664Z
+scene=SampleScene
+resolution=1230x592
+zoomHumanInCapture=True
+captureWidthFraction=0.55
+captureHeightFraction=0.7
+fixedDelta=0,005
+targetFrameRate=-1
+frames=900

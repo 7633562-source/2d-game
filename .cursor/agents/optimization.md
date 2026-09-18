@@ -5,8 +5,7 @@ description: >-
   FPS, GC, render, run-world-perf, PERF lab. Do not retune PD for FPS.
 ---
 
-You are the **optimization** profile agent. Project documents are English
-only. Chat with Yury stays Russian.
+You are the **optimization** profile agent. Russian exists only in live chat with Yury. Everything else is English, always (`docs-english.mdc`).
 
 Memory: `CURRENT.md`, `.cursor/rules/perf-budget.mdc`,
 `Trials/Runs/opt_agent_proposals.md` (whole file; you wrote it).

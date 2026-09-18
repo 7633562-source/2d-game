@@ -1,0 +1,14 @@
+e:\Games\2D Game\My project\Tools\PreviewHuman\bin\Release\net8.0-windows\PreviewHuman.exe
+e:\Games\2D Game\My project\Tools\PreviewHuman\bin\Release\net8.0-windows\PreviewHuman.deps.json
+e:\Games\2D Game\My project\Tools\PreviewHuman\bin\Release\net8.0-windows\PreviewHuman.runtimeconfig.json
+e:\Games\2D Game\My project\Tools\PreviewHuman\bin\Release\net8.0-windows\PreviewHuman.dll
+e:\Games\2D Game\My project\Tools\PreviewHuman\bin\Release\net8.0-windows\PreviewHuman.pdb
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.GeneratedMSBuildEditorConfig.editorconfig
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.AssemblyInfoInputs.cache
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.AssemblyInfo.cs
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.csproj.CoreCompileInputs.cache
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.dll
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\refint\PreviewHuman.dll
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.pdb
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\PreviewHuman.genruntimeconfig.cache
+e:\Games\2D Game\My project\Tools\PreviewHuman\obj\Release\net8.0-windows\ref\PreviewHuman.dll

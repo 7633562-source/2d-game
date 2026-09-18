@@ -1,24 +1,48 @@
 ---
-description: All project documentation is English only, always. Do not add Russian docs.
+description: Russian only in live chat with Yury. Everything else is English, always — existing and new.
 alwaysApply: true
 ---
 
-# Document language
+# Language — ironclad
 
-**Every project document is English only, always.**
+**Russian exists in exactly one place: live chat between an agent and Yury.**
+That is the only exception. Token thrift is the reason: rules, cards, comments,
+scripts, and reports stay English so every agent rereads one language.
 
-This covers `.md`, `.mdc`, task cards, READMEs, agent profiles, trial
-narrative reports, and `DOCS.md`. Do not add a Russian (or any other)
-document for a new rule, card, baseline note, or report.
+**Everything else is English. Always. Existing and new.**
+If leftover Russian is found, translate it or rename the file. Do not leave
+Cyrillic in the repo “because it is old”.
 
-Chat with Yury stays Russian. Files on this disk do not.
+| Surface | Language |
+|---|---|
+| Live chat answers to Yury | Russian |
+| Rule files (`.mdc`), agent profiles, task cards | English |
+| Code comments (C#, PowerShell, Python, Bash, …) | English |
+| `[Header]`, `[Tooltip]`, Inspector text | English |
+| `Debug.Log` / `Write-Host` / overlay / exceptions | English |
+| `DOCS.md`, `CURRENT.md`, READMEs, trial narrative `.md` | English |
+| Git commit messages | English |
+| Agent-to-agent notes in the project | English |
+| File and folder names | English (rename leftovers) |
 
-Class names and Unity API stay untranslated: `FixedUpdate`, `Rigidbody2D`,
-`HingeJoint2D`. Metric names stay as in JSON (`fell`, `pelvisDrop`).
+Do not put Russian — including quotes and examples — inside a rule, card,
+agent profile, README, or source file.
 
-When editing a file that still has Russian, translate that file in the
-same change. Do not leave a mixed-language living document.
+# What must not be translated
 
-Do not delete old tables to "clean up" a translation. Translate them.
-C# comments already in the tree are not this pass; new comments in files
-you touch should be English.
+Class names, function names, variables, Unity API names, CLI arguments, and
+metric names stay in their original English/code form (`FixedUpdate`,
+`Rigidbody2D`, `HingeJoint2D`, `fell`, `pelvisDrop`).
+
+Do not rename historical trial labels or baseline folder names
+(`Trials/Baselines/stable-pd/`, run ids). Those are identifiers, not prose.
+
+Do not rewrite historical `Trials/Runs/*.json` / `*.csv` payloads. They are
+stand records, not documents.
+
+# Comments
+
+New comments explain why and the physical meaning; they do not restate the
+line. A leftover Russian comment is not “existing style” — translate it.
+
+When editing any project file, the result must contain no Cyrillic.

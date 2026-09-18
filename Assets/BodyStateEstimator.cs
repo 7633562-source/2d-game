@@ -16,6 +16,8 @@ public class BodyStateEstimator : MonoBehaviour
     private HingeJoint2D rightKneeJoint;
     private HingeJoint2D leftAnkleJoint;
     private HingeJoint2D rightAnkleJoint;
+    private HingeJoint2D leftToeJoint;
+    private HingeJoint2D rightToeJoint;
     private HingeJoint2D lumbarJoint;
 
     // ─── FOOT REFS ───
@@ -23,6 +25,10 @@ public class BodyStateEstimator : MonoBehaviour
     private Transform rightFoot;
     private Collider2D leftFootCollider;
     private Collider2D rightFootCollider;
+    private Transform leftToe;
+    private Transform rightToe;
+    private Collider2D leftToeCollider;
+    private Collider2D rightToeCollider;
 
     private Transform leftHand;
     private Transform rightHand;
@@ -54,6 +60,9 @@ public class BodyStateEstimator : MonoBehaviour
     [Header("Center of mass")]
     public Vector2 comPosition;
     public Vector2 comVelocity;
+    // Physics-step counter: TrialRecorder reads this to prove this
+    // sensor actually ran. Zero means FixedUpdate never wrote CoM.
+    public int sensorTick;
 
     [Header("Support")]
     public float supportMinX;
@@ -69,9 +78,13 @@ public class BodyStateEstimator : MonoBehaviour
     public bool rightFootGrounded;
     public float leftFootGroundClearance;
     public float rightFootGroundClearance;
-    // Heel contact (point.x ≤ foot center). Unused by CoM/fell.
+    // Heel contact (point.x ≤ heel center). Unused by CoM/fell.
     public bool leftFootHeelLoaded;
     public bool rightFootHeelLoaded;
+    public bool leftHeelGrounded;
+    public bool rightHeelGrounded;
+    public bool leftToeGrounded;
+    public bool rightToeGrounded;
     public bool leftHandGrounded;
     public bool rightHandGrounded;
 
@@ -82,6 +95,8 @@ public class BodyStateEstimator : MonoBehaviour
     public float rightKneeAngle;
     public float leftAnkleAngle;
     public float rightAnkleAngle;
+    public float leftToeAngle;
+    public float rightToeAngle;
     public float lumbarAngle;
 
     [Header("Joint angular velocities (deg/s)")]
@@ -91,6 +106,8 @@ public class BodyStateEstimator : MonoBehaviour
     public float rightKneeAngularVelocity;
     public float leftAnkleAngularVelocity;
     public float rightAnkleAngularVelocity;
+    public float leftToeAngularVelocity;
+    public float rightToeAngularVelocity;
     public float lumbarAngularVelocity;
 
     [Header("Vestibular system")]
@@ -115,12 +132,18 @@ public class BodyStateEstimator : MonoBehaviour
         rightKneeJoint = GetJoint("RightLegShin");
         leftAnkleJoint = GetJoint("LeftLegFoot");
         rightAnkleJoint = GetJoint("RightLegFoot");
+        leftToeJoint = GetJoint("LeftLegToe");
+        rightToeJoint = GetJoint("RightLegToe");
         lumbarJoint = GetJoint("Torso");
 
         leftFoot = transform.Find("LeftLegFoot");
         rightFoot = transform.Find("RightLegFoot");
         leftFootCollider = leftFoot != null ? leftFoot.GetComponent<Collider2D>() : null;
         rightFootCollider = rightFoot != null ? rightFoot.GetComponent<Collider2D>() : null;
+        leftToe = transform.Find("LeftLegToe");
+        rightToe = transform.Find("RightLegToe");
+        leftToeCollider = leftToe != null ? leftToe.GetComponent<Collider2D>() : null;
+        rightToeCollider = rightToe != null ? rightToe.GetComponent<Collider2D>() : null;
 
         leftHand = transform.Find("LeftArmHand");
         rightHand = transform.Find("RightArmHand");
@@ -151,7 +174,11 @@ public class BodyStateEstimator : MonoBehaviour
     // ─── FIXEDUPDATE: COLLECT DATA ───
     void FixedUpdate()
     {
-        // 1. Center of mass
+        sensorTick++;
+        // 1. Center of mass. Written every physics step from the live
+        // rigidbody sum — not a spawn snapshot. Quiet ankle hold can
+        // keep x near 0.069 m under a 14° lean; that is the loop, not
+        // a frozen sensor (sensorTick still climbs).
         if (comCalculator != null)
         {
             comPosition = comCalculator.GetCenterOfMass();
@@ -169,16 +196,31 @@ public class BodyStateEstimator : MonoBehaviour
             previousComPosition = comPosition;
         }
 
-        // 2. Foot positions
-        if (leftFoot != null) leftFootPosition = leftFoot.position;
-        if (rightFoot != null) rightFootPosition = rightFoot.position;
+        // 2. Foot positions: geometric centre of the heel-to-toe plate, so
+        // a flat split foot reports the same mid-foot as the former 0.26 m
+        // box (ankle + 0.065 m).
+        leftFootPosition = FootPlateCenter(leftFoot, leftFootCollider, leftToe, leftToeCollider);
+        rightFootPosition = FootPlateCenter(rightFoot, rightFootCollider, rightToe, rightToeCollider);
 
-        // 3. Foot-ground contact (heel is separate and does not affect grounded)
-        leftFootGrounded = IsSegmentGrounded(leftFootCollider, out leftFootHeelLoaded);
-        rightFootGrounded = IsSegmentGrounded(rightFootCollider, out rightFootHeelLoaded);
+        // 3. Foot-ground contact. Each box is probed on its own so CoP can
+        // sit on the heel, the toe, or the union. Grounded is the OR.
+        bool leftHeelIgnored;
+        bool rightHeelIgnored;
+        leftHeelGrounded = IsSegmentGrounded(leftFootCollider, out leftFootHeelLoaded);
+        rightHeelGrounded = IsSegmentGrounded(rightFootCollider, out rightFootHeelLoaded);
+        leftToeGrounded = IsSegmentGrounded(leftToeCollider, out leftHeelIgnored);
+        rightToeGrounded = IsSegmentGrounded(rightToeCollider, out rightHeelIgnored);
+        leftFootGrounded = leftHeelGrounded || leftToeGrounded;
+        rightFootGrounded = rightHeelGrounded || rightToeGrounded;
         float groundTopY = ResolveGroundTopY();
-        leftFootGroundClearance = FootGroundClearance(leftFootCollider, groundTopY);
-        rightFootGroundClearance = FootGroundClearance(rightFootCollider, groundTopY);
+        leftFootGroundClearance = FootPlateClearance(
+            leftFootCollider, leftToeCollider, groundTopY);
+        rightFootGroundClearance = FootPlateClearance(
+            rightFootCollider, rightToeCollider, groundTopY);
+        // GetContacts can be empty while the solver still holds the sole
+        // (CCD toe-edge, contactOffset hover). CoM then keeps last support,
+        // the walk FSM sees both feet in the air, and the step never starts.
+        ApplyContactOffsetGrounded();
         // Skip hands while the crouch is shallow: in stance the arms are in the air,
         // and OverlapBox still walked their colliders every step.
         float slop = balance != null ? Mathf.Max(0f, balance.crouchHandGroundSlop) : 0.06f;
@@ -201,6 +243,8 @@ public class BodyStateEstimator : MonoBehaviour
         rightKneeAngle = rightKneeJoint != null ? rightKneeJoint.jointAngle : 0f;
         leftAnkleAngle = leftAnkleJoint != null ? leftAnkleJoint.jointAngle : 0f;
         rightAnkleAngle = rightAnkleJoint != null ? rightAnkleJoint.jointAngle : 0f;
+        leftToeAngle = leftToeJoint != null ? leftToeJoint.jointAngle : 0f;
+        rightToeAngle = rightToeJoint != null ? rightToeJoint.jointAngle : 0f;
         lumbarAngle = lumbarJoint != null ? lumbarJoint.jointAngle : 0f;
 
         // 6. Joint angular velocities
@@ -210,6 +254,8 @@ public class BodyStateEstimator : MonoBehaviour
         rightKneeAngularVelocity = rightKneeJoint != null ? rightKneeJoint.jointSpeed : 0f;
         leftAnkleAngularVelocity = leftAnkleJoint != null ? leftAnkleJoint.jointSpeed : 0f;
         rightAnkleAngularVelocity = rightAnkleJoint != null ? rightAnkleJoint.jointSpeed : 0f;
+        leftToeAngularVelocity = leftToeJoint != null ? leftToeJoint.jointSpeed : 0f;
+        rightToeAngularVelocity = rightToeJoint != null ? rightToeJoint.jointSpeed : 0f;
         lumbarAngularVelocity = lumbarJoint != null ? lumbarJoint.jointSpeed : 0f;
 
         // 7. Vestibular data: torso and pelvis in the same reference frame
@@ -252,6 +298,11 @@ public class BodyStateEstimator : MonoBehaviour
                     break;
                 }
             }
+            // ContactPoint2D list is the manifold, not the solver bit.
+            // A pitched toe on Continuous can report 0 points while
+            // IsTouching is still true and the body does not fall.
+            if (hitCount <= 0 && col.IsTouching(groundContactFilter))
+                hitCount = 1;
         }
         else
         {
@@ -299,6 +350,60 @@ public class BodyStateEstimator : MonoBehaviour
         return col.bounds.min.y - groundTopY;
     }
 
+    private static float FootPlateClearance(Collider2D heel, Collider2D toe, float groundTopY)
+    {
+        if (heel == null && toe == null) return 0.5f;
+        if (toe == null) return FootGroundClearance(heel, groundTopY);
+        if (heel == null) return FootGroundClearance(toe, groundTopY);
+        return Mathf.Min(
+            FootGroundClearance(heel, groundTopY),
+            FootGroundClearance(toe, groundTopY));
+    }
+
+    // Mid-point of heel-back to toe-tip along the plate. On a flat foot
+    // this is the former 0.26 m box centre (ankle + 0.065 m).
+    private static Vector2 FootPlateCenter(
+        Transform heel, Collider2D heelCol, Transform toe, Collider2D toeCol)
+    {
+        if (heel == null) return Vector2.zero;
+        Vector2 back = ColliderLocalEnd(heel, heelCol, -1f);
+        Vector2 tip = toe != null
+            ? ColliderLocalEnd(toe, toeCol, 1f)
+            : ColliderLocalEnd(heel, heelCol, 1f);
+        return 0.5f * (back + tip);
+    }
+
+    private static Vector2 ColliderLocalEnd(Transform t, Collider2D col, float sign)
+    {
+        if (t == null) return Vector2.zero;
+        BoxCollider2D box = col as BoxCollider2D;
+        float half = box != null ? box.size.x * 0.5f : 0f;
+        return (Vector2)t.position + (Vector2)t.right * (sign * half);
+    }
+
+    // Combined defaultContactOffset of sole + slab. A 4 mm hover is
+    // still the contact that offset exists for; it is not air.
+    private static float ContactOffsetBand()
+    {
+        return Physics2D.defaultContactOffset * 2f;
+    }
+
+    private void ApplyContactOffsetGrounded()
+    {
+        float band = ContactOffsetBand();
+        float groundTopY = ResolveGroundTopY();
+        if (!leftHeelGrounded && FootGroundClearance(leftFootCollider, groundTopY) <= band)
+            leftHeelGrounded = true;
+        if (!rightHeelGrounded && FootGroundClearance(rightFootCollider, groundTopY) <= band)
+            rightHeelGrounded = true;
+        if (!leftToeGrounded && FootGroundClearance(leftToeCollider, groundTopY) <= band)
+            leftToeGrounded = true;
+        if (!rightToeGrounded && FootGroundClearance(rightToeCollider, groundTopY) <= band)
+            rightToeGrounded = true;
+        leftFootGrounded = leftHeelGrounded || leftToeGrounded;
+        rightFootGrounded = rightHeelGrounded || rightToeGrounded;
+    }
+
     // ─── SUPPORT REGION AND STABILITY MARGIN ───
     // Support is the union of heel and toe colliders that touch the ground.
     private void CalculateSupport()
@@ -317,8 +422,10 @@ public class BodyStateEstimator : MonoBehaviour
         float minX = 0f;
         float maxX = 0f;
 
-        ExpandSupport(leftFootCollider, leftFootGrounded, ref hasSupport, ref minX, ref maxX);
-        ExpandSupport(rightFootCollider, rightFootGrounded, ref hasSupport, ref minX, ref maxX);
+        ExpandSupport(leftFootCollider, leftHeelGrounded, ref hasSupport, ref minX, ref maxX);
+        ExpandSupport(leftToeCollider, leftToeGrounded, ref hasSupport, ref minX, ref maxX);
+        ExpandSupport(rightFootCollider, rightHeelGrounded, ref hasSupport, ref minX, ref maxX);
+        ExpandSupport(rightToeCollider, rightToeGrounded, ref hasSupport, ref minX, ref maxX);
 
         // In a squat the hands on the ground are the third and fourth support points.
         if (balance != null && balance.crouchLevel >= balance.crouchHandSupportMin)

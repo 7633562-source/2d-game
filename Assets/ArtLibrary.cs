@@ -1,8 +1,8 @@
-using System.Collections.Generic;
 using UnityEngine;
 
-// Заливки из Resources/Art. Нет файла — null, вызывающий рисует белое как раньше.
-// Физику не трогает: это только пиксели для спрайтов.
+// Picture keys stay for callers (ground, campfire). This layer no longer
+// loads Resources/Art PNGs: every sprite is a flat color box, same as Human.
+// Dog / Crow / Chicken replace the debug rainbow tints at bake time.
 public static class ArtLibrary
 {
     public const string Skin = "skin";
@@ -12,160 +12,124 @@ public static class ArtLibrary
     public const string Grass = "grass";
     public const string Bark = "bark";
     public const string Leaf = "leaf";
-    public const string HumanHead = "Human/head";
-    public const string HumanNeck = "Human/neck";
-    public const string HumanTorso = "Human/torso";
-    public const string HumanPelvis = "Human/pelvis";
-    public const string HumanUpper = "Human/upper";
-    public const string HumanLower = "Human/lower";
-    public const string HumanHand = "Human/hand";
-    public const string HumanThigh = "Human/thigh";
-    public const string HumanShin = "Human/shin";
-    public const string HumanFoot = "Human/foot";
-    public const string DogChest = "Dog/chest";
-    public const string DogPelvis = "Dog/pelvis";
-    public const string DogNeck = "Dog/neck";
-    public const string DogHead = "Dog/head";
-    public const string DogJaw = "Dog/jaw";
-    public const string DogTail = "Dog/tail";
-    public const string DogFrontUpper = "Dog/front_upper";
-    public const string DogFrontLower = "Dog/front_lower";
-    public const string DogThigh = "Dog/thigh";
-    public const string DogShin = "Dog/shin";
-    public const string DogPaw = "Dog/paw";
+
+    public const float BodyTileMeters = 0.38f;
+    public const float GroundTileMeters = 2.5f;
+    public const float GrassTileMeters = 0.5f;
+
+    const byte KindNone = 0;
+    const byte KindDog = 1;
+    const byte KindCrow = 2;
+    const byte KindChicken = 3;
+
+    // Unity 6: Object.GetInstanceID is obsolete (CS0619). Object == / !=
+    // and if (obj) still call it. Cache the host Transform and compare
+    // with ReferenceEquals (CURRENT.md Walk front rule 4).
+    static Transform _host;
+    static byte _hostKind;
 
     public static bool IsHumanPart(string key)
     {
         return !string.IsNullOrEmpty(key) && key.StartsWith("Human/");
     }
 
-    // Painted segment sprite: full PNG stretched onto the collider box.
+    // Human layout is a tinted white square. Painted PNG is off.
     public static bool IsPaintedPart(string key)
     {
-        if (string.IsNullOrEmpty(key))
-            return false;
-        return key.StartsWith("Human/")
-            || key.StartsWith("Dog/")
-            || key.StartsWith("Crow/")
-            || key.StartsWith("Chicken/");
+        return false;
     }
 
-    // Крупный повтор: на сегменте виден цвет ткани, не поры.
-    public const float BodyTileMeters = 0.38f;
+    public static Color PaintedTint(Color layout)
+    {
+        return layout;
+    }
 
-    // Земля: один повтор на несколько метров.
-    public const float GroundTileMeters = 2.5f;
-    public const float GrassTileMeters = 0.5f;
+    // Far limb in the sagittal pair (Left* names). Dim only the picture.
+    public static bool IsFarSide(string objectName)
+    {
+        return !string.IsNullOrEmpty(objectName)
+            && objectName.IndexOf("Left", System.StringComparison.Ordinal) >= 0;
+    }
 
-    // 64px на 2.5 м при камере 2.5 давало ~8× растяжение — «пиксель-арт».
-    private const int SoftSize = 128;
-    private const int TileSize = 512;
+    public static Color DimFar(Color near)
+    {
+        return new Color(near.r * 0.70f, near.g * 0.70f, near.b * 0.70f, near.a * 0.62f);
+    }
 
-    private static readonly Dictionary<string, Texture2D> Source = new Dictionary<string, Texture2D>();
-    private static readonly Dictionary<string, Texture2D> Soft = new Dictionary<string, Texture2D>();
-    private static readonly Dictionary<string, Texture2D> Tiles = new Dictionary<string, Texture2D>();
-    private static readonly Dictionary<string, Sprite> TiledSprites = new Dictionary<string, Sprite>();
+    // Do not attach Art/ PNG keys. Dog and bird get a species box tint.
+    public static void BindPicture(string objectName, Transform node, ref string albedoKey, ref Color color)
+    {
+        albedoKey = null;
+        if (ReferenceEquals(node, null))
+            return;
+
+        byte kind = HostKind(node);
+        if (kind == KindDog)
+            color = DogArt.Tint(objectName);
+        else if (kind == KindChicken)
+            color = ChickenArt.Tint(objectName);
+        else if (kind == KindCrow)
+            color = CrowArt.Tint(objectName);
+    }
+
+    // One GetComponentInParent per animal at build, not per physics step.
+    static byte HostKind(Transform node)
+    {
+        Transform t = node;
+        while (!ReferenceEquals(t, null))
+        {
+            if (ReferenceEquals(t, _host))
+                return _hostKind;
+            t = t.parent;
+        }
+
+        Dog dog = node.GetComponentInParent<Dog>();
+        if (!ReferenceEquals(dog, null))
+        {
+            _host = dog.transform;
+            _hostKind = KindDog;
+            return KindDog;
+        }
+
+        Bird bird = node.GetComponentInParent<Bird>();
+        if (!ReferenceEquals(bird, null))
+        {
+            _host = bird.transform;
+            _hostKind = bird.kind == BirdKind.Chicken ? KindChicken : KindCrow;
+            return _hostKind;
+        }
+
+        _host = node.root;
+        _hostKind = KindNone;
+        return KindNone;
+    }
+
+    public static string ResolveAlbedoKey(string objectName, Transform node)
+    {
+        _ = objectName;
+        _ = node;
+        return null;
+    }
 
     public static Texture2D Albedo(string key)
     {
-        return SoftMap(key);
+        _ = key;
+        return null;
     }
 
     public static Color Sample(string key, float xMeters, float yMeters)
     {
-        Texture2D tex = SoftMap(key);
-        if (tex == null || !tex.isReadable)
-            return Color.white;
-
-        float u = xMeters / BodyTileMeters;
-        float v = yMeters / BodyTileMeters;
-        return tex.GetPixelBilinear(u, v);
+        _ = key;
+        _ = xMeters;
+        _ = yMeters;
+        return Color.white;
     }
 
+    // GroundBuilder / LevelArt already fall back to a white square + tint.
     public static Sprite Tiled(string key, float metersPerTile = GroundTileMeters)
     {
-        if (string.IsNullOrEmpty(key))
-            return null;
-
-        string cacheKey = key + ":" + metersPerTile.ToString("F3");
-        if (TiledSprites.TryGetValue(cacheKey, out Sprite cached) && cached != null)
-            return cached;
-
-        Texture2D tex = TileMap(key);
-        if (tex == null)
-            return null;
-
-        float ppu = tex.width / Mathf.Max(0.05f, metersPerTile);
-        Sprite sprite = Sprite.Create(
-            tex,
-            new Rect(0f, 0f, tex.width, tex.height),
-            new Vector2(0.5f, 0.5f),
-            ppu,
-            0,
-            SpriteMeshType.FullRect);
-        TiledSprites[cacheKey] = sprite;
-        return sprite;
-    }
-
-    private static Texture2D LoadSource(string key)
-    {
-        if (string.IsNullOrEmpty(key))
-            return null;
-        if (Source.TryGetValue(key, out Texture2D cached))
-            return cached;
-        Texture2D src = Resources.Load<Texture2D>("Art/" + key);
-        if (src != null)
-            src.wrapMode = TextureWrapMode.Repeat;
-        Source[key] = src;
-        return src;
-    }
-
-    private static Texture2D SoftMap(string key)
-    {
-        if (string.IsNullOrEmpty(key))
-            return null;
-        if (Soft.TryGetValue(key, out Texture2D cached))
-            return cached;
-        Texture2D src = LoadSource(key);
-        Texture2D working = src != null && src.isReadable ? Downsample(src, SoftSize) : src;
-        Soft[key] = working;
-        return working;
-    }
-
-    private static Texture2D TileMap(string key)
-    {
-        if (string.IsNullOrEmpty(key))
-            return null;
-        if (Tiles.TryGetValue(key, out Texture2D cached))
-            return cached;
-        Texture2D src = LoadSource(key);
-        Texture2D working = src != null && src.isReadable ? Downsample(src, TileSize) : src;
-        Tiles[key] = working;
-        return working;
-    }
-
-    private static Texture2D Downsample(Texture2D src, int size)
-    {
-        int w = Mathf.Min(size, src.width);
-        int h = Mathf.Min(size, src.height);
-        Texture2D dst = new Texture2D(w, h, TextureFormat.RGBA32, true);
-        dst.filterMode = FilterMode.Bilinear;
-        dst.wrapMode = TextureWrapMode.Repeat;
-        dst.name = src.name + "_w" + w;
-
-        Color[] pixels = new Color[w * h];
-        for (int y = 0; y < h; y++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                float u = (x + 0.5f) / w;
-                float v = (y + 0.5f) / h;
-                pixels[y * w + x] = src.GetPixelBilinear(u, v);
-            }
-        }
-
-        dst.SetPixels(pixels);
-        dst.Apply(true, false);
-        return dst;
+        _ = key;
+        _ = metersPerTile;
+        return null;
     }
 }

@@ -65,11 +65,21 @@ public class TreeSpring : MonoBehaviour
         float errorRad = (joint.jointAngle - restAngle) * Mathf.Deg2Rad;
         float springTorque = stiffness * errorRad;
 
+        // World-pose on a dynamic parent yanks that parent to the stop
+        // (crown looks upright, the tree lists). The stump is Static, so
+        // −τ is absorbed by the ground: the trunk can hold world-up and
+        // the twigs still sway on the joint spring.
+        RigidbodyType2D parentType = joint.connectedBody.bodyType;
+        if (worldStiffness > 0f
+            && parentType != RigidbodyType2D.Dynamic)
+        {
+            float worldErrRad = Mathf.DeltaAngle(restWorldAngle, rbSelf.rotation) * Mathf.Deg2Rad;
+            springTorque += -worldStiffness * worldErrRad;
+        }
+
         // One-step caps assume muscle-scale inertia. Wood boxes sit near
         // minSegmentInertia: springStop was then < 1 N·m and gravity
         // walked every fork to the hinge limit. Cap by maxTorque only.
-        // No world-pose term: τ, −τ on a world error yanks the parent
-        // to the stop while the child looks upright (crown height lies).
         springTorque = Mathf.Clamp(springTorque, -maxTorque, maxTorque);
 
         float torque = holdTorque + springTorque;

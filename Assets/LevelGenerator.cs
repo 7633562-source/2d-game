@@ -9,26 +9,32 @@ public enum LevelProfile
     Test1 = 3
 }
 
-// Слой мира: площадки вокруг игрока. Не читает суставы и не создаёт моменты.
-// Стенд (HeadlessTrial) сюда не заходит — у него по-прежнему GroundBuilder.
+// World layer: platforms around the player. Does not read joints or create torques.
+// The stand (HeadlessTrial) never enters here — it still uses GroundBuilder.
 public class LevelGenerator : MonoBehaviour
 {
-    [Header("Профиль")]
+    [Header("Profile")]
     public LevelProfile profile = LevelProfile.Flat;
     public int seed = 1;
 
-    [Header("Чанки")]
+    [Header("Chunks")]
     public float chunkWidth = 16f;
     public int keepBehind = 2;
     public int keepAhead = 3;
 
-    [Header("Ступени")]
-    [Tooltip("Высота одной ступени. Верх спавна всегда y = −2, как у GroundBuilder.")]
+    [Header("Steps")]
+    [Tooltip("Height of one step. Spawn top is always y = −2, as on GroundBuilder.")]
     public float stepHeight = 0.05f;
-    [Tooltip("Насколько поверхность может подняться над спавном.")]
+    [Tooltip("How far the surface may rise above spawn.")]
     public float maxRise = 0.20f;
 
-    // Верх земли в стойке: центр GroundBuilder (−3) + половина высоты (1).
+    [Header("Drawn level")]
+    [Tooltip("Human X on Test1. World showcase 0. Level1 −8, left of the apple.")]
+    public float playerSpawnX = 0f;
+    [Tooltip("Apple, strawberries, hedgehog. On in scene Level1. Off in World.")]
+    public bool plantDrawnLevel = false;
+
+    // Ground top in stance: GroundBuilder center (−3) + half height (1).
     public const float DefaultSurfaceY = -2f;
     public const float GroundThickness = 2f;
     public const float SpawnAboveSurface = 1.18f;
@@ -38,27 +44,50 @@ public class LevelGenerator : MonoBehaviour
     private Transform followTarget;
     private Transform root;
     private readonly Dictionary<int, GameObject> loaded = new Dictionary<int, GameObject>();
-    // Повторно используем буфер выгрузки: new List каждый Update даёт мусор на главном потоке.
+    // Reuse the unload buffer: a new List every Update garbage-collects on the main thread.
     private readonly List<int> dropBuffer = new List<int>(8);
     private bool running;
     private bool grovePlanted;
+    private bool campfirePlanted;
     private int lastStreamCenter = int.MinValue;
 
     public void ApplyOverrideFlag()
     {
-        string path = System.IO.Path.Combine(Application.dataPath, "..", "Tools", "force-level.flag");
-        if (!System.IO.File.Exists(path))
-            return;
+        // Desk-only flag. On WebGL dataPath is a URL; File.Exists throws and
+        // used to abort GameProcess.Start before Begin / CreateHumans —
+        // empty World, no hero, no Walk button. Same gate as PlayerInputSource.
+#if !(UNITY_WEBGL && !UNITY_EDITOR)
+        try
+        {
+            string path = System.IO.Path.Combine(Application.dataPath, "..", "Tools", "force-level.flag");
+            if (System.IO.File.Exists(path))
+            {
+                string raw = System.IO.File.ReadAllText(path).Trim().ToLowerInvariant();
+                if (raw == "course" || raw == "1")
+                    profile = LevelProfile.Course;
+                else if (raw == "steps")
+                    profile = LevelProfile.Steps;
+                else if (raw == "level1")
+                {
+                    profile = LevelProfile.Test1;
+                    plantDrawnLevel = true;
+                    playerSpawnX = LevelTest1.DrawnPlayerX;
+                }
+                else if (raw == "test1" || raw == "yard" || raw == "dvor" || raw == "3")
+                    profile = LevelProfile.Test1;
+                else if (raw == "flat" || raw == "0")
+                    profile = LevelProfile.Flat;
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("LevelGenerator: force-level.flag skipped (" + e.GetType().Name + ").");
+        }
+#endif
 
-        string raw = System.IO.File.ReadAllText(path).Trim().ToLowerInvariant();
-        if (raw == "course" || raw == "1")
-            profile = LevelProfile.Course;
-        else if (raw == "steps")
-            profile = LevelProfile.Steps;
-        else if (raw == "test1" || raw == "yard" || raw == "dvor" || raw == "3")
-            profile = LevelProfile.Test1;
-        else if (raw == "flat" || raw == "0")
-            profile = LevelProfile.Flat;
+        // GameProcess reads LevelTest1.PlayerX for Test1. Copy the scene field
+        // even when the flag file is absent.
+        LevelTest1.PlayerX = playerSpawnX;
     }
 
     public void Begin()
@@ -82,23 +111,65 @@ public class LevelGenerator : MonoBehaviour
         }
 
         running = true;
-        GroundBuilder ground = GetComponent<GroundBuilder>();
-        if (ground != null)
-            ground.BuildBackdrop();
-        LevelBackdrop.Install(root);
-        Debug.Log($"LevelGenerator: {Title()}, seed {seed}, чанк {chunkWidth} м");
-        StreamAround(0f, true);
+        try
+        {
+            GroundBuilder ground = GetComponent<GroundBuilder>();
+            if (ground != null)
+                ground.BuildBackdrop();
+            LevelBackdrop.Install(root);
+            Debug.Log($"LevelGenerator: {Title()}, seed {seed}, chunk {chunkWidth} m");
+            StreamAround(0f, true);
+        }
+        catch (System.Exception e)
+        {
+            // GameProcess.CreateHumans is after Begin. A picture throw here
+            // used to skip the hero and the Walk button on WebGL World.
+            running = false;
+            Debug.LogException(e);
+            return;
+        }
+
+        // Static grove / apple have no wood fixtures. Plant before birds
+        // so GameProcess can seat the flock (Level1 apple, World gate trees).
+        // Isolated from the chunk loop: a prop throw must not unload the yard
+        // or skip CreateHumans.
+        if (profile == LevelProfile.Test1)
+        {
+            try
+            {
+                PlantYardProps(null);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogException(e);
+            }
+        }
     }
 
     public void SetFollowTarget(Transform target)
     {
         followTarget = target;
-        // После человека: роще нужны его коллайдеры, чтобы их развести.
-        if (!grovePlanted && profile == LevelProfile.Test1)
+        if (profile == LevelProfile.Test1)
+            PlantYardProps(target);
+    }
+
+    private void PlantYardProps(Transform human)
+    {
+        if (!grovePlanted)
         {
-            LevelGrove.Plant(root, target);
+            LevelGrove.Plant(root, human, plantDrawnLevel);
             grovePlanted = true;
         }
+        if (!campfirePlanted)
+        {
+            Campfire fire = Campfire.EnsureOnYard();
+            if (plantDrawnLevel)
+                LevelGrove.PlaceDrawnCampfire(fire);
+            campfirePlanted = true;
+        }
+
+        if (profile == LevelProfile.Test1)
+            DayNightCycle.Ensure();
     }
 
     void Update()
@@ -153,7 +224,16 @@ public class LevelGenerator : MonoBehaviour
             StaticPlatform.Spawn(pieces[i], chunk.transform);
 
         if (profile == LevelProfile.Test1)
-            LevelTest1.SpawnDecor(chunkIndex, chunkWidth, chunk.transform);
+        {
+            try
+            {
+                LevelTest1.SpawnDecor(chunkIndex, chunkWidth, chunk.transform);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogException(e);
+            }
+        }
 
         return chunk;
     }
@@ -161,7 +241,7 @@ public class LevelGenerator : MonoBehaviour
     public string Title()
     {
         if (profile == LevelProfile.Test1)
-            return LevelTest1.Title;
+            return plantDrawnLevel ? "Level1" : LevelTest1.Title;
         return profile.ToString();
     }
 
@@ -173,7 +253,7 @@ public class LevelGenerator : MonoBehaviour
         float x0 = chunkIndex * chunkWidth;
         var pieces = new List<LevelPiece>(8);
 
-        // Чанки под спавном и позади — та же высота, что у GroundBuilder.
+        // Chunks under spawn and behind — the same height as GroundBuilder.
         if (chunkIndex <= 0)
         {
             pieces.Add(MakeSlab(x0, chunkWidth, DefaultSurfaceY, DirtColor(chunkIndex)));
@@ -190,8 +270,8 @@ public class LevelGenerator : MonoBehaviour
             return pieces;
         }
 
-        // Course: сплошная опора без щелей. Высоту чанка N продолжаем с конца
-        // N−1, иначе на стыке 16 м получится обрыв из ниоткуда.
+        // Course: continuous support with no gaps. Chunk N height continues from
+        // the end of N−1, otherwise a 16 m seam becomes a cliff from nowhere.
         float surfaceY = DefaultSurfaceY;
         List<LevelPiece> generated = pieces;
         for (int i = 1; i <= chunkIndex; i++)

@@ -1,19 +1,25 @@
 using UnityEngine;
 
-// Компонент, представляющий мышцу, которая активно создаёт момент в суставе.
-// Мышца работает поверх пассивного трения (JointFriction) и может
-// сгибать или разгибать сустав в зависимости от своего направления.
+// Muscle that actively produces joint torque.
+// It sits on top of passive friction (JointFriction) and can
+// flex or extend the joint depending on its direction.
+// ActuatorDriver applies the torque (after friction); FixedUpdate is a fallback.
+[DefaultExecutionOrder(50)]
 public class Muscle : MonoBehaviour
 {
-    [Tooltip("Максимальный момент, который мышца может создать (при activation = 1).")]
+    [Tooltip("Maximum torque the muscle can produce (at activation = 1).")]
     public float maxTorque = 50f;
 
-    [Tooltip("Текущая активация мышцы от 0 до 1. Управляется внешним кодом.")]
+    [Tooltip("Current muscle activation from 0 to 1. Driven by outside code.")]
     [Range(0f, 1f)]
     public float activation = 0f;
 
-    [Tooltip("Направление действия мышцы: +1 = сгибает сустав, -1 = разгибает.")]
+    [Tooltip("Muscle direction: +1 flexes the joint, -1 extends it.")]
     public float direction = 1f;
+
+    // true — ActuatorDriver calls Apply; this FixedUpdate stays silent.
+    [System.NonSerialized]
+    public bool drivenExternally;
 
     private HingeJoint2D joint;
     private Rigidbody2D rbSelf;
@@ -25,11 +31,17 @@ public class Muscle : MonoBehaviour
 
         if (joint == null || rbSelf == null)
         {
-            Debug.LogError("Muscle должен быть на том же объекте, что и HingeJoint2D и Rigidbody2D.");
+            Debug.LogError("Muscle must be on the same object as HingeJoint2D and Rigidbody2D.");
         }
     }
 
     void FixedUpdate()
+    {
+        if (drivenExternally) return;
+        Apply();
+    }
+
+    public void Apply()
     {
         if (joint == null || joint.connectedBody == null) return;
 

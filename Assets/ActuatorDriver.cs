@@ -1,21 +1,25 @@
 using UnityEngine;
 
-// Один проход актюаторов: сначала вязкость, потом мышцы.
-// Иначе при одном DefaultExecutionOrder(50) порядок FixedUpdate
-// между JointFriction и Muscle не определён.
+// One actuator pass: viscosity first, then muscles.
+// Otherwise with the same DefaultExecutionOrder(50) the FixedUpdate
+// order between JointFriction and Muscle is undefined.
 [DefaultExecutionOrder(50)]
 public class ActuatorDriver : MonoBehaviour
 {
     private JointFriction[] frictions = System.Array.Empty<JointFriction>();
     private Muscle[] muscles = System.Array.Empty<Muscle>();
 
-    // Собирает дочерние актюаторы после сборки тела.
+    // World off-camera rest. NpcRest writes this. Skip the 200 Hz pass.
+    [System.NonSerialized]
+    public bool energyRest;
+
+    // Collect child actuators after the body is built.
     public void RebuildCache()
     {
         frictions = GetComponentsInChildren<JointFriction>(true);
         muscles = GetComponentsInChildren<Muscle>(true);
-        // Имена в иерархии — стабильный порядок; GetComponentsInChildren
-        // формально не обещает порядок между прогонами.
+        // Hierarchy names give a stable order; GetComponentsInChildren
+        // does not formally promise order across runs.
         System.Array.Sort(frictions, CompareByHierarchyPath);
         System.Array.Sort(muscles, CompareByHierarchyPath);
 
@@ -54,6 +58,8 @@ public class ActuatorDriver : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (energyRest) return;
+
         for (int i = 0; i < frictions.Length; i++)
         {
             JointFriction friction = frictions[i];

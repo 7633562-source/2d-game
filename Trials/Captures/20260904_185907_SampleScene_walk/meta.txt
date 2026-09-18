@@ -1,0 +1,8 @@
+state=stopped
+reason=component disabled
+capturedUtc=2026-09-04T18:59:11.3626878Z
+scene=SampleScene
+resolution=1229x585
+fixedDelta=0,005
+targetFrameRate=-1
+frames=33

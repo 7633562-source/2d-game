@@ -12,7 +12,7 @@ stance by muscles). A flock in scene is `BirdRig.Flock` (one body). The
 human and the dog have no invisible "up" force.
 
 The physics scene is built in code from `GameProcess.Start()`. No prefabs.
-Seven saved scenes — do not mix Play Mode, so chats do not open the wrong
+Saved scenes — do not mix Play Mode, so chats do not open the wrong
 model in one Editor:
 
 | Scene | Whose Play | What it spawns |
@@ -21,9 +21,10 @@ model in one Editor:
 | `Bird` | Bird / bird AI | `humanCount = 0`, `birdCount = 1`, `cameraFollowsBird`. Flat ground, no `LevelGenerator`. |
 | `BirdFlock50` | bird AI flock | `humanCount = 0`, `birdCount = 50`, `birdDrive` wander. Flat ground, no `LevelGenerator`. |
 | `Chicken` | ground bird | `humanCount = 0`, `birdCount = 5`, `birdKind` chicken, `birdDrive` wander. Flat ground. |
-| `Tree` | plants | `humanCount = 0`, `birdCount = 0`, `treeCount = 1`. Flat ground, no `LevelGenerator`. |
+| `Tree` | plants | `humanCount = 0`, `birdCount = 0`, `treeCount = 9`, `flowerCount = 12`. Flat ground, no `LevelGenerator`. |
 | `Dog` | dog stance | `humanCount = 0`, `dogCount = 1`. Flat ground, no `LevelGenerator`. |
-| `World` | levels / optimization | human + yard. `birdCount = 0`, `birdDrive` off, `treeCount = 0`, `dogCount = 0`. |
+| `Campfire` | fire lab | `humanCount = 0`, `spawnCampfire`. Flat ground, no `LevelGenerator`. |
+| `World` | levels / optimization | human + Test1 yard. Small crow flock, hens, a few dogs. `treeCount = 0` (grove is Static). |
 
 One Unity Editor and one `-Rebuild` for the project. Scenes split Play
 eyes, not two solvers at once. Headless human: `run-trial.ps1` on
@@ -34,11 +35,11 @@ scene `World`.
 
 | Layer | Files |
 |---|---|
-| Boot | `GameProcess`, `GroundBuilder` |
+| Boot | `GameProcess`, `GroundBuilder`, `NpcRest` |
 | World | `LevelGenerator`, `StaticPlatform` |
 | Body (human) | `Human`, `HumanSegment` |
 | Body (bird) | `Bird` |
-| Body (plant) | `PlantTree`, `TreeSpring`, `TreeDriver` |
+| Body (plant) | `PlantTree`, `TreeSpring`, `TreeDriver`, `PlantFlower` |
 | Body (dog) | `Dog` |
 | Actuators | `Muscle`, `JointFriction` |
 | Aero (bird) | `BirdFlight`, `BodyAero` |
@@ -48,7 +49,7 @@ scene `World`.
 | Control (bird) | `BirdController` |
 | Control (dog) | `DogStanceController` |
 | Intent | `MotionIntent`, `PlayerInputSource`, `StepPhaseDriver` |
-| AI (every species) | rule `ai.mdc`; bird — `BirdDrive` writes `mode` / `SetFacing`; human — `MotionIntent` |
+| AI (every species) | rule `ai.mdc` (life + factions); bird — `BirdDrive` writes `mode` / `SetFacing`; human — `MotionIntent` |
 | Experiment | `HeadlessTrial`, `TrialRecorder`, `HeadlessBuild`, `GlobalHumanLogger` |
 
 Sensors only read state and never apply forces.
@@ -63,8 +64,9 @@ the matching CLI flag is set.
 ## Language
 
 Project documents are **English only, always** (`docs-english.mdc`).
-Chat with Yury stays Russian. Do not translate class names or Unity API:
-`FixedUpdate`, `Rigidbody2D`, `HingeJoint2D`.
+Russian exists only in live chat with Yury. Everything else is English,
+always — existing and new (`docs-english.mdc`). Do not translate class names
+or Unity API: `FixedUpdate`, `Rigidbody2D`, `HingeJoint2D`.
 
 Yury is new to Unity — explain the physical meaning of a change, not only
 the code.
@@ -82,6 +84,17 @@ birds or trees.
 
 Map: `DOCS.md`. Acceptance canon: `Trials/Baselines/stable-pd/`.
 Folder `Baselines/current/` is history. Do not delete summaries.
+
+## Unity AI — declined (Yury, 01.09)
+
+Do not install the in-editor Unity AI (Assistant, Generators, Sentis) and
+do not accept its terms in the `AI` toolbar menu. Reasons: the Assistant
+duplicates Cursor while ignoring these rules and the `stable-pd`
+provenance; the animation generator contradicts muscle-driven motion.
+Practical trap: the build fingerprint hashes `Assets`, `Packages` and
+`ProjectSettings`, so installing the packages invalidates
+`build-manifest.json` and every trial without `-Rebuild` is refused.
+Reopen only from a card by Yury.
 
 ## Desk
 

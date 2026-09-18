@@ -1,0 +1,8 @@
+state=stopped
+reason=keyboard
+capturedUtc=2026-09-04T18:59:26.4415583Z
+scene=SampleScene
+resolution=1229x585
+fixedDelta=0,005
+targetFrameRate=-1
+frames=81

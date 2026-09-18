@@ -10,15 +10,18 @@ public enum LifeState
 
 public static class OrganismLife
 {
-    // Ordinary waking is Forage. Stronger hostile or alarm → Flee.
-    // Weaker hostile → Pursue. Flee wins if both are true.
+    // Ordinary waking is Forage. Stronger hostile → Flee.
+    // Weaker hostile is food (Insects): Pursue even if a pack Alarm is
+    // on the bus. Alarm without a seen stronger threat still Flee.
     public static LifeState ChooseWake(
         bool strongerHostile, bool weakerHostile, bool heardAlarm, bool alertHeld)
     {
-        if (strongerHostile || heardAlarm || alertHeld)
+        if (strongerHostile)
             return LifeState.Flee;
         if (weakerHostile)
             return LifeState.Pursue;
+        if (heardAlarm || alertHeld)
+            return LifeState.Flee;
         return LifeState.Forage;
     }
 

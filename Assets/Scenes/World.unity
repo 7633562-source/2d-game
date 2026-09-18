@@ -275,25 +275,28 @@ MonoBehaviour:
   humanCount: 1
   humanStartPosition: {x: 0, y: -0.82}
   spacing: 1.5
-  birdCount: 6
+  birdCount: 1
   birdOffsetX: 39
   birdSpacing: 1.2
   cameraFollowsBird: 0
   birdDrive: 1
   birdDriveKind: wander
   birdKind: crow
-  chickenCount: 10
+  chickenCount: 1
   chickenOffsetX: 12
   chickenSpacing: 0.9
-  treeCount: 0
-  treeOffsetX: 0
+  treeCount: 1
+  treeOffsetX: -8
   treeSpacing: 5
   cameraFollowsTree: 0
-  dogCount: 3
+  dogCount: 1
   dogOffsetX: 26
   dogSpacing: 2
   cameraFollowsDog: 0
   dogPreyOffsetX: 8
+  flowerCount: 1
+  flowerOffsetX: 5
+  flowerSpacing: 0.55
 --- !u!114 &907298185
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -313,6 +316,8 @@ MonoBehaviour:
   keepAhead: 3
   stepHeight: 0.05
   maxRise: 0.2
+  playerSpawnX: 0
+  plantDrawnLevel: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

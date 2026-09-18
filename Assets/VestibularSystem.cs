@@ -1,13 +1,13 @@
 using UnityEngine;
 
-// Вестибулярный аппарат человека.
-// Читает ориентацию торса и таза в мире. Никаких сил не прикладывает.
-// В будущем сюда добавятся шум, задержка и фильтрация сигналов.
+// Human vestibular apparatus.
+// Reads torso and pelvis world orientation. Applies no forces.
+// Noise, delay, and filtering belong here later.
 public class VestibularSystem : MonoBehaviour
 {
-    [Header("Настройки шума (пока не используются)")]
-    public float tiltNoiseDegrees = 0f;            // шум измерения наклона (градусы)
-    public float angularVelocityNoiseDegrees = 0f; // шум измерения угловой скорости (град/с)
+    [Header("Noise settings (unused for now)")]
+    public float tiltNoiseDegrees = 0f;            // tilt measurement noise (degrees)
+    public float angularVelocityNoiseDegrees = 0f; // angular-velocity measurement noise (deg/s)
 
     private Rigidbody2D torsoRb;
     private Rigidbody2D pelvisRb;
@@ -35,10 +35,10 @@ public class VestibularSystem : MonoBehaviour
         }
         else
         {
-            Debug.LogError("VestibularSystem: Таз не найден!");
+            Debug.LogError("VestibularSystem: Pelvis not found!");
         }
 
-        // Шея и голова не обязательны: тело собирается динамически.
+        // Neck and head are optional: the body is assembled at runtime.
         Transform neckTransform = transform.Find("Neck");
         if (neckTransform != null) neckRb = neckTransform.GetComponent<Rigidbody2D>();
 
@@ -46,7 +46,7 @@ public class VestibularSystem : MonoBehaviour
         if (headTransform != null) headRb = headTransform.GetComponent<Rigidbody2D>();
     }
 
-    // Возвращает текущий наклон торса относительно вертикали (градусы)
+    // Current torso tilt from vertical (degrees)
     public float GetBodyTilt()
     {
         if (torsoRb == null) return 0f;
@@ -56,7 +56,7 @@ public class VestibularSystem : MonoBehaviour
         return tilt;
     }
 
-    // Возвращает угловую скорость торса (градусы в секунду)
+    // Torso angular velocity (degrees per second)
     public float GetBodyAngularVelocity()
     {
         if (torsoRb == null) return 0f;
@@ -66,8 +66,8 @@ public class VestibularSystem : MonoBehaviour
         return angVel;
     }
 
-    // Наклон таза к мировой вертикали (градусы). Та же ось, что у торса:
-    // иначе рабочая точка поясницы невидима, хотя именно она упирает сустав.
+    // Pelvis tilt to world vertical (degrees). Same axis as the torso:
+    // otherwise the lumbar operating point is invisible, and that is what jams the joint.
     public float GetPelvisTilt()
     {
         if (pelvisRb == null) return 0f;
@@ -86,9 +86,9 @@ public class VestibularSystem : MonoBehaviour
         return angVel;
     }
 
-    // Наклон шеи и головы к мировой вертикали. У человека взгляд стабилизирует
-    // именно вестибулярный рефлекс, а не угол к груди: голова обязана знать,
-    // где верх, иначе она послушно едет вниз вместе с заваливающимся торсом.
+    // Neck and head tilt to world vertical. In a human, gaze is stabilized
+    // by the vestibular reflex, not the angle to the chest: the head must know
+    // where up is, or it rides down with a falling torso.
     public float GetNeckTilt()
     {
         if (neckRb == null) return 0f;
@@ -125,8 +125,8 @@ public class VestibularSystem : MonoBehaviour
         return angVel;
     }
 
-    // Вычисляет ошибку равновесия как комбинацию наклона и угловой скорости.
-    // Коэффициенты настраиваются извне.
+    // Balance error as a mix of tilt and angular velocity.
+    // Weights are set from outside.
     public float GetBalanceError(float tiltWeight = 1f, float angularVelocityWeight = 0.1f)
     {
         return tiltWeight * GetBodyTilt() + angularVelocityWeight * GetBodyAngularVelocity();

@@ -3,41 +3,45 @@ using System.Collections.Generic;
 
 public class GameProcess : MonoBehaviour
 {
-    [Header("Настройки создания людей")]
+    [Header("Human spawn")]
     public int humanCount = 1;
-    public Vector2 humanStartPosition = new Vector2(-36.75f, -0.82f); // стопы касаются земли
+    public Vector2 humanStartPosition = new Vector2(-36.75f, -0.82f); // feet touch the ground
     public float spacing = 1.5f;
 
-    [Header("Настройки создания птиц")]
-    [Tooltip("0 — не спавнить. Play стаи — BirdFlock50. World может держать небольшую стаю.")]
+    [Header("Bird spawn")]
+    [Tooltip("0 — do not spawn. Flock Play is BirdFlock50. World may hold a small flock.")]
     public int birdCount = 0;
-    [Tooltip("Сдвиг первой птицы вперёд от человека, м.")]
+    [Tooltip("Offset of the first bird ahead of the human, m.")]
     public float birdOffsetX = 1.6f;
     public float birdSpacing = 1.2f;
-    [Tooltip("Если включено и есть птица — камера за ней, не за человеком.")]
+    [Tooltip("If on and a bird exists — camera follows the bird, not the human.")]
     public bool cameraFollowsBird = false;
-    [Tooltip("+1 нос в +X, −1 в −X. Не scale корпуса.")]
+    [Tooltip("+1 nose along +X, −1 along −X. Not a body scale.")]
     public float birdFacing = 1f;
-    [Tooltip("Чётные в одну сторону, нечётные в другую.")]
+    [Tooltip("Even indices one way, odd the other.")]
     public bool alternateBirdFacing = false;
-    [Tooltip("Через столько секунд стая разворачивается. 0 — нет.")]
+    [Tooltip("Seconds until the flock turns around. 0 — off.")]
     public float birdTurnAfter = 0f;
-    [Tooltip("Мозг птицы. Пишет только mode, не силу.")]
+    [Tooltip("Bird brain. Writes mode only, not force.")]
     public bool birdDrive = false;
-    [Tooltip("prey — пике на метку. wander — случайный полёт.")]
+    [Tooltip("prey — hunt Insect (Peck on dirt). wander — random flight.")]
     public string birdDriveKind = "wander";
-    [Tooltip("crow — полёт. chicken — земля, короткий прыжок.")]
+    [Tooltip("crow — flight. chicken — ground, short hop.")]
     public string birdKind = "crow";
-    [Tooltip("Отдельные куры на дворе. Не смешивать с birdKind стаи.")]
+    [Tooltip("Separate hens in the yard. Do not mix with the flock birdKind.")]
     public int chickenCount = 0;
     public float chickenOffsetX = 12f;
     public float chickenSpacing = 0.9f;
-    [Tooltip("Добыча впереди первой птицы, м. Только prey.")]
+    [Tooltip("World pack: this many hens stay on chickenOffsetX (live near the camera). 0 — all use the offset row.")]
+    public int chickenNearbyCount = 0;
+    [Tooltip("World pack: remaining hens start here, m ahead of the human. 0 — no park row.")]
+    public float chickenParkOffsetX = 0f;
+    [Tooltip("Prey ahead of the first bird, m. Prey only.")]
     public float preyOffsetX = 10f;
-    [Tooltip("Угроза впереди первой птицы, м. 0 — нет метки, wander как был.")]
+    [Tooltip("Threat ahead of the first bird, m. 0 — no mark, wander stays as before.")]
     public float threatOffsetX = 0f;
 
-    [Header("Номера людей для логирования")]
+    [Header("Human numbers to log")]
     public int[] logHumanNumbers = new int[] { 1, 10, 20, 30, 40, 50 };
 
     [Header("Trees")]
@@ -60,32 +64,54 @@ public class GameProcess : MonoBehaviour
     [Tooltip("Leap mark ahead of the first dog, m. Play scene Dog.")]
     public float dogPreyOffsetX = 1.4f;
 
+    [Header("Flowers")]
+    [Tooltip("0 — do not spawn. Play gallery is scene Tree. Not World.")]
+    public int flowerCount = 0;
+    [Tooltip("Offset of the first flower from origin (or from the human), m.")]
+    public float flowerOffsetX = 0f;
+    public float flowerSpacing = 0.55f;
+
+    [Header("Campfire lab")]
+    [Tooltip("Play is scene Campfire. World/Level1 still plant via LevelGenerator.")]
+    public bool spawnCampfire = false;
+
+    [Header("Play capture")]
+    [Tooltip("Attach PlayCaptureRecorder in non-headless Play mode.")]
+    public bool enablePlayCapture = true;
+
     private GroundBuilder groundBuilder;
     private LevelGenerator levelGenerator;
     private List<Human> humans = new List<Human>();
     private List<Bird> birds = new List<Bird>();
     private List<PlantTree> trees = new List<PlantTree>();
+    private List<PlantFlower> flowers = new List<PlantFlower>();
     private List<Dog> dogs = new List<Dog>();
+    private Camera playCamera;
+    private CameraFollow playFollow;
+    private BirdFlockDrive flockDrive;
+    // One Insect for Play birds/hens. World keeps the generator — no crowd.
+    private Transform birdPreyMark;
 
     void Start()
     {
-        // В headless-прогоне сцену строит HeadlessTrial (один человек),
-        // иначе к нему добавились бы ещё 50 и результат стал бы бессмысленным.
+        // In a headless run HeadlessTrial builds the scene (one human);
+        // otherwise fifty more would spawn and the result would be meaningless.
         if (HeadlessTrial.Active) return;
 
-        // 200 Гц: при 50 Гц регулятор не успевает и раскачивает тело.
+        // 200 Hz: at 50 Hz the controller cannot keep up and rocks the body.
         Time.fixedDeltaTime = 0.005f;
 
-        // Сцена Bird держит humanCount = 0. Раньше зажим «всегда ≥ 1»
-        // подсовывал человека в полёт и сжирал второй остров из 16 тел.
+        // Scene Bird keeps humanCount = 0. The old clamp "always ≥ 1"
+        // used to sneak a human into flight and eat a second island of 16 bodies.
         if (humanCount < 0) humanCount = 0;
         if (birdCount < 0) birdCount = 0;
         if (treeCount < 0) treeCount = 0;
         if (dogCount < 0) dogCount = 0;
         if (chickenCount < 0) chickenCount = 0;
-        if (humanCount < 1 && birdCount < 1 && treeCount < 1 && dogCount < 1 && chickenCount < 1)
+        if (flowerCount < 0) flowerCount = 0;
+        if (humanCount < 1 && birdCount < 1 && treeCount < 1 && dogCount < 1 && chickenCount < 1 && flowerCount < 1 && !spawnCampfire)
         {
-            Debug.LogError("GameProcess: нужен humanCount ≥ 1, birdCount ≥ 1, chickenCount ≥ 1, treeCount ≥ 1 или dogCount ≥ 1.");
+            Debug.LogError("GameProcess: need humanCount ≥ 1, birdCount ≥ 1, chickenCount ≥ 1, treeCount ≥ 1, flowerCount ≥ 1, dogCount ≥ 1, or spawnCampfire.");
             return;
         }
         if (logHumanNumbers == null || logHumanNumbers.Length == 0)
@@ -97,12 +123,13 @@ public class GameProcess : MonoBehaviour
         groundBuilder = GetComponent<GroundBuilder>();
         if (groundBuilder == null)
         {
-            Debug.LogError("GroundBuilder не найден на GameManager!");
+            Debug.LogError("GroundBuilder not found on GameManager!");
             return;
         }
 
-        // Yard is the generator on World. Bird / Chicken / Dog / Tree scenes
-        // have no LevelGenerator, so a flock or dogs here do not flatten the yard.
+        // Yard is the generator on World. Bird / Chicken / Dog / Tree /
+        // Campfire scenes have no LevelGenerator, so a flock or dogs here
+        // do not flatten the yard.
         levelGenerator = GetComponent<LevelGenerator>();
         if (levelGenerator != null)
         {
@@ -111,14 +138,29 @@ public class GameProcess : MonoBehaviour
                 levelGenerator.profile = LevelProfile.Flat;
         }
 
+        // World.unity leftover Inspector is bird/chicken/dog 1 and tree/flower 1.
+        // OPT-3 rest distances assume the showcase pack (dogs 26, crows 39, hens 12).
+        ApplyWorldShowcasePack();
+
         bool wantYard = levelGenerator != null
             && levelGenerator.profile != LevelProfile.Flat
             && humanCount >= 1;
 
         if (wantYard)
         {
+            if (levelGenerator.profile == LevelProfile.Test1)
+                startX = LevelTest1.PlayerX;
             humanStartPosition = new Vector2(startX, levelGenerator.SpawnY);
-            levelGenerator.Begin();
+            try
+            {
+                levelGenerator.Begin();
+            }
+            catch (System.Exception e)
+            {
+                // Yard pictures must not skip CreateHumans. WebGL then shows
+                // an empty World with no hero and no Walk button.
+                Debug.LogException(e);
+            }
         }
         else
         {
@@ -133,10 +175,13 @@ public class GameProcess : MonoBehaviour
         CreateBirds();
         CreateChickens();
         CreateTrees();
+        CreateFlowers();
         SeatBirdsOnTrees();
         CreateDogs();
+        CreateCampfire();
         SetupCameraFollow();
         SetupNightLighting();
+        SetupPlayCapture();
         if (levelGenerator != null
             && levelGenerator.profile != LevelProfile.Flat
             && humans.Count > 0)
@@ -144,24 +189,19 @@ public class GameProcess : MonoBehaviour
         SeatBirdsOnYardGrove();
         DisableCollisionsBetweenHumans();
         DisableCollisionsWithBirds();
+        EnsureWorldPerfMonitor();
+        // autoSyncTransforms is off. NpcRest.ProbeX reads Rigidbody2D.position
+        // (chest / Body), not the host Transform still sitting on dirt spawn.
+        // A full-scene SyncTransforms here was the BIRD-12 flock stall and
+        // is not required for rest/wake.
+        AttachNpcRest();
 
-        // Один герой в World — без GlobalHumanLogger: Find каждые 33 мс
-        // съедает главный поток. Лабораторная толпа — лог как раньше.
+        // One hero in World — no GlobalHumanLogger: Find every 33 ms
+        // eats the main thread. Laboratory crowd — log as before.
         if (humanCount > 1)
         {
             SetupGlobalLogger();
-            Debug.Log($"Логгер настроен на {logHumanNumbers.Length} человек(а): [{string.Join(", ", logHumanNumbers)}]");
-        }
-        else if (levelGenerator != null)
-        {
-            Application.targetFrameRate = 60;
-            QualitySettings.vSyncCount = 0;
-            // Профайлер только в batch (run-world-perf.ps1) или по явному флагу.
-            if (GetComponent<WorldPerformanceMonitor>() == null && ShouldAttachWorldPerfMonitor())
-            {
-                gameObject.AddComponent<WorldPerformanceMonitor>();
-                Debug.Log("WorldPerformanceMonitor: замер кадра включён (см. world_perf.txt).");
-            }
+            Debug.Log($"Logger set for {logHumanNumbers.Length} human(s): [{string.Join(", ", logHumanNumbers)}]");
         }
     }
 
@@ -173,9 +213,9 @@ public class GameProcess : MonoBehaviour
         {
             int humanNumber = i + 1;
 
-            // Одиночный человек — те же множители, что на стенде.
-            // Иначе Play Mode крутил трение 0.75, а пороги сняты на 1.
-            // Разброс по популяции оставляем только когда людей много.
+            // A single human — the same multipliers as on the stand.
+            // Otherwise Play Mode ran friction 0.75 while thresholds were taken at 1.
+            // Population spread stays only when there are many humans.
             float muscleMultiplier;
             float frictionMultiplier;
             if (humanCount == 1)
@@ -205,6 +245,7 @@ public class GameProcess : MonoBehaviour
             human.shoulderMuscleTorque *= muscleMultiplier;
             human.elbowMuscleTorque *= muscleMultiplier;
             human.wristMuscleTorque *= muscleMultiplier;
+            human.toeMuscleTorque *= muscleMultiplier;
             human.neckMuscleTorque *= muscleMultiplier;
             human.lumbarMuscleTorque *= muscleMultiplier;
 
@@ -214,14 +255,15 @@ public class GameProcess : MonoBehaviour
             human.shoulderFriction *= frictionMultiplier;
             human.elbowFriction *= frictionMultiplier;
             human.wristFriction *= frictionMultiplier;
+            human.toeFriction *= frictionMultiplier;
             human.neckFriction *= frictionMultiplier;
             human.lumbarFriction *= frictionMultiplier;
 
             human.muscleMultiplier = muscleMultiplier;
             human.frictionMultiplier = frictionMultiplier;
 
-            // Намерение и клавиатура только у того, которым играют.
-            // Остальные при большом humanCount остаются без ввода.
+            // Intent and keyboard only on the one being played.
+            // The rest at a large humanCount stay without input.
             if (i == 0)
             {
                 humanObject.AddComponent<MotionIntent>();
@@ -244,14 +286,20 @@ public class GameProcess : MonoBehaviour
         float originX = humans.Count > 0
             ? humans[0].transform.position.x + birdOffsetX
             : 0f;
+        // Test1 apple is planted in LevelGenerator.Begin, before this spawn.
+        if (LevelGrove.Apple != null)
+            originX = LevelGrove.Apple.transform.position.x;
         float groundY = SurfaceAt(originX);
 
         string driveKind = (birdDriveKind ?? "wander").Trim().ToLowerInvariant();
         bool wander = birdDrive && driveKind != "prey";
         bool preyDrive = birdDrive && driveKind == "prey";
-        Transform prey = null;
-        if (preyDrive)
-            prey = SpawnBirdPrey(new Vector2(originX + preyOffsetX, groundY + 0.04f));
+        Transform prey = birdPreyMark;
+        if (prey == null && WantsPlayInsect())
+        {
+            prey = Insect.SpawnOnDirt(originX + preyOffsetX, groundY);
+            birdPreyMark = prey;
+        }
         Transform threat = null;
         if (birdDrive && Mathf.Abs(threatOffsetX) > 0.01f)
             threat = SpawnBirdThreat(new Vector2(originX + threatOffsetX, groundY + 0.9f));
@@ -267,8 +315,9 @@ public class GameProcess : MonoBehaviour
             float x = originX + i * birdSpacing;
             float y = bird.StandingRootOffset(SurfaceAt(x));
             birdObject.transform.position = new Vector2(x, y);
-            bird.BuildBird();
+            // Stamp before BuildBird so BeakStrike.Awake sees Rel Hostile.
             FactionStamp.Bird(birdObject);
+            bird.BuildBird();
             if (bird.controller != null)
             {
                 bird.controller.flapPhaseOffset = i * 0.13f;
@@ -283,8 +332,8 @@ public class GameProcess : MonoBehaviour
                     bird.controller.takeoffDelay = 0f;
                     BirdDrive drive = birdObject.AddComponent<BirdDrive>();
                     drive.kind = BirdDrive.Kind.Prey;
-                    drive.prey = prey;
                     drive.threat = threat;
+                    drive.BindPrey(i == 0 ? prey : null);
                 }
                 else if (wander && birdCount == 1)
                 {
@@ -294,6 +343,7 @@ public class GameProcess : MonoBehaviour
                     drive.kind = BirdDrive.Kind.Wander;
                     drive.wanderSeed = 1;
                     drive.threat = threat;
+                    drive.BindPrey(prey);
                 }
                 else if (wander)
                 {
@@ -306,8 +356,9 @@ public class GameProcess : MonoBehaviour
                     bird.controller.mode = BirdMode.Stand;
                 }
             }
-            // TextMesh на десятках особей дороже самой физики стаи.
-            if (birdCount <= 8)
+            // TextMesh on dozens of birds costs more than the flock physics itself.
+            // World already has a yard — debug numbers are not the picture.
+            if (birdCount <= 8 && levelGenerator == null)
                 bird.AddNumberLabel(i + 1);
             birds.Add(bird);
         }
@@ -315,8 +366,10 @@ public class GameProcess : MonoBehaviour
         if (wander && birdCount > 1)
         {
             GameObject host = new GameObject("BirdFlockDrive");
-            BirdFlockDrive flock = host.AddComponent<BirdFlockDrive>();
-            flock.Bind(birds.ToArray(), 1);
+            flockDrive = host.AddComponent<BirdFlockDrive>();
+            flockDrive.threat = threat;
+            flockDrive.Bind(birds.ToArray(), 1);
+            flockDrive.BindPrey(prey);
         }
     }
 
@@ -328,10 +381,27 @@ public class GameProcess : MonoBehaviour
         float originX = humans.Count > 0
             ? humans[0].transform.position.x + chickenOffsetX
             : chickenOffsetX;
+        // World showcase: two hens at x≈12 stay live (OPT-3). The rest
+        // sit past the walker rest band so a wide Game view cannot keep
+        // all ten on the 200 Hz island. Scene Chicken leaves park at 0.
+        bool parkFar = chickenParkOffsetX > 0.01f && chickenNearbyCount < chickenCount;
+        float parkX = parkFar
+            ? (humans.Count > 0
+                ? humans[0].transform.position.x + chickenParkOffsetX
+                : chickenParkOffsetX)
+            : originX;
+        int nearby = parkFar ? Mathf.Max(0, chickenNearbyCount) : chickenCount;
+        if (birdPreyMark == null && WantsPlayInsect())
+        {
+            float preyX = originX + preyOffsetX;
+            birdPreyMark = Insect.SpawnOnDirt(preyX, SurfaceAt(preyX));
+        }
 
         for (int i = 0; i < chickenCount; i++)
         {
-            float x = originX + i * chickenSpacing;
+            float x = i < nearby
+                ? originX + i * chickenSpacing
+                : parkX + (i - nearby) * chickenSpacing;
             float groundY = SurfaceAt(x);
             GameObject henObject = new GameObject("Chicken_" + (i + 1));
             Bird hen = henObject.AddComponent<Bird>();
@@ -339,8 +409,8 @@ public class GameProcess : MonoBehaviour
             hen.kind = BirdKind.Chicken;
             hen.ApplyKind(BirdKind.Chicken);
             henObject.transform.position = new Vector2(x, hen.StandingRootOffset(groundY));
-            hen.BuildBird();
             FactionStamp.Bird(henObject);
+            hen.BuildBird();
             if (hen.controller != null)
             {
                 hen.controller.mode = BirdMode.Sit;
@@ -349,10 +419,33 @@ public class GameProcess : MonoBehaviour
             }
 
             BirdDrive drive = henObject.AddComponent<BirdDrive>();
-            drive.kind = BirdDrive.Kind.Wander;
+            // Hunter hen: Kind.Prey so GlanceBoundInsect faces the Insect
+            // (Forage → Pursue). The rest stay wander. One quarry.
+            drive.kind = (i == 0 && birdPreyMark != null)
+                ? BirdDrive.Kind.Prey
+                : BirdDrive.Kind.Wander;
             drive.wanderSeed = 11 + i * 13;
+            // One Insect, one hunter. Binding every hen made a Walk pile.
+            drive.BindPrey(i == 0 ? birdPreyMark : null);
             birds.Add(hen);
         }
+    }
+
+    // One Insect on Play Bird / Chicken. Forage until seen, then Pursue.
+    // Scene Bird already sets preyOffsetX; a wander crow must still spawn
+    // that quarry (not only Kind.Prey / hens). World is generator. Flock50
+    // is 50 — not a crowd of insects, and not this Play leash.
+    private bool WantsPlayInsect()
+    {
+        if (!birdDrive || levelGenerator != null)
+            return false;
+        string kind = (birdDriveKind ?? "wander").Trim().ToLowerInvariant();
+        if (kind == "prey")
+            return true;
+        if (Mathf.Abs(preyOffsetX) <= 0.01f)
+            return false;
+        int hunters = chickenCount > 0 ? chickenCount : birdCount;
+        return hunters >= 1 && hunters <= 8;
     }
 
     private float SurfaceAt(float x)
@@ -362,46 +455,28 @@ public class GameProcess : MonoBehaviour
         return LevelGenerator.DefaultSurfaceY;
     }
 
-    // Метка добычи: не тело и не сила. BirdDrive читает только позицию.
-    private static Transform SpawnBirdPrey(Vector2 position)
-    {
-        GameObject mark = new GameObject("BirdPrey");
-        mark.transform.position = position;
-        SpriteRenderer sprite = mark.AddComponent<SpriteRenderer>();
-        Texture2D tex = new Texture2D(8, 8, TextureFormat.RGBA32, false);
-        Color[] fill = new Color[64];
-        Color pebble = new Color(0.35f, 0.22f, 0.12f, 1f);
-        for (int i = 0; i < fill.Length; i++)
-            fill[i] = pebble;
-        tex.SetPixels(fill);
-        tex.Apply(false, true);
-        sprite.sprite = Sprite.Create(tex, new Rect(0, 0, 8, 8), new Vector2(0.5f, 0.5f), 50);
-        sprite.sortingOrder = 4;
-        SpriteLighting.ApplyLit(sprite);
-        return mark.transform;
-    }
-
     private static Transform SpawnBirdThreat(Vector2 position)
     {
         GameObject mark = new GameObject("BirdThreat");
         mark.transform.position = position;
         SpriteRenderer sprite = mark.AddComponent<SpriteRenderer>();
-        Texture2D tex = new Texture2D(8, 8, TextureFormat.RGBA32, false);
-        Color[] fill = new Color[64];
-        Color threat = new Color(0.65f, 0.08f, 0.05f, 1f);
-        for (int i = 0; i < fill.Length; i++)
-            fill[i] = threat;
-        tex.SetPixels(fill);
-        tex.Apply(false, true);
-        sprite.sprite = Sprite.Create(tex, new Rect(0, 0, 8, 8), new Vector2(0.5f, 0.5f), 50);
+        sprite.sprite = LevelArt.White();
+        sprite.drawMode = SpriteDrawMode.Sliced;
+        sprite.size = new Vector2(0.16f, 0.16f);
+        sprite.color = new Color(0.65f, 0.08f, 0.05f, 1f);
         sprite.sortingOrder = 4;
         SpriteLighting.ApplyLit(sprite);
+        FactionStamp.Wolf(mark);
         return mark.transform;
     }
 
     private void CreateTrees()
     {
         if (treeCount < 1) return;
+        // World / Level1 grove is LevelGrove Static. Leftover Inspector
+        // treeCount=1 used to plant a Sway (16 RB) on the hero camera.
+        if (levelGenerator != null)
+            return;
 
         float groundY = LevelGenerator.DefaultSurfaceY;
         float originX = 0f;
@@ -414,7 +489,7 @@ public class GameProcess : MonoBehaviour
 
         for (int i = 0; i < treeCount; i++)
         {
-            TreeKind kind = PlantTree.KindFromPlantIndex(i);
+            TreeKind kind = PlantTree.KindFromGalleryIndex(i);
             GameObject treeObject = new GameObject("Tree_" + (i + 1) + "_" + kind);
             PlantTree tree = treeObject.AddComponent<PlantTree>();
             tree.kind = kind;
@@ -430,17 +505,51 @@ public class GameProcess : MonoBehaviour
         }
     }
 
+    private void CreateFlowers()
+    {
+        if (flowerCount < 1) return;
+        // World / Level1 flowers are the yard picture, not this gallery.
+        // Leftover Inspector flowerCount=1 used to plant a bed on the hero camera.
+        if (levelGenerator != null)
+            return;
+
+        float groundY = LevelGenerator.DefaultSurfaceY;
+        // Absolute X in the plant gallery. A human shifts the bed; trees do not.
+        float originX = flowerOffsetX;
+        if (humans.Count > 0)
+            originX = humans[0].transform.position.x + flowerOffsetX;
+
+        for (int i = 0; i < flowerCount; i++)
+        {
+            FlowerKind kind = PlantFlower.KindFromIndex(i);
+            GameObject flowerObject = new GameObject("Flower_" + (i + 1) + "_" + kind);
+            PlantFlower flower = (PlantFlower)flowerObject.AddComponent(PlantFlower.ComponentType(kind));
+            flower.kind = kind;
+            flower.seed = 1 + i * 11;
+            flowerObject.transform.position = new Vector2(
+                originX + i * flowerSpacing,
+                PlantFlower.RootY(groundY));
+            flower.BuildFlower();
+            flowers.Add(flower);
+        }
+    }
+
     private void SeatBirdsOnTrees()
     {
         if (trees.Count == 0 || birds.Count == 0) return;
-        Bird.GhostTreeWood(birds.ToArray(), trees.ToArray());
-        PlantTree.SeatBirds(birds.ToArray(), trees[0]);
-        BirdFlockDrive flock = FindFirstObjectByType<BirdFlockDrive>();
-        if (flock != null)
-            flock.BindPerches(trees[0].GetPerchSlots());
+        Bird[] pack = birds.ToArray();
+        Bird.GhostTreeWood(pack, trees.ToArray());
+        Vector2[] slots = trees[0].GetPerchSlots();
+        // BindPerches already PlaceOnSlot / SpreadSeat. Do not SeatBirds:
+        // that moves only the host, and the next simulate snaps Body RB
+        // back to dirt spawn so NpcRest rest/wake sees the spawn line.
+        if (flockDrive != null)
+            flockDrive.BindPerches(slots);
+        else
+            Bird.SpreadSeat(pack, slots);
     }
 
-    // Grove plants after SetFollowTarget. Static trees, pads only if a bird sits.
+    // Grove + apple plant in LevelGenerator.Begin. Pads only if a bird sits.
     private void SeatBirdsOnYardGrove()
     {
         PlantTree[] grove = LevelGrove.Planted;
@@ -451,14 +560,17 @@ public class GameProcess : MonoBehaviour
         if (crows.Length == 0)
             return;
 
-        Bird.GhostTreeWood(crows, grove);
-        PlantTree gate = NearestTree(grove, 40f);
-        if (gate == null)
+        PlantTree perch = LevelGrove.Apple != null
+            ? LevelGrove.Apple
+            : NearestTree(grove, 40f);
+        if (perch == null)
             return;
-        PlantTree.SeatBirds(crows, gate);
-        BirdFlockDrive flock = FindFirstObjectByType<BirdFlockDrive>();
-        if (flock != null)
-            flock.BindPerches(gate.GetPerchSlots());
+        Bird.GhostTreeWood(crows, grove);
+        Vector2[] slots = perch.GetPerchSlots();
+        if (flockDrive != null)
+            flockDrive.BindPerches(slots);
+        else
+            Bird.SpreadSeat(crows, slots);
     }
 
     private Bird[] CrowsOnly()
@@ -536,14 +648,227 @@ public class GameProcess : MonoBehaviour
             if (dogs[i] != null && dogs[i].stance != null && prey != null)
                 dogs[i].stance.leapTarget = prey.transform;
         }
+
     }
 
-    // Только картинка: CameraFollow в LateUpdate, силы не трогает.
+    // Scene Campfire only. World / Level1 still plant via LevelGenerator.
+    private void CreateCampfire()
+    {
+        if (!spawnCampfire || levelGenerator != null)
+            return;
+        Campfire.SpawnAt(Campfire.LabX, -2f);
+    }
+
+    // World Test1 showcase (not Level1). Inspector leftover 1/1/1 would
+    // skip the OPT-3 pack: far dogs/crows never spawn, so they never rest.
+    // Hero Human, 200 Hz, and Level1 birdCount=20 stay as the scene set them.
+    private const int WorldShowcaseBirdCount = 6;
+    private const int WorldShowcaseChickenCount = 10;
+    private const int WorldShowcaseDogCount = 3;
+    private const int WorldShowcaseNearbyHenCount = 2;
+    private const float WorldShowcaseBirdOffsetX = 39f;
+    private const float WorldShowcaseChickenOffsetX = 12f;
+    private const float WorldShowcaseChickenSpacing = 0.5f;
+    private const float WorldShowcaseChickenParkOffsetX = 32f;
+    private const float WorldShowcaseDogOffsetX = 26f;
+    private const float WorldShowcaseDogSpacing = 2f;
+
+    private void ApplyWorldShowcasePack()
+    {
+        if (levelGenerator == null)
+            return;
+        if (levelGenerator.profile != LevelProfile.Test1)
+            return;
+        if (levelGenerator.plantDrawnLevel)
+            return;
+
+        birdCount = WorldShowcaseBirdCount;
+        chickenCount = WorldShowcaseChickenCount;
+        dogCount = WorldShowcaseDogCount;
+        treeCount = 0;
+        flowerCount = 0;
+        birdOffsetX = WorldShowcaseBirdOffsetX;
+        chickenOffsetX = WorldShowcaseChickenOffsetX;
+        chickenSpacing = WorldShowcaseChickenSpacing;
+        chickenNearbyCount = WorldShowcaseNearbyHenCount;
+        chickenParkOffsetX = WorldShowcaseChickenParkOffsetX;
+        dogOffsetX = WorldShowcaseDogOffsetX;
+        dogSpacing = WorldShowcaseDogSpacing;
+        if (birdKind == null || birdKind.Trim().Length == 0)
+            birdKind = "crow";
+    }
+
+    // Off-camera dogs, birds, and hedgehogs rest. Distance is the
+    // physics body X (NpcRest.probe), not the species host: chest / Body
+    // walk while the host stays at spawn. The human never enters the list.
+    // Bind also finds LevelGrove plants once.
+    // HeadlessTrial never attaches: the stand has no camera follow.
+    private void AttachNpcRest()
+    {
+        if (HeadlessTrial.Active)
+            return;
+        // SampleScene / Tree / Campfire have no NPC ragdolls. NpcRestEarly
+        // would still occupy a FixedUpdate on the hero island. World and
+        // Level1 keep LevelGenerator (grove hedgehog is not in dogs/birds).
+        if (dogs.Count == 0 && birds.Count == 0 && levelGenerator == null)
+            return;
+        NpcRest rest = GetComponent<NpcRest>();
+        if (rest == null)
+            rest = gameObject.AddComponent<NpcRest>();
+        // Flock body is 0.14 m. 0.10 m past the half-width puts the sprite
+        // off the Level1 right edge (player −8, apple sitters at x>0.9).
+        // Do not keep 0.35: that left x=1.2 live (already off-frame).
+        rest.flyViewMargin = 0.10f;
+        // Hens keep viewMargin 4 m (World x=12 live). Dogs / hedgehog
+        // rest 1.5 m past the clip so 18 Dynamic bodies do not ride
+        // the hen band while already off-camera.
+        rest.quadViewMargin = 1.5f;
+        // Flock hens at x=12 rest-decide in LateUpdate (one body).
+        // NpcRestEarly stays off that World spawn island. A dog /
+        // hedgehog leaving the clip still gets the same physics step.
+        rest.nearRestBand = 0.5f;
+        rest.physicsRestMinBodies = 8;
+        // Walker-band leftover stays Dynamic (npcLiveHens 2). NpcRest
+        // drops BirdController / rest loop there until the clip — Sit
+        // or Walk/Peck, not only Sit. Probe unsim, still Dynamic.
+        // Sleep on dirt was a no-op (Ground wakes StartAwake).
+        // drivenExternally skips sensors/flight FixedUpdate.
+        // Not energyRest, not BirdSensors / BirdFlight enabled=false.
+        // CameraFollow snaps in LateUpdate, after the first FixedUpdate.
+        // Bind Tick in Start would otherwise rest against the leftover
+        // scene X (BirdFlock50 lens 29.4, flock around 0).
+        SnapPlayCameraToFollow();
+        // BindFlock clears CameraFollow.bird. Do not keepAwake the whole
+        // pack: wanderers past the padded view must rest. Snap already
+        // put the lens on the centroid, so in-frame birds stay Dynamic.
+        // Level1 follows the human; those 20 apple crows rest per-root.
+        // World wander crows have no BirdDrive — pass the pack brain so
+        // rest can freeze it (leftover Sit, not a ForceFly on wake).
+        // Freeze follows flock-owned live count. A live woodpecker
+        // (BirdDrive) must not keep the crow brain writing Fly.
+        // Human is never keepAwake. NpcRest drops Muscle/Friction/BodyAero
+        // / strike / TreeSpring (dog tail) off-camera; sensors and
+        // BirdFlight stay enabled. Rest is Kinematic + simulated=false
+        // so leftover sit leaves the 200 Hz contact island. Pose is
+        // pinned to physics X before unsim (dirt Transform is stale).
+        // Discrete over leftover Paw CCD; colliders and Joint2D off so
+        // leftover sit leaves the broadphase. Far leftover sit latches
+        // that island once. Physics Tick is only a heavy walker in the
+        // near-rest band; flock hens park in LateUpdate.
+        // HuntBeak is a world-root query (OverlapCollider
+        // needs an attached body; Body child used BirdCore). Bind pairs
+        // it once to the bird that Awoke it. Rest parks like Bird
+        // ParkHuntSlab: unsim first, Kinematic, StartAwake, trigger,
+        // pose at (0, ParkY), then include Nothing. Bird 19:40
+        // re-latches Default include after a bodyType flip; Unity 6
+        // does not zero an already-Kinematic leftover, so Default
+        // ×Default would ride a simulated leak. Live Peck is Dynamic
+        // NeverSleep solid — leaving that after unsim is a 200 Hz
+        // island. Monitor counts huntBeakRb so npcLiveBodies is not
+        // stuck at 0. Wake leaves unsim; BakeHuntSlab owns live
+        // simulated, dirt pose, and Default include. Stay Kinematic.
+        // Tick does not walk roots.
+        // BirdController is off leftover Sit so RestorePeckReach is
+        // not 3×/frame. BodyAero is in the rest loop. Rest disables
+        // Dog so leftover sit does not keep Dog.LateUpdate. Pass
+        // birdPreyMark so Bind latches the Play quarry without a
+        // second species scan. Live BakeHuntSlab owns enable.
+        rest.Bind(dogs, birds, playCamera, FollowedRestRoot(playFollow), false, flockDrive, birdPreyMark);
+        WorldPerformanceMonitor monitor = GetComponent<WorldPerformanceMonitor>();
+        if (monitor != null)
+            monitor.BindNpcRest(rest);
+    }
+
+    // Scene Dog / Bird / Chicken: the followed body stays Dynamic.
+    // Human and tree are not in the rest list.
+    private static Transform FollowedRestRoot(CameraFollow follow)
+    {
+        if (follow == null)
+            return null;
+        if (follow.dog != null)
+            return follow.dog.transform;
+        if (follow.bird != null)
+            return follow.bird.transform;
+        if (follow.hedgehog != null)
+            return follow.hedgehog.transform;
+        return null;
+    }
+
+    // Yard, flock overview, and followed-NPC scenes (Dog / Bird / Chicken).
+    // SampleScene has no LevelGenerator and no followed rest root — skip
+    // so the stand camera keeps humanStandOffset. Chicken extra hens are
+    // not keepAwake; a leftover scene X would freeze them for the first
+    // physics step before CameraFollow LateUpdate.
+    private void SnapPlayCameraToFollow()
+    {
+        if (playCamera == null)
+            return;
+        bool flockOverview = cameraFollowsBird && birds.Count >= 10;
+        if (levelGenerator == null && !flockOverview && FollowedRestRoot(playFollow) == null)
+            return;
+        CameraFollow follow = playFollow;
+        Vector3 off = follow != null ? follow.offset : new Vector3(0f, 1.1f, -10f);
+        Vector2 point;
+        if (flockOverview)
+        {
+            int n = 0;
+            float sx = 0f;
+            float sy = 0f;
+            for (int i = 0; i < birds.Count; i++)
+            {
+                if (birds[i] == null)
+                    continue;
+                Vector3 p = birds[i].transform.position;
+                // autoSyncTransforms is off. Body RB is the perch / fly
+                // pose; the host can still sit on dirt spawn.
+                if (birds[i].controller != null && birds[i].controller.BodyRb != null)
+                {
+                    Vector2 bp = birds[i].controller.BodyRb.position;
+                    p.x = bp.x;
+                    p.y = bp.y;
+                }
+                sx += p.x;
+                sy += p.y;
+                n++;
+            }
+            if (n < 1)
+                return;
+            point = new Vector2(sx / n, sy / n);
+        }
+        else if (follow != null && follow.dog != null)
+            point = follow.dog.GetFollowPoint();
+        else if (follow != null && follow.bird != null)
+        {
+            point = follow.bird.transform.position;
+            if (follow.bird.controller != null && follow.bird.controller.BodyRb != null)
+                point = follow.bird.controller.BodyRb.position;
+        }
+        else if (follow != null && follow.hedgehog != null)
+            point = follow.hedgehog.GetFollowPoint();
+        else if (humans.Count > 0 && humans[0] != null)
+            point = humans[0].transform.position;
+        else if (follow != null && follow.tree != null)
+            point = follow.tree.transform.position;
+        else
+            return;
+
+        playCamera.transform.position = new Vector3(point.x + off.x, point.y + off.y, off.z);
+    }
+
+    // Picture only: CameraFollow in LateUpdate, does not touch forces.
     private void SetupCameraFollow()
     {
         Camera cam = Camera.main;
+        if (cam == null)
+            cam = FindAnyObjectByType<Camera>();
         if (cam == null) return;
-        if (humans.Count == 0 && birds.Count == 0 && trees.Count == 0 && dogs.Count == 0) return;
+        playCamera = cam;
+        if (humans.Count == 0 && birds.Count == 0 && trees.Count == 0 && dogs.Count == 0)
+        {
+            if (spawnCampfire)
+                FrameCampfire(cam);
+            return;
+        }
 
         cam.backgroundColor = SceneLighting.NightSky;
         cam.orthographic = true;
@@ -551,10 +876,11 @@ public class GameProcess : MonoBehaviour
         CameraFollow follow = cam.GetComponent<CameraFollow>();
         if (follow == null)
             follow = cam.gameObject.AddComponent<CameraFollow>();
+        playFollow = follow;
 
-        // Стая в ряд: 50×1.2 м ≈ 59 м. Кадр 3.2 видит 1–2 особи.
-        // Ширина = 2 * size * aspect; при 16:9 size ≈ 17 закрывает ряд.
-        // Физику и шаг не трогаем — только картинка.
+        // Flock in a row: 50×1.2 m ≈ 59 m. A 3.2 frame sees 1–2 birds.
+        // Width = 2 * size * aspect; at 16:9 size ≈ 17 covers the row.
+        // Do not touch physics or the step — picture only.
         bool flockOverview = cameraFollowsBird && birds.Count >= 10;
         if (flockOverview)
         {
@@ -574,16 +900,26 @@ public class GameProcess : MonoBehaviour
         }
         else
         {
-            // Стенд: человек ~1.75 м в кадре с запасом на голову. Мир/уровни — шире.
+            // Stand: 1.77 m chain centered with about 1.1 m margin. World/levels stay wider.
+            // Bird / Chicken keep the old 4.0 tight frame; do not steal it.
             bool treeOnly = trees.Count > 0 && humans.Count == 0 && birds.Count == 0 && dogs.Count == 0;
             bool dogOnly = dogs.Count > 0 && humans.Count == 0 && birds.Count == 0 && trees.Count == 0;
             bool tight = levelGenerator == null || levelGenerator.profile == LevelProfile.Flat;
+            bool humanStand = tight && humans.Count > 0 && birds.Count == 0
+                && trees.Count == 0 && dogs.Count == 0;
             if (treeOnly)
                 cam.orthographicSize = 4.6f;
             else if (dogOnly)
                 cam.orthographicSize = 3.6f;
+            else if (humanStand)
+            {
+                follow.frameFullBody = true;
+                follow.offset = follow.humanStandOffset;
+                cam.orthographic = true;
+                cam.orthographicSize = follow.humanStandOrthoSize;
+            }
             else
-                cam.orthographicSize = tight ? 3.2f : 5f;
+                cam.orthographicSize = tight ? 4.0f : 5f;
             if (cameraFollowsDog && dogs.Count > 0)
                 follow.Bind(dogs[0]);
             else if (cameraFollowsTree && trees.Count > 0)
@@ -599,7 +935,15 @@ public class GameProcess : MonoBehaviour
         }
     }
 
-    // Только картинка. Стенд headless сюда не заходит (Start возвращает раньше).
+    private static void FrameCampfire(Camera cam)
+    {
+        cam.orthographic = true;
+        cam.orthographicSize = 2.6f;
+        cam.transform.position = new Vector3(0f, -0.85f, -10f);
+        cam.backgroundColor = SceneLighting.NightSky;
+    }
+
+    // Picture only. The headless stand never reaches here (Start returns earlier).
     private void SetupNightLighting()
     {
         SceneLighting.Ensure(Camera.main);
@@ -614,9 +958,21 @@ public class GameProcess : MonoBehaviour
                 : dogs.Count > 0
                     ? dogs[0].transform.position
                     : trees[0].transform.position;
-        // Низ шеста на линии стояния y = −2.
+        // Pole base on the stance line y = −2.
         Vector3 torchPos = new Vector3(root.x + 1.25f, -2f, 0f);
         Torch.Spawn(torchPos);
+    }
+
+    private void SetupPlayCapture()
+    {
+        if (!enablePlayCapture)
+            return;
+        if (GetComponent<PlayCaptureRecorder>() != null)
+            return;
+
+        PlayCaptureRecorder capture = gameObject.AddComponent<PlayCaptureRecorder>();
+        // Keep defaults in one place; this log gives the output folder contract.
+        Debug.Log("PlayCaptureRecorder: armed (Tools/force-play-capture.flag, F8 toggle, output Trials/Captures).");
     }
 
     private void DisableCollisionsBetweenHumans()
@@ -652,8 +1008,8 @@ public class GameProcess : MonoBehaviour
         {
             for (int j = i + 1; j < packs.Count; j++)
             {
-                // Пары человек–человек уже выключены выше. Здесь — птица–птица
-                // и человек–птица: иначе 16+15 тел липнут друг к другу на спавне.
+                // Human–human pairs are already off above. Here — bird–bird
+                // and human–bird: otherwise 16+15 bodies stick together at spawn.
                 bool bothHuman = i < humans.Count && j < humans.Count;
                 if (bothHuman) continue;
                 foreach (Collider2D ca in packs[i])
@@ -686,7 +1042,23 @@ public class GameProcess : MonoBehaviour
         logger.SetHumansToLog(selectedHumans.ToArray(), selectedNumbers.ToArray());
     }
 
-    // Batch (run-world-perf.ps1) всегда; Play Mode — только Tools/force-world-perf.flag.
+    // Batch (run-world-perf.ps1) always; Play Mode — only Tools/force-world-perf.flag.
+    // Attach before NpcRest so BindNpcRest can cache the component (OnEnable
+    // of a late add would miss NpcRest if BindNpcRest did not run).
+    private void EnsureWorldPerfMonitor()
+    {
+        if (humanCount > 1 || levelGenerator == null)
+            return;
+
+        Application.targetFrameRate = 60;
+        QualitySettings.vSyncCount = 0;
+        if (GetComponent<WorldPerformanceMonitor>() == null && ShouldAttachWorldPerfMonitor())
+        {
+            gameObject.AddComponent<WorldPerformanceMonitor>();
+            Debug.Log("WorldPerformanceMonitor: frame capture on (see world_perf.txt).");
+        }
+    }
+
     private static bool ShouldAttachWorldPerfMonitor()
     {
         if (Application.isBatchMode)

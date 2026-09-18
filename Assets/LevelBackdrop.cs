@@ -1,9 +1,9 @@
 using UnityEngine;
 
-// Параллакс двора. Только картинка, без коллайдера и без Rigidbody2D.
-// LateUpdate после CameraFollow: слой едет как camX * follow.
-// follow → 1 — почти приклеен к камере (горизонт почти стоит на экране).
-// follow → 0 — как земля (быстро уезжает). Дворовые PlantTree не сюда.
+// Yard parallax. Picture only, no collider and no Rigidbody2D.
+// LateUpdate after CameraFollow: the layer moves as camX * follow.
+// follow → 1 — almost glued to the camera (horizon almost still on screen).
+// follow → 0 — like the ground (slides away fast). Yard PlantTree do not go here.
 [DefaultExecutionOrder(110)]
 public class LevelBackdrop : MonoBehaviour
 {
@@ -16,6 +16,14 @@ public class LevelBackdrop : MonoBehaviour
     private Layer[] layers;
     private Camera followCamera;
     private bool cameraRetryUsed;
+
+    // High cloud belt. Local X is wind; wrap keeps a short strip around the camera.
+    private Transform[] cloudPuffs;
+    private float[] cloudHomeX;
+    private float[] cloudHomeY;
+    private float[] cloudSpeed;
+    private const float CloudSpan = 96f;
+    private const int CloudOrder = -37;
 
     public static void Install(Transform levelRoot)
     {
@@ -31,7 +39,7 @@ public class LevelBackdrop : MonoBehaviour
         if (backdrop == null)
             backdrop = root.AddComponent<LevelBackdrop>();
         backdrop.Build();
-        // levelRoot не родитель: чанки на Level не должны увозить горы.
+        // levelRoot is not the parent: Level chunks must not carry the mountains away.
         _ = levelRoot;
     }
 
@@ -52,27 +60,31 @@ public class LevelBackdrop : MonoBehaviour
             Destroy(transform.GetChild(i).gameObject);
 
         CacheFollowCamera();
-        layers = new Layer[8];
+        layers = new Layer[9];
 
-        // Дальние слои — большой follow: на экране почти стоят.
-        // Ближний лес — малый follow: быстрее уезжает, объём читается.
+        // Far layers — large follow: almost still on screen.
+        // Near woods — small follow: slide away faster, depth reads.
+        // Clouds sit just in front of the sky so they occult the sun disc
+        // and stay behind the mountain silhouettes (−36).
         layers[0] = MakeLayer("Sky", 1.00f);
-        layers[1] = MakeLayer("Horizon", 0.97f);
-        layers[2] = MakeLayer("FarMountains", 0.91f);
-        layers[3] = MakeLayer("MidMountains", 0.80f);
-        layers[4] = MakeLayer("FarHills", 0.64f);
-        layers[5] = MakeLayer("NearHills", 0.48f);
-        layers[6] = MakeLayer("FarWoods", 0.33f);
-        layers[7] = MakeLayer("NearWoods", 0.18f);
+        layers[1] = MakeLayer("Clouds", 0.985f);
+        layers[2] = MakeLayer("Horizon", 0.97f);
+        layers[3] = MakeLayer("FarMountains", 0.91f);
+        layers[4] = MakeLayer("MidMountains", 0.80f);
+        layers[5] = MakeLayer("FarHills", 0.64f);
+        layers[6] = MakeLayer("NearHills", 0.48f);
+        layers[7] = MakeLayer("FarWoods", 0.33f);
+        layers[8] = MakeLayer("NearWoods", 0.18f);
 
         BuildSky(layers[0].root);
-        BuildHorizon(layers[1].root);
-        BuildMountains(layers[2].root, -36, new Color(0.11f, 0.13f, 0.20f, 1f), 4.6f, 7.2f, 11);
-        BuildMountains(layers[3].root, -34, new Color(0.13f, 0.15f, 0.22f, 1f), 3.2f, 5.4f, 13);
-        BuildHills(layers[4].root, -32, new Color(0.10f, 0.15f, 0.13f, 1f), 1.6f, 2.6f, 14);
-        BuildHills(layers[5].root, -30, new Color(0.09f, 0.14f, 0.11f, 1f), 1.1f, 1.9f, 16);
-        BuildWoods(layers[6].root, -28, new Color(0.06f, 0.09f, 0.07f, 1f), 0.9f, 1.6f, 22, 3.6f);
-        BuildWoods(layers[7].root, -26, new Color(0.05f, 0.08f, 0.06f, 1f), 0.7f, 1.35f, 28, 2.4f);
+        BuildClouds(layers[1].root);
+        BuildHorizon(layers[2].root);
+        BuildMountains(layers[3].root, -36, new Color(0.11f, 0.13f, 0.20f, 1f), 4.6f, 7.2f, 11);
+        BuildMountains(layers[4].root, -34, new Color(0.13f, 0.15f, 0.22f, 1f), 3.2f, 5.4f, 13);
+        BuildHills(layers[5].root, -32, new Color(0.10f, 0.15f, 0.13f, 1f), 1.6f, 2.6f, 14);
+        BuildHills(layers[6].root, -30, new Color(0.09f, 0.14f, 0.11f, 1f), 1.1f, 1.9f, 16);
+        BuildWoods(layers[7].root, -28, new Color(0.06f, 0.09f, 0.07f, 1f), 0.9f, 1.6f, 22, 3.6f);
+        BuildWoods(layers[8].root, -26, new Color(0.05f, 0.08f, 0.06f, 1f), 0.7f, 1.35f, 28, 2.4f);
     }
 
     private Layer MakeLayer(string name, float follow)
@@ -108,8 +120,50 @@ public class LevelBackdrop : MonoBehaviour
 
     private void BuildHorizon(Transform parent)
     {
-        // Полоска над землёй: дальняя дымка, почти не едет.
+        // Strip above the ground: far haze, almost does not move.
         SpawnBox(parent, "Haze", 0f, 1.8f, 140f, 2.4f, new Color(0.10f, 0.12f, 0.20f, 1f), -38);
+    }
+
+    private void BuildClouds(Transform parent)
+    {
+        const int count = 7;
+        cloudPuffs = new Transform[count];
+        cloudHomeX = new float[count];
+        cloudHomeY = new float[count];
+        cloudSpeed = new float[count];
+
+        // Rest color is the night look. DayNightCycle.ToDay brightens the
+        // same SpriteRenderers at noon, so the belt rides the yard clock
+        // without a second Find.
+        System.Random rng = new System.Random(91);
+        float x = -46f;
+        for (int i = 0; i < count; i++)
+        {
+            float w = 3.4f + (float)rng.NextDouble() * 4.2f;
+            float h = 0.52f + (float)rng.NextDouble() * 0.50f;
+            float y = 2.7f + (float)rng.NextDouble() * 3.2f;
+            float a = 0.38f + (float)rng.NextDouble() * 0.12f;
+            Color tint = new Color(0.52f, 0.56f, 0.64f, a);
+
+            GameObject puff = new GameObject("Cloud_" + i);
+            puff.transform.SetParent(parent, false);
+            puff.transform.localPosition = new Vector3(x + w * 0.5f, y, 0f);
+
+            SpawnBox(puff.transform, "Body", 0f, 0f, w, h, tint, CloudOrder);
+            if (rng.NextDouble() > 0.22)
+            {
+                float w2 = w * (0.38f + (float)rng.NextDouble() * 0.30f);
+                float h2 = h * (0.68f + (float)rng.NextDouble() * 0.38f);
+                float ox = ((float)rng.NextDouble() - 0.5f) * w * 0.42f;
+                SpawnBox(puff.transform, "Bump", ox, h * 0.28f, w2, h2, tint, CloudOrder + 1);
+            }
+
+            cloudPuffs[i] = puff.transform;
+            cloudHomeX[i] = puff.transform.localPosition.x;
+            cloudHomeY[i] = y;
+            cloudSpeed[i] = 0.22f + (float)rng.NextDouble() * 0.38f;
+            x += w * 0.82f + 1.4f;
+        }
     }
 
     private void BuildMountains(Transform parent, int order, Color color, float minH, float maxH, int count)
@@ -122,7 +176,7 @@ public class LevelBackdrop : MonoBehaviour
             float h = minH + (float)rng.NextDouble() * (maxH - minH);
             float baseY = LevelGenerator.DefaultSurfaceY + 0.15f;
             SpawnBox(parent, "Peak_" + i, x + w * 0.5f, baseY + h * 0.5f, w, h, color, order);
-            // Второй пик чуть выше — силуэт хребта, не один прямоугольник.
+            // Second peak a bit higher — a ridge silhouette, not one rectangle.
             if (rng.NextDouble() > 0.35)
             {
                 float w2 = w * 0.45f;
@@ -225,6 +279,37 @@ public class LevelBackdrop : MonoBehaviour
             p.x = camX * layers[i].follow;
             p.y = 0f;
             layers[i].root.position = p;
+        }
+
+        TickClouds(camX);
+    }
+
+    private void TickClouds(float camX)
+    {
+        if (cloudPuffs == null || layers == null || layers.Length < 2)
+            return;
+
+        Transform layer = layers[1].root;
+        if (layer == null)
+            return;
+
+        float layerX = layer.position.x;
+        float t = Time.time;
+        for (int i = 0; i < cloudPuffs.Length; i++)
+        {
+            Transform puff = cloudPuffs[i];
+            if (puff == null)
+                continue;
+
+            float x = cloudHomeX[i] + t * cloudSpeed[i];
+            float worldX = layerX + x;
+            float dx = worldX - camX;
+            dx -= CloudSpan * Mathf.Round(dx / CloudSpan);
+
+            Vector3 p = puff.localPosition;
+            p.x = camX + dx - layerX;
+            p.y = cloudHomeY[i] + Mathf.Sin(t * 0.17f + i * 0.9f) * 0.07f;
+            puff.localPosition = p;
         }
     }
 }

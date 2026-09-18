@@ -6,10 +6,16 @@ alwaysApply: true
 # Documents
 
 Map: `DOCS.md`. Role: agent `docs`. Body journal is not here —
-`current-front.mdc`. Language: English only (`docs-english.mdc`).
+`current-front.mdc`. Language: Russian exists only in live chat with Yury; everything else is English, always (`docs-english.mdc`).
 
 Stance acceptance is `Trials/Baselines/stable-pd/`. Folder
 `Baselines/current/` is a historical name, ostrich knee, not canon.
+
+## Git Branching Strategy (College Decision 2026-09-01)
+- `master` is the clean, production-ready canonical branch. Direct unverified commits by agents to `master` are strictly forbidden.
+- Feature and experiment work must occur on `feat/*` or `exp/*` branches.
+- Merging to `master` requires passing a clean Gatekeeper checklist: `gitDirty=false`, matching build fingerprint, and zero stability regressions against `stable-pd`.
+- `git checkout` is strictly forbidden while the Unity Editor is running. Parallel subagents must use isolated `git worktree` and distinct build/trial output folders (`-BuildFolder`, `-TrialFolder`).
 
 Do not delete or rename `Trials/Baselines/*`, `Trials/Runs/*`,
 `.cursor/tasks/archive/`. Do not "clean" Runs. Do not backfill fingerprint

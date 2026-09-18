@@ -482,8 +482,16 @@ go only to the human with index 0.
    `oneg_l`, `det_r1…det_r5`. Remainder: CSV is not bitwise between repeats
    (trajectory drift, not fell/swingFoot). Do not start SIMBICON.
 10. Bitwise CSV on one leg: the outcome (`fell`, `pelvisDrop`) is stable,
-    the trajectory diverges from ~5.06 s — see `trial-protocol.mdc`. Does not block
-    acceptance of one-leg stance.
+ the trajectory diverges from ~5.06 s — see `trial-protocol.mdc`. Does not block
+ acceptance of one-leg stance.
+11. ~~Return from one-leg stance to two feet topples the human~~ —
+ **closed 01.09.** Root cause: on release (`standLeg -> 0`) split logic
+ dropped the support sign immediately (`splitLegs=false`), while `standLegLevel`
+ was still high, so the swing leg lost role and planted unpredictably.
+ Fix in `BalanceController`: outside walk, keep the last non-zero support sign
+ (`heldStandCmd`) until `standLegLevel` decays to zero. Verification:
+ `retfix_onegl30` now survives full 30 s, release at 25.0037 s,
+ `fell: false`, `pelvisDrop` 0.0016, torso 3.30°.
 
 # Work order
 
@@ -550,6 +558,93 @@ Regression on defaults: `wt_reg_walk` = `walk_unstick_s8`; stance 30 s RMS
 accepted forward threshold is **23**, not 24. Next is stance push-off on a
 body-driven cadence, not another sweep. Do not start SIMBICON.
 
+**01.09 Play felt broken; the body was not.** Report from Yury: "even
+does not lift a leg". Two Play-only causes, no physics regression.
+(1) `PlayerInputSource` made →/D a lean and let lean **cancel** walk:
+`W` held together with `D` zeroed `moveX` and called `EndWalk()`, so the
+usual "walk right" grip did nothing at all. Fixed: walk wins, lean applies
+only while ↑/W is up. (2) The first leg lift comes at
+`walkStanceLiftDelay` = 6 s of an 8 s stance, so a short press shows
+nothing — the Editor overlay now prints phase, seconds to lift,
+`standLegLevel` and swap count.
+Rebuild on today's sources reproduced the accepted walk exactly
+(`now_walk` = `fix_walk`: 4 swaps, `swingFoot` 0.3928, `pelvisDrop`
+0.0016, travel 0.208). Regress `fix_stand` (RMS 0.0052, sat 0, feet
+1.0000), `fix_pf23`, `fix_pb23` all hold.
+
+**01.09 walk contract confirmed + deeper crouch without regressions.**
+Yury clarified the Play input contract: hold ↑/W to walk, release to stand.
+This behavior stays; no walk latch/toggle was added. Crouch request was a
+deeper pose with more forward torso. Correct sweep key is `-crouchLean`
+(not `-crouchTorso`). Stability edge: knee 101 folds, knee 100 holds.
+Defaults updated to `crouchKneeFlex` **100** (was 98),
+`crouchPelvisTilt` **28**, `crouchTorsoLean` **18** (was 15).
+Rebuild fingerprint `0b71f784af2898fd...`: `u2_crouch` survives 20 s
+(`fell: false`, `pelvisDrop` 0.4239, `returnedToStand: true`,
+`muscleSaturation` 0.0012). Regressions hold:
+`u2_stand`, `u2_pf23`, `u2_pb23`, `u2_walk` (4 swaps, `swingFoot` 0.3820),
+`u2_onegl30` (`fell: false` after release).
+
+**01.09 swapped left/right shoulder anchors (requested pose).** In
+`Human.BuildHuman` arm attachment sides were swapped:
+`CreateArm("RightArm", -1, ...)` and `CreateArm("LeftArm", 1, ...)`.
+This moves the visible right arm to the former back-side shoulder slot and
+puts the hidden arm on the former front-side slot, as requested.
+Rebuild fingerprint `7d46ed31ad232f5f...`; stance `armswap_stand` holds
+(`fell: false`, `pelvisDrop` 0.0016). Walk `armswap_walk` also survives
+40 s with 4 swaps; metrics shifted but stayed stable
+(`swingFoot` 0.5738, `travel` 0.396).
+
+**01.09 Contact friction is not a stability lever — measured.** Yury asked
+for "boots instead of bare feet". Until now no collider carried a
+`PhysicsMaterial2D` at all, so both foot and ground ran on Unity's implicit
+**0.4**. New levers, defaults inert: `Human.footFriction`,
+`GroundBuilder.groundFriction`, CLI `-footFriction` / `-groundFriction`;
+the summary reports `footFriction`, `groundFriction` and the pair
+`contactFriction` = sqrt(µ₁·µ₂). Regression at 0.4 (`mu_reg_stand`,
+`mu_reg_walk`) matched the accepted numbers to the digit.
+
+| µ pair | stance 30 s | push +23 | push +24 | walk 40 s | travel |
+|---|---|---|---|---|---|
+| 0.3 | — | — | — | 4 swaps | 0.315 |
+| **0.4 now** | RMS 0.0052 | holds | falls | 4 swaps | 0.208 |
+| 0.5 | RMS 0.0052 | holds | falls | 4 swaps | **0.519** |
+| 0.6 | — | **falls 7.6 s** | — | **falls 25 s** | — |
+| 0.7 | — | **falls 7.8 s** | falls | **falls 25 s** | — |
+| 1.0 | RMS 0.0052 | holds | falls | **falls 25 s** | — |
+
+Quiet stance is identical from 0.4 to 1.0: standing still there is nothing
+to slip, so grip buys nothing. The forward threshold stays **23** at every
+µ. The landscape is **holey** — 0.6 and 0.7 drop an accepted push while 1.0
+holds it — so µ is not a knob, it is a trajectory perturbation. Physical
+reason is already in `balance-actuators.mdc`: the fall is rotation about
+toe or heel, ceiling `m·g·arm` (65 / 22 N·m), and friction does not raise
+that ceiling. **Keep 0.4.** Lead worth remembering, not shipping: µ=0.5
+holds every acceptance run, moves 0.519 m instead of 0.208 and lifts the
+one-leg swing much cleaner (`swingFoot` 0.30 → **0.0516**, `mu05_onegl20`)
+— but 0.6 already falls, so it sits 0.1 from a cliff.
+
+**01.09 one-leg release fixed (body, not friction).** Failure was in control
+timing, not contact: when one-leg command released to zero, split mode
+disappeared immediately although `standLegLevel` still ramped down. The
+controller lost the swing/stance identity during landing. New behavior:
+outside walk, `BalanceController` holds the previous support sign in
+`heldStandCmd` until `standLegLevel` reaches zero. This keeps leg roles
+through the release window and restores a controlled touchdown.
+Runs: `retfix_onegl30` (release at 25 s) survives to 30 s with
+`fell: false`, `pelvisDrop` 0.0016; acceptance windows still pass:
+`retfix_stand`, `retfix_pf23`, `retfix_pb23`, `retfix_walk` (4 swaps,
+`swingFoot` 0.3820).
+
+**Short cadence is closed — it falls.** Stance shortened with a
+proportional lift delay, 40 s each: `cad_s6` (6 s / lift 4), `cad_s5`
+(5 / 3), `cad_s4` (4 / 2.5), `cad_s3` (3 / 1.8). **All four fall**:
+`pelvisDrop` 0.85, torso tilt 74…97°, travel 1.6 m of falling, not
+walking. With the fast `cad_i` / `cad_o` cadence the swing foot never
+leaves the ground (`swingFoot` 0.996). So 8 s stance with lift at 6 s is
+not arbitrary — it is the only cadence that both stands and lifts a
+foot. Do not shorten the step to make Play livelier.
+
 `PlayerInputSource`: →/D — lean forward, ←/A — back (`MotionIntent.lean`);
 ↑/W — walk; **double-tap ↑/W + hold** — run (`intent.run`); ↓/S — crouch;
 Q/E — one-leg. `Tools/force-lean.flag` (`forward`/`back`), `Tools/force-run.flag`.
@@ -571,9 +666,29 @@ after latch and `!grounded`; before lift-off — `swingKneeGroundedFraction`)
 `-walkKneePeel` / `-walkLiftUnload`
 `-walk 1 -walkTime 5 -walkDuration 25 -walkStance 10 -walkTransfer 8
 -walkTransferCom 0.02 -walkFirst right|left`
+`-footFriction` / `-groundFriction` (both 0.4 = Unity implicit default;
+pair is sqrt(µ₁·µ₂), reported as `contactFriction`)
 
 Play Mode after SPD is not fully closed by eye (key injection into Input
 System did not arrive); the stand crouch with SPD matched `son_squat`.
+
+# Vestibular (VEST-1 accepted 15.09)
+
+Quiet hold on both supports and both 23 N·s pushes. Lever: quiet
+`ProtectJointLimit` 8° plus freeze of `standLegLevel` until the swing
+plants on release. `hipBalanceGain` 8 stays (zeroing it dumps at 2.05 s).
+No new baseline. Card archive: `.cursor/tasks/archive/VEST-1-balance.md`.
+
+| Run | fell | s | note |
+|---|---|---|---|
+| `oneleg_sym_l5` left | false | 30 | span 0.79°, drop 0.025 |
+| `oneleg_sym_r5` right | false | 30 | span 0.75°, drop 0.033 |
+| `pf23r` +23 N·s | false | 15 | offset 0.116, recovery 2.81, **bothFeet 0.975**, travel 0.465 m |
+| `pb23r` −23 N·s | false | 15 | offset 0.075, recovery 1.38, bothFeet 0.999 |
+
+Next is VEST-2, not WalkLift: forward push still damps by unloading the
+rear plate (same midpoint `ankleBalance` on both feet). Ankle first,
+then hip, then a step — one CoM loop. Do not start SIMBICON.
 
 # What walk still lacks
 
@@ -630,3 +745,15 @@ Stump is Static. Wind is `½ ρ v² S` on each dynamic segment, via
 `TreeDriver` in `FixedUpdate`. Leaves are visual-only. `TreeRig.Static`
 is the cheap grove (same shape, no hinges). Bark/leaf: `Art/bark`,
 `Art/leaf` via `ArtLibrary`, same bake as clothing. Collider size unchanged.
+
+**04.09: garden flowers.** Separate class `PlantFlower` (not a tree).
+Twelve subclasses: Rose, Tulip, Daisy, Poppy, Sunflower, Lily,
+Daffodil, Violet, Crocus, Lavender, Iris, Bluebell. Picture only —
+no rigidbody, no perch. Scene `Tree` plants all twelve
+(`flowerCount = 12`). World stays 0. Card `PLANT-3-flowers`.
+
+**09.09: four extra tree silhouettes.** `TreeKind` Lilac (Y-split green
+stem, purple ellipse blooms), Hazel (three trunks), Cedar (layered
+fans), Plum (square fruit clusters). Flat unicolor sprites, no PNG.
+Sway still ≤ 31 bodies. Yard `KindFromPlantIndex` stays Oak…Poplar.
+Scene `Tree` `treeCount = 9`. Perch pads and `TreeSpring` hold unchanged.

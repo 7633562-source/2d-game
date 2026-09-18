@@ -1,0 +1,11 @@
+state=stopped
+reason=component disabled
+capturedUtc=2026-09-11T13:41:24.3354079Z
+scene=World
+resolution=640x480
+zoomHumanInCapture=True
+captureWidthFraction=0.55
+captureHeightFraction=0.7
+fixedDelta=0,005
+targetFrameRate=60
+frames=22

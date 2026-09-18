@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// Картинки уровня. Сначала контракт Level/* (visul). Пока своих PNG нет —
-// бесшовный Art/dirt и Art/grass через ArtLibrary.Tiled. Коллайдер не зависит.
+// Level pictures. Level/* contract first (visul). Until own PNGs exist —
+// seamless Art/dirt and Art/grass via ArtLibrary.Tiled. Collider does not depend.
 public static class LevelArt
 {
     public const string FillKey = "ground_fill";
@@ -15,8 +15,8 @@ public static class LevelArt
 
     public static Sprite Fill()
     {
-        // Свои PNG из Resources/Level/ важнее: контракт visul.
-        // Пока их нет — бесшовная заливка из Art/dirt.
+        // Own PNGs from Resources/Level/ win: visul contract.
+        // ArtLibrary.Tiled is off: White() + FillTint is the flat-color path.
         return Load(FillKey) ?? ArtLibrary.Tiled(ArtLibrary.Dirt, ArtLibrary.GroundTileMeters) ?? White();
     }
 
@@ -64,7 +64,7 @@ public static class LevelArt
         return new Color(0.30f, 0.58f, 0.28f, 1f);
     }
 
-    // true, когда нет своей 9-slice из Level/, но есть бесшовный Art/dirt.
+    // true when there is no own 9-slice from Level/, but seamless Art/dirt exists.
     public static bool UseTiledFill()
     {
         return !HasFill() && ArtLibrary.Albedo(ArtLibrary.Dirt) != null;
@@ -115,7 +115,7 @@ public static class LevelArt
         if (single != null)
             return single;
 
-        // visul импортировал Multiple (dirt_0, grass_0) — Load<Sprite> молчит.
+        // visul imported Multiple (dirt_0, grass_0) — Load<Sprite> stays silent.
         Sprite[] many = Resources.LoadAll<Sprite>(path);
         if (many != null && many.Length > 0)
             return many[0];
@@ -134,8 +134,14 @@ public static class LevelArt
         for (int i = 0; i < pixels.Length; i++)
             pixels[i] = Color.white;
         tex.SetPixels(pixels);
-        tex.Apply(false, true);
+        // Keep CPU pixels: Sprite.Create on WebGL rejects an unreadable
+        // texture and then Sliced reports Failed to create texture.
+        tex.Apply(false, false);
 
+        // Solid white, no 9-slice border. 4 px at 32 PPU is 0.125 m per
+        // side, so Sliced needs size ≥ 0.25 m. Woods trunks are 0.10–0.18 m
+        // and curb faces 0.14 × 0.05 m; Unity then builds an inner texture
+        // of width ≤ 0 and throws Failed to create texture.
         _white = Sprite.Create(
             tex,
             new Rect(0f, 0f, 32f, 32f),
@@ -143,7 +149,7 @@ public static class LevelArt
             32f,
             0,
             SpriteMeshType.FullRect,
-            new Vector4(4f, 4f, 4f, 4f));
+            Vector4.zero);
         return _white;
     }
 }

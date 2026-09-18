@@ -2,14 +2,15 @@
 
 Read this and `.cursor/rules/`. Do not copy chat history.
 
-**Documents are English only, always.** See `docs-english.mdc`.
+**Russian exists only in live chat with Yury.** Everything else is English,
+always — existing and new. See `docs-english.mdc`.
 
 ## Object
 
 The human is assembled in `Human.cs` (public fields). No prefabs. Scenes:
-`SampleScene` (stand, do not touch), `World` (game, `birdCount = 0`),
+`SampleScene` (stand, do not touch), `World` (yard: flock 6 / hens 10 / dogs 3; `treeCount = 0`),
 `Bird` (one crow + AI), `BirdFlock50` (flock AI), `Chicken` (hens),
-`Tree` (plants), `Dog` (quadruped).
+`Tree` (plants), `Dog` (quadruped), `Campfire` (fire lab).
 
 Stance baseline: `Trials/Baselines/stable-pd/`. Folder `Baselines/current/`
 is the old ostrich knee. Document map: `DOCS.md`. Do not delete
@@ -21,25 +22,64 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 
 | Who | Task | Card |
 |---|---|---|
-| physics | WALK-1: stance 8 holds; Play one-leg “freeze” = Stance timer; walk-only Transfer unstick (`walk_freeze_fix.md`); lift <0.35 open | `.cursor/tasks/WALK-1-physics.md` |
+| physics | **VEST-2**: per-foot quiet ankle coded (`quietAnklePerFoot` 1). Next: `pf23v2` +23 N·s. | `.cursor/tasks/VEST-2-balance.md` |
+| physics | ONELEG-1 accepted (Yury): `oneleg_sym` / `oneleg_sym_l`, both 30 s, span 0.75° / 0.79°. | `.cursor/tasks/ONELEG-1-physics.md` |
+| physics | ONELEG-2 **wall**: 90° pose holds; CoM ankle loop is bistable. Do not reopen. | `.cursor/tasks/ONELEG-2-march.md` |
+| physics | WALK-2: the walk never steps (single support 0 %, walkSwap 0, folds 1.3 s after the walk start). Vestibular first; switch surface frozen. | this file, Walk front |
 | physics | deep crouch WIP intentionally leaves code defaults 98/28 after `crouch_accept`; accepted journal remains 55/12 until the physics work closes | HumanPhysics continuation |
-| visual | code hand is `0.06×0.32`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/VIS-HAND.md` |
+| visual | code hand is `0.06×0.16`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/VIS-HAND.md` |
 | docs | pointers and baselines; do not clean Runs | `DOCS.md` |
-| optimization | P1 + P2/P3 + PERF-5 closed. Bird code audit 02.09: flock N=50 is the 200 Hz solver edge; ragdoll 1 bird is 17 RB / 32 muscles — stand only, no new 10% candidate | `opt_bird_code_02.md`; archive `PERF-5-bird-flock.md` |
-| level | Test1 yard: gate Static trees + World flock 6 / hens 10 / dogs 3; `treeCount` 0 | no new card |
-| bird | BIRD-9 tree1 accepted. Opt 02.09: flock 50 is the 200 Hz edge; ragdoll 17 RB stand-only; perch `probeSat` 0 — no `GetContacts` | `opt_bird_code_02.md`; `BIRD-9-tree-ghost.md` |
-| plant | PLANT-2 accepted. Pass 03.09: Static skips hold/sync; perch slots cached; leaves are sprites not `HumanSegment` | `plant_static_cheap_02.md`; archive `PLANT-2-static-cheap.md`; `PLANT-1-tree.md` |
+| optimization | P1 + P2/P3 + PERF-5 closed. Yard 04.09: off-camera dogs/birds rest (`NpcRest`). PERF-1 is pre-grove and pre-yard. Do not cut 200 Hz | `OPT-3-distant-rest.md`; `opt_agent_proposals.md` |
+| level | Test1 yard: campfire at x=32.5 (24 tongues + ParticleSystem sparks/smoke/embers; no sprite smoke boxes); lab scene `Campfire`; gate Static trees + World flock 6 / hens 10 / dogs 3; `treeCount` 0 | no new card |
+| bird | BIRD-12: inter-bird contact is torso+head (`BirdCore`); limbs/perch `BirdLimb`. Walk = `walkThrust` on the body. Opt 02.09 flock 50 still the 200 Hz edge; no `GetContacts` | `BIRD-12-core-contact.md`; `opt_bird_code_02.md` |
+| plant | PLANT-2 accepted. PLANT-3: 12 garden flowers. Four extra tree kinds in scene Tree (Lilac Hazel Cedar Plum); yard cycle still Oak…Poplar | `PLANT-3-flowers.md`; `plant-physics.mdc` |
 | visual | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/VIS-TREE.md` |
 | visual | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/VIS-DOG-textures.md` |
 | visual | crow / chicken parts in `Art/Crow` and `Art/Chicken` | `.cursor/tasks/VIS-BIRD-textures.md` |
-| ai | Factions at spawn: Player / Wildlife.Wolf / Wildlife.Bird. Wolf↔Bird Hostile | `FACTION-1.md` |
-| dog | DOG-2 c53–c62 done. Leftover: rake −25/+25, `startupHipP` 8 / 0.25 s. `dog_c59_stand` drop **0.193**, `fourFeet` 0.992 — still a sit, not ~0.01 | `.cursor/tasks/DOG-2-stance-10.md` |
+| ai | Insect hunt concept: faction Insects, Forage→Pursue, eat with beak | `BIRD-13-insect-hunt.md` |
+| dog | DOG-3 leftover sit-trot **0.286 km/h** (`dog_w10`); 5 km/h open. DOG-4: `DogDrive` writes Walk; no play keys | `.cursor/tasks/DOG-3-walk.md`; `DOG-4-ai.md` |
+
+## Walk front — WALK-2 (Hermes 16.09)
+
+Yury 15.09: **vestibular first, not swing lift** — still the line.
+
+**Two controllers, one of them dead (Hermes 17.09).** Measured in the window before the fall: the default path (WalkLift / Stance clock) never lifts a foot — single support 0.0 %, both feet grounded 100 %, first single support never. The capture walker (`-captureWalk 1`) does step: single support 34 %, both feet 62 %, first single support at 5.22 s, 2-3 swaps, fall at 5.8 s. Fresh data (Hermes 17.09, Yury's eye check): at the walk start kneeL 6.5 / kneeR 3.4 deg, by 5.6 s BOTH knees reach 120 deg, the pelvis drops 0.456 m and the body topples forward. The launch squats both legs instead of lifting one: the swing knee must flex, the stance knee must stay extended, pelvis drop under 3 cm. So `BalanceControllerCaptureWalk.cs` is the canonical walk now; the WalkLift families own the dead path and must not be tuned. The hourly trial runs `-captureWalk 1`.
+
+Measured on build `c125adbd` (`burn_walk`, 40 s, walk starts at 5 s):
+
+- During the walk phase both feet stay grounded **100 %**, single support
+  **0 %**, `walkSwap` **0**, `comX` moves **9 mm**, knees stay 3–7° — then the
+  body folds.
+- Moving the walk start from 5 s to 12 s moves the fold from 6.305 s to
+  13.335 s: the fold follows the walk start by **1.3 s**. The first transfer
+  fails; the gait never runs.
+- Quiet stance in the same build: 40 s, 2.1° tilt — the support loop is healthy.
+- Variants tried: default, `-walkStance 8 -walkTransfer 8 -walkFirst right`,
+  `-captureWalk 1` — all fold 1.3 s after the start, 0–1 swaps.
+- Yury watched the video: "the step is weak". Measured: there is no step.
+
+Hard rules for the walk scope:
+
+1. **The switch surface is frozen.** 250 `-walk*` switches exist, 61 are read
+   at most once, and 46 are synonyms of two ideas (`-walkPlantFallFoldGrow*`
+   15, `-walkPlantFallLiftCapGrow*` 16). Never add a switch: reuse an existing
+   one, or delete a dead sibling.
+2. The step must come from the CoM leaving the support area — the CoM-triggered
+   capture step — not from swing-lift or plant-fold timers.
+3. Do not tune PD, do not touch the stance loop, do not start SIMBICON.
+4. Unity 6 API: `GetInstanceID` is obsolete and stops the build (CS0619). Cache a `Transform` reference and compare it instead.
+5. One writer only: the walk slot edits the physics files (`StepPhaseDriver.cs`, `BalanceController.cs`, `MotionIntent.cs`, `PlayerInputSource.cs`, `Human.cs`, `HumanSegment.cs`, `JointFriction.cs`). Other slots stay out of them.
+
+Acceptance: 40 s no fall, `walkSwap` ≥ 6, `comTravelX` > 3 m, single support
+above 20 % of the walk phase, swing foot grounded fraction < 0.35, left/right
+step length within 15 %, stance still RMS ≤ 0.0055 and `pf23v2` +23 N·s holds.
 
 ## Closed — do not open
 
 Forces in `Update`, 100/50 Hz in prod, merge pelvis+torso, amputate arms,
 SIMBICON, retune PD for FPS. PERF-2: keep 200 Hz (`perf_wave2_timestep.json`).
 Wood `Rigidbody2D` / wood collider on `TreeRig.Static` (PLANT-2).
+`enabled = false` on driven `BirdSensors` / `BirdFlight` (PERF-5, 0%).
 
 ## Automations
 
@@ -58,8 +98,51 @@ Documents: scheduler `Unity-Docs-daily` every day at **02:00**, script
 `Tools/run-docs-daily.ps1`. Cloud cannot see this folder. Report:
 `Trials/Runs/docs_daily_latest.md`.
 
+## Dispatch
+
+Telegram: Hermes manages the game. Generic recon is CLI `-Ask`. Named
+work is **`-Profile physics`**: the wrapper **injects**
+`.cursor/agents/physics.md`. On this PC headless `--print` has **no
+Task** (Hermes 2026-09-06, 70K log). Label `generic+physics.md`, not
+“physics Task”. This IDE chat is the **internal admin**.
+
 ## Roster
 
 `.cursor/ROSTER.md` and `.cursor/agents/` (`physics`, `visual`, `level`,
-`bird`, `optimization`, `ai`, `docs`). The five-model college is not these
-profiles.
+`bird`, `plant`, `dog`, `optimization`, `ai`, `docs`). The five-model
+college is not these profiles.
+5. Unique local names: CS0136 shadowing blocked the build three times tonight (BirdTrialRecorder, PlantTree). Never reuse a local name inside a method.
+
+6. Commit a checkpoint before a big change and never leave the tree uncompilable: the repo had no commit since 04.09 while BalanceController gained 12k lines, so a regression could not be traced or undone.
+
+## Get up from a fall - Yury 17.09
+
+The human has five states, and the trial must tell them apart:
+
+1. Standing. 2. Walking. 3. Falling. 4. Fallen. 5. Getting up.
+
+Rule: while the human is Fallen and the walk key is held, he must try
+to get back on his feet. The walk input is not ignored on the ground.
+
+Measured 17.09: after the fall at 8.0 s the body is frozen - torsoTilt
+-70.4 deg, comX 0.970 m, state 1 - until the trial ends, even though the
+walk window stays open to 40 s. There is no attempt at all.
+
+Acceptance for the get-up case: the trial runs walk 1, walkTime 5,
+walkDuration 35. The human falls, and while the walk key is still held
+he must come back to his feet: torso tilt above -20 deg and CoM above
+the standing threshold within 10 s of the fall, then walk again for 3 s.
+The recorder must report getUpAttempts, getUpSuccess and seconds from
+fall to stand.
+
+
+## Arms are part of the vestibular apparatus - Yury 17.09
+
+The arms are not decoration. They counter the legs while walking, they reach
+when a fall is caught, and they push off the ground while getting up.
+Measured 17.09: the walk window shoulder range is 42 deg but the counter phase
+is weak, correlation -0.22 with the left hip and +0.55 with the right; after
+the fall the arms are dead, shoulder 4.8 deg and elbow 0.03 deg over 33 s.
+Acceptance: walking shoulder correlation below -0.5 with the opposite leg;
+while Getting up the elbow range above 20 deg and a non zero arm command;
+both must be visible in the video, not only in the numbers.

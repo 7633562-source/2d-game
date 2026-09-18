@@ -49,6 +49,21 @@ public class DogTrialRecorder
     private bool sawLeapPush;
     private bool sawLeapAir;
     private bool sawLeapBite;
+    private bool walkWindowOpen;
+    private float walkStartComX;
+    private float walkStartTime = -1f;
+    private float walkEndComX;
+    private float walkEndTime = -1f;
+    private int samplesWalkActive;
+    private int lastWalkCycleCount;
+    private int lastSenseTick;
+    private float sensorComXMin = float.MaxValue;
+    private float sensorComXMax = float.MinValue;
+    private float sensorMarginMin = float.MaxValue;
+    private float sensorMarginMax = float.MinValue;
+    private int samplesOnsetWindow;
+    private int samplesOnsetCollapsed;
+    private int samplesOnsetPosed;
 
     public DogTrialRecorder(Dog dog, TrialRunInfo info)
     {
@@ -113,7 +128,8 @@ public class DogTrialRecorder
         float maxActivation = stance.MaxStanceActivation();
         if (maxActivation >= SATURATION_THRESHOLD) samplesSaturated++;
 
-        if (fallTime < 0f && stance.currentState == DogStanceController.StanceState.Falling)
+        if (fallTime < 0f && (stance.currentState == DogStanceController.StanceState.Falling
+            || stance.currentState == DogStanceController.StanceState.Fallen))
             fallTime = time;
 
         if (absOff > SETTLED_COM_OFFSET)
@@ -128,6 +144,33 @@ public class DogTrialRecorder
         if (stance.currentState == DogStanceController.StanceState.LeapPush) sawLeapPush = true;
         if (stance.currentState == DogStanceController.StanceState.LeapAir) sawLeapAir = true;
         if (stance.currentState == DogStanceController.StanceState.LeapBite) sawLeapBite = true;
+
+        if (stance.IsWalk() || stance.walkWanted)
+        {
+            if (!walkWindowOpen)
+            {
+                walkStartComX = stance.comPosition.x;
+                walkStartTime = time;
+                walkWindowOpen = true;
+            }
+            walkEndComX = stance.comPosition.x;
+            walkEndTime = time;
+            samplesWalkActive++;
+        }
+        lastWalkCycleCount = stance.walkCycleCount;
+        lastSenseTick = stance.senseTick;
+        float comX = stance.comPosition.x;
+        if (comX < sensorComXMin) sensorComXMin = comX;
+        if (comX > sensorComXMax) sensorComXMax = comX;
+        float margin = stance.supportMargin;
+        if (margin < sensorMarginMin) sensorMarginMin = margin;
+        if (margin > sensorMarginMax) sensorMarginMax = margin;
+        if (walkWindowOpen && walkStartTime >= 0f && time - walkStartTime <= 3.001f)
+        {
+            samplesOnsetWindow++;
+            if (stance.WalkCollapsed) samplesOnsetCollapsed++;
+            if (stance.WalkPosed) samplesOnsetPosed++;
+        }
 
         AppendCsvFloat(time);
         rows.Append(',');
@@ -217,6 +260,40 @@ public class DogTrialRecorder
         json.Append(",\"sawLeapPush\":").Append(sawLeapPush ? "true" : "false");
         json.Append(",\"sawLeapAir\":").Append(sawLeapAir ? "true" : "false");
         json.Append(",\"sawLeapBite\":").Append(sawLeapBite ? "true" : "false");
+        float walkWindow = walkWindowOpen && walkEndTime > walkStartTime
+            ? walkEndTime - walkStartTime
+            : 0f;
+        float travelX = walkWindowOpen ? walkEndComX - walkStartComX : 0f;
+        float speedX = walkWindow > 0.01f ? travelX / walkWindow : 0f;
+        AppendNum(json, "comTravelX", travelX);
+        AppendNum(json, "comSpeedX", speedX);
+        AppendNum(json, "comSpeedKmh", speedX * 3.6f);
+        AppendNum(json, "walkWindowSeconds", walkWindow);
+        json.Append(",\"walkCycleCount\":").Append(lastWalkCycleCount.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "walkActiveFraction", samples > 0 ? samplesWalkActive / (float)samples : 0f);
+        json.Append(",\"senseTick\":").Append(lastSenseTick.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "sensorComXMin",
+            samples > 0 && sensorComXMin < float.MaxValue * 0.5f ? sensorComXMin : 0f);
+        AppendNum(json, "sensorComXMax",
+            samples > 0 && sensorComXMax > float.MinValue * 0.5f ? sensorComXMax : 0f);
+        AppendNum(json, "sensorSupportMarginMin",
+            samples > 0 && sensorMarginMin < float.MaxValue * 0.5f ? sensorMarginMin : 0f);
+        AppendNum(json, "sensorSupportMarginMax",
+            samples > 0 && sensorMarginMax > float.MinValue * 0.5f ? sensorMarginMax : 0f);
+        AppendNum(json, "walkOnsetSeconds", samplesOnsetWindow * Time.fixedDeltaTime);
+        AppendNum(json, "walkOnsetCollapsedFraction",
+            samplesOnsetWindow > 0 ? samplesOnsetCollapsed / (float)samplesOnsetWindow : 0f);
+        AppendNum(json, "walkOnsetPosedFraction",
+            samplesOnsetWindow > 0 ? samplesOnsetPosed / (float)samplesOnsetWindow : 0f);
+        json.Append(",\"walkOnsetCollapsed\":")
+            .Append(samplesOnsetCollapsed > 0 ? "true" : "false");
+        json.Append(",\"walkOnsetPosed\":")
+            .Append(samplesOnsetPosed > 0 ? "true" : "false");
+        AppendStr(json, "walkOnsetLog", FormatWalkOnsetLog());
+        json.Append(",\"getUpAttempts\":").Append(stance.getUpAttempts.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"getUpSuccess\":").Append(stance.getUpSuccess ? "true" : "false");
+        AppendNum(json, "getUpSeconds", stance.getUpSeconds);
+        AppendNum(json, "getUpFallTime", stance.getUpFallTime);
         json.Append(",\"jawStrikeHits\":").Append((jawStrike != null ? jawStrike.HitCount : 0).ToString(CultureInfo.InvariantCulture));
         json.Append(",\"preyHurtCount\":").Append((preyLife != null ? preyLife.HurtCount : 0).ToString(CultureInfo.InvariantCulture));
         json.Append(",\"preyPresent\":").Append(preyLife != null ? "true" : "false");
@@ -298,6 +375,9 @@ public class DogTrialRecorder
         {
             AppendNum(json, "pawComP", c.pawComP);
             AppendNum(json, "pawComD", c.pawComD);
+            AppendNum(json, "pawComDeadzone", c.pawComDeadzone);
+            AppendNum(json, "pawComVelDeadzone", c.pawComVelDeadzone);
+            AppendNum(json, "pawGroundHoldSeconds", c.pawGroundHoldSeconds);
             AppendNum(json, "chestPGain", c.chestPGain);
             AppendNum(json, "chestDGain", c.chestDGain);
             AppendNum(json, "chestTargetTilt", c.chestTargetTilt);
@@ -326,6 +406,9 @@ public class DogTrialRecorder
             AppendNum(json, "heightD", c.heightD);
             AppendNum(json, "heightMaxDeg", c.heightMaxDeg);
             AppendNum(json, "heightHipMaxDeg", c.heightHipMaxDeg);
+            AppendNum(json, "heightDeadzone", c.heightDeadzone);
+            AppendNum(json, "heightVelDeadzone", c.heightVelDeadzone);
+            AppendNum(json, "poseHoldDeadzoneDeg", c.poseHoldDeadzoneDeg);
             AppendNum(json, "startupHoldSeconds", c.startupHoldSeconds);
             AppendNum(json, "jawOpen", c.jawOpen);
             AppendNum(json, "jawAngle", c.jawAngle);
@@ -341,6 +424,40 @@ public class DogTrialRecorder
             AppendNum(json, "leapAimX", c.LeapAim.x);
             AppendNum(json, "leapAimY", c.LeapAim.y);
             json.Append(",\"leapTargetSet\":").Append(c.leapTarget != null ? "true" : "false");
+            json.Append(",\"walkWanted\":").Append(c.walkWanted ? "true" : "false");
+            AppendNum(json, "walkPeriod", c.walkPeriod);
+            AppendNum(json, "walkDuty", c.walkDuty);
+            AppendNum(json, "walkRearLag", c.walkRearLag);
+            AppendNum(json, "walkHipFlex", c.walkHipFlex);
+            AppendNum(json, "walkShoulderFlex", c.walkShoulderFlex);
+            AppendNum(json, "walkHipExtend", c.walkHipExtend);
+            AppendNum(json, "walkShoulderExtend", c.walkShoulderExtend);
+            AppendNum(json, "walkKneeFlex", c.walkKneeFlex);
+            AppendNum(json, "walkElbowFlex", c.walkElbowFlex);
+            AppendNum(json, "walkPawPlant", c.walkPawPlant);
+            AppendNum(json, "walkFrontPlantScale", c.walkFrontPlantScale);
+            AppendNum(json, "walkChestTilt", c.walkChestTilt);
+            AppendNum(json, "walkLumbarP", c.walkLumbarP);
+            AppendNum(json, "walkHipP", c.walkHipP);
+            AppendNum(json, "walkKneeP", c.walkKneeP);
+            AppendNum(json, "walkActivationSpeed", c.walkActivationSpeed);
+            AppendNum(json, "runSpeed", c.runSpeed);
+            AppendNum(json, "runSpeedRef", c.runSpeedRef);
+            AppendNum(json, "runStride", c.runStride);
+            AppendNum(json, "runHipFlex", c.runHipFlex);
+            AppendNum(json, "runShoulderFlex", c.runShoulderFlex);
+            AppendNum(json, "runHipExtend", c.runHipExtend);
+            AppendNum(json, "runShoulderExtend", c.runShoulderExtend);
+            AppendNum(json, "runKneeFlex", c.runKneeFlex);
+            AppendNum(json, "runElbowFlex", c.runElbowFlex);
+            AppendNum(json, "runChestLean", c.runChestLean);
+            AppendNum(json, "runPawPlant", c.runPawPlant);
+            json.Append(",\"walkCycleCount\":").Append(c.walkCycleCount.ToString(CultureInfo.InvariantCulture));
+            AppendNum(json, "walkPhase", c.walkPhase);
+            json.Append(",\"walkCollapsed\":").Append(c.WalkCollapsed ? "true" : "false");
+            json.Append(",\"walkPosed\":").Append(c.WalkPosed ? "true" : "false");
+            json.Append(",\"senseTick\":").Append(c.senseTick.ToString(CultureInfo.InvariantCulture));
+            AppendNum(json, "supportMargin", c.supportMargin);
             json.Append(",\"jawStrikeHits\":").Append((jawStrike != null ? jawStrike.HitCount : 0).ToString(CultureInfo.InvariantCulture));
             json.Append(",\"preyHurtCount\":").Append((preyLife != null ? preyLife.HurtCount : 0).ToString(CultureInfo.InvariantCulture));
             AppendNum(json, "targetPelvisY", c.targetPelvisY);
@@ -356,6 +473,41 @@ public class DogTrialRecorder
             }
         }
         json.Append("}");
+    }
+
+    private string FormatWalkOnsetLog()
+    {
+        if (stance == null || stance.WalkOnsetLogCount <= 0)
+            return "";
+        var log = new StringBuilder();
+        for (int i = 0; i < DogStanceController.WalkOnsetLogCapacity; i++)
+        {
+            float age;
+            bool collapsed;
+            bool posed;
+            float comX;
+            float margin;
+            float hipDrop;
+            float comDrop;
+            float columnStanding;
+            byte reason;
+            if (!stance.TryGetWalkOnsetSample(i, out age, out collapsed,
+                    out posed, out comX, out margin, out hipDrop, out comDrop,
+                    out columnStanding, out reason))
+                continue;
+            if (log.Length > 0)
+                log.Append('|');
+            log.Append(age.ToString("0.00", CultureInfo.InvariantCulture));
+            log.Append(",c").Append(collapsed ? "1" : "0");
+            log.Append(",p").Append(posed ? "1" : "0");
+            log.Append(",x").Append(comX.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",m").Append(margin.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",hd").Append(hipDrop.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",cd").Append(comDrop.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",cs").Append(columnStanding.ToString("0.000", CultureInfo.InvariantCulture));
+            log.Append(",r").Append(reason.ToString(CultureInfo.InvariantCulture));
+        }
+        return log.ToString();
     }
 
     private void AppendCsvFloat(float value)

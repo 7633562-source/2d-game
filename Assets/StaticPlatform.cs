@@ -1,7 +1,7 @@
 using UnityEngine;
 
-// Один кусок уровня: прямоугольник в мире. Физика здесь только статическая
-// опора — без Rigidbody2D, без сил, без суставов.
+// One level piece: a rectangle in the world. Physics here is only static
+// support — no Rigidbody2D, no forces, no joints.
 public struct LevelPiece
 {
     public string name;
@@ -13,8 +13,8 @@ public struct LevelPiece
     public bool hasCollider;
 }
 
-// Спавн статической площадки. Размер задаётся спрайтом и коллайдером, не
-// масштабом: иначе как у сегментов тела поедут дочерние объекты и контакты.
+// Spawn a static platform. Size is set by sprite and collider, not
+// scale: otherwise child objects and contacts slide as on body segments.
 public static class StaticPlatform
 {
     public const int SortingOrder = -2;
@@ -62,8 +62,8 @@ public static class StaticPlatform
         return go;
     }
 
-    // Трава лежит в верхней кромке грунта, не торчит выше поверхности:
-    // иначе 14 см травы перекрыли бы ступень 5 см соседней террасы.
+    // Grass sits in the top rim of the dirt, not above the surface:
+    // otherwise 14 cm of grass would cover a 5 cm step of the next terrace.
     private static void SpawnSurfaceCap(Transform parent, Vector2 size)
     {
         float capHeight = 0.14f;

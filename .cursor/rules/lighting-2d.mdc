@@ -1,6 +1,6 @@
 ---
 description: 2D lighting concept (URP Light2D). Not physics.
-globs: Assets/{Torch,SceneLighting,SpriteLighting,LightingPipelineSetup}*
+globs: Assets/{Torch,Campfire,SceneLighting,SpriteLighting,LightingPipelineSetup}*
 alwaysApply: false
 ---
 
@@ -36,7 +36,7 @@ Do not attach `ShadowCaster2D` shadows yet: a long ground would make a
 false wall.
 
 Light Render Texture scale 0.5. Depth/stencil is off: there are no 2D
-shadows. Max light RT is 4 (moon + torch), shadow RT is 0.
+shadows. Max light RT is 4 (moon + torch + campfire), shadow RT is 0.
 
 ## Frame budget (college 28.08)
 
@@ -67,6 +67,22 @@ Sprites go Unlit so the frame is not black. Set `true` to restore night.
 Stands at y = −2, 1.25 m ahead of the human.
 Volumetric is off for the frame budget (`volumetricEnabled = false`,
 `volumeIntensity = 0`); do not turn it on without a separate task.
+
+## Campfire
+
+`Campfire.EnsureOnYard` from `LevelGenerator` on Test1 (x = 32.5).
+Play lab is scene `Campfire` (`GameProcess.spawnCampfire`, x = 0, y = −2).
+Unicolor logs (no PNG). Flame: pool of 24 Unlit disc tongues (white →
+yellow → orange → red by age, recycle). Particles: three
+`ParticleSystem` (sparks orange up, smoke warm-gray, embers red dots).
+Own Unlit material + soft disc; do not write `SpriteLighting.Unlit`
+texture. Sprite smoke boxes were removed (cool gray rectangles on
+`NightSky` read as blue slabs). One `Light2D` Point, Additive, no
+volume, only if `SceneLighting.Enabled`. Far from the camera the
+tongues hide and particles `StopEmittingAndClear`. No collider, no
+heat force. Do not add a Light2D per tongue.
+No `Instantiate` / `Destroy` in `LateUpdate`. Cap: sparkMax 32 /
+smokeMax 20 / emberMax 16.
 
 ## Do not
 

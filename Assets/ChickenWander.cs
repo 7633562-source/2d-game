@@ -28,13 +28,30 @@ public sealed class ChickenWander
     private float peckEnds;
     private bool pecking;
     private float facing = 1f;
+    private float tempo = 1f;
+
+    // Insect hunt does not Step. An expired Sit bout used to EnterWalk
+    // (and Peck) the first Forage frame after the eat.
+    public void HoldHuntSit(float now, float sitMin, float sitMax)
+    {
+        if (phase == Phase.Walk)
+        {
+            EnterSit(now, sitMin, sitMax);
+            return;
+        }
+
+        pecking = false;
+        if (phase == Phase.Sit && now >= phaseEnds)
+            phaseEnds = now + Tempo(Rand(0.85f, 2.2f));
+    }
 
     public void Reset(int seed, float now, float sitMin, float sitMax, float startFacing)
     {
         rng = new System.Random(seed);
+        tempo = 0.78f + (float)rng.NextDouble() * 0.50f;
         facing = startFacing >= 0f ? 1f : -1f;
         phase = Phase.Sit;
-        phaseEnds = now + Rand(sitMin, sitMax);
+        phaseEnds = now + Tempo(Rand(sitMin, sitMax));
         nextTurn = now + 999f;
         walkCount = 0;
         sitCount = 0;
@@ -91,7 +108,7 @@ public sealed class ChickenWander
             if (now >= peckEnds)
             {
                 pecking = false;
-                nextPeck = now + Rand(peckGapMin, peckGapMax);
+                nextPeck = now + Tempo(Rand(peckGapMin, peckGapMax));
             }
 
             return;
@@ -101,7 +118,7 @@ public sealed class ChickenWander
         {
             pecking = true;
             peckCount++;
-            peckEnds = now + Rand(peckMin, peckMax);
+            peckEnds = now + Tempo(Rand(peckMin, peckMax));
         }
     }
 
@@ -109,7 +126,7 @@ public sealed class ChickenWander
     {
         phase = Phase.Sit;
         sitCount++;
-        phaseEnds = now + Rand(sitMin, sitMax);
+        phaseEnds = now + Tempo(Rand(sitMin, sitMax));
         nextTurn = now + 999f;
         pecking = false;
         nextPeck = now + 999f;
@@ -121,10 +138,10 @@ public sealed class ChickenWander
         walkCount++;
         if (rng.Next(0, 2) == 0)
             SetFace(-facing);
-        phaseEnds = now + Rand(walkMin, walkMax);
+        phaseEnds = now + Tempo(Rand(walkMin, walkMax));
         nextTurn = now + Rand(turnMin, turnMax);
         pecking = false;
-        nextPeck = now + Rand(peckGapMin, peckGapMax);
+        nextPeck = now + Tempo(Rand(peckGapMin, peckGapMax));
     }
 
     private void SetFace(float sign)
@@ -133,6 +150,11 @@ public sealed class ChickenWander
         if (next != facing)
             facingFlipCount++;
         facing = next;
+    }
+
+    private float Tempo(float seconds)
+    {
+        return seconds * tempo;
     }
 
     private float Rand(float min, float max)

@@ -34,6 +34,8 @@ public class JawStrike : MonoBehaviour
     {
         if (jaw == null || stance == null || !jaw.enabled)
             return;
+        if (stance.energyRest)
+            return;
         if (!stance.jawStrikeArmed)
             return;
         if (Time.time < nextHit)

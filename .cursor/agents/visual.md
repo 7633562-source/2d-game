@@ -5,7 +5,7 @@ description: >-
   Use when HumanSegment, handSize, CameraFollow, Torch, SceneLighting.
 ---
 
-You are the **2D visual** profile agent. Communication with user Yury: ALWAYS strictly in Russian ("на русском общаемся только с Юрием"). Code comments & project documentation: ALWAYS strictly in English (`docs-english.mdc`). Do not translate Unity API names.
+You are the **2D visual** profile agent. Russian exists only in live chat with Yury. Everything else is English, always (`docs-english.mdc`). Do not translate Unity API names.
 
 Memory: `CURRENT.md`, `.cursor/rules/lighting-2d.mdc`,
 `unity-2d-physics.mdc` (size = `sprite.size` / `collider.size`, not

@@ -3,12 +3,17 @@
 Do not read old long chats. A new chat = `CURRENT.md` + your rule + a card
 + `Trials/Runs/opt_agent_proposals.md` (your section). Not a GO card.
 
-Documents are English only, always.
+Language policy: Russian exists only in live chat with Yury. Everything else is English, always — existing and new (`docs-english.mdc`). Translate leftover Russian; rename leftover Russian file names.
 
 | Agent | Layer | Rule | Play scene |
 |---|---|---|---|
 | `physics` | body / actuators / human control | `balance-actuators.mdc` | `SampleScene` |
-| `visual` | sprite, camera, light | `lighting-2d.mdc` | `World` / `SampleScene` / `Dog` (look) |
+| `visual` | sprite, camera | `lighting-2d.mdc` | `World` / `SampleScene` / `Dog` (look) |
+| `light` | Light2D, day/night | `lighting-2d.mdc` | `World` |
+| `artist` | look, palette, silhouette | `painted-parts.mdc` | `World` / `Dog` (look) |
+| `designer` | mechanics, UX, specs (no code) | `project-context.mdc`, `perf-budget.mdc` | no Play; no code |
+| `qa` | verification, trials, perf | `trial-protocol.mdc` | `SampleScene` / WebGL `World` |
+| `sound` | voice, sound bus, ambience | `perf-budget.mdc` | `World` / `Bird` |
 | `level` | yard, chunks | `level-generation.mdc` | `World` |
 | `bird` | flight (not the brain) | `bird-physics.mdc` | `Bird` / `BirdFlock50` / `Chicken` or `-bird 1` |
 | `plant` | recursive tree | `plant-physics.mdc` | `Tree` |
@@ -16,6 +21,7 @@ Documents are English only, always.
 | `ai` | bird brain (now); law for every AI | `ai.mdc` | `Bird` / `BirdFlock50` / `Chicken` |
 | `docs` | document map, baselines, pointers | `docs-map.mdc` | no Play; do not write game code |
 | `dog` | quadruped stance | `dog-physics.mdc` | `Dog` or `-dog 1` |
+| `programmer` | integration, build health, review partner of the slots | `trial-protocol.mdc` | no Play; reads trial output |
 
 Dispatcher is the chat with the human. The executor reads the card, not the
 thread.

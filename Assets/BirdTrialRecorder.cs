@@ -3,8 +3,8 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-// Сводка прогона птицы. Как TrialRecorder: только читает, сил нет.
-// fell по CoM недостаточно — оседание и кульбит ловим отдельно.
+// Bird-run summary. Like TrialRecorder: read-only, no forces.
+// fell from CoM is not enough — settling and a flip are caught separately.
 public class BirdTrialRecorder
 {
     private const float SATURATION_THRESHOLD = 0.999f;
@@ -18,6 +18,7 @@ public class BirdTrialRecorder
     private readonly BirdController control;
     private readonly BirdDrive drive;
     private readonly BirdFlockDrive flockDrive;
+    private readonly BeakStrike beakHit;
     private readonly Transform body;
 
     private readonly StringBuilder rows = new StringBuilder();
@@ -56,21 +57,45 @@ public class BirdTrialRecorder
     private int samplesForage;
     private int samplesFlee;
     private int samplesPursue;
+    private int samplesPursueFly;
     private int lastFacingSign = 1;
     private bool enteredFlight;
+    private FactionStance liveBirdInsectRel;
+    private bool latchedBirdInsectRel;
+    private bool sawLivePrey;
+    // First 3 s: Forage→Pursue and Walk/Peck, not leftover Fly.
+    private readonly StringBuilder huntOnset = new StringBuilder();
+    private int huntOnsetCount;
+    private LifeState lastOnsetLife = (LifeState)(-1);
+    private int lastOnsetMode = int.MinValue;
+    private float nextOnsetLog;
 
-    public BirdTrialRecorder(Bird bird, TrialRunInfo info)
+    public BirdTrialRecorder(Bird bird, TrialRunInfo info, BirdFlockDrive flock = null)
     {
         this.bird = bird;
         this.info = info;
         sensors = bird != null ? bird.sensors : null;
         control = bird != null ? bird.controller : null;
         drive = bird != null ? bird.GetComponent<BirdDrive>() : null;
-        flockDrive = UnityEngine.Object.FindFirstObjectByType<BirdFlockDrive>();
+        // Solo BirdDrive already holds the hunter. Flock is the spawn host
+        // passed by HeadlessTrial. Do not Find — BIRD-13 is not a scene scan.
+        flockDrive = drive != null ? null : flock;
+        beakHit = bird != null ? bird.GetComponent<BeakStrike>() : null;
         Transform bodyT = bird != null ? bird.transform.Find("Body") : null;
         body = bodyT;
 
         rows.AppendLine("t,bodyPitch,bodyY,comX,comY,comOffset,leftG,rightG,liftY,mode,hipL,kneeL,hipR,kneeR");
+        // Spawn is Forage. Drive holds ChooseWake until after this ctor
+        // so the first Sample can be Forage. If Update already Pursued
+        // (no hold), seed the log so the gate still sees Forage→Pursue.
+        LifeState spawnLife = drive != null
+            ? drive.Life
+            : flockDrive != null ? flockDrive.Life : LifeState.Forage;
+        if (spawnLife == LifeState.Forage && sensors != null && body != null)
+            Sample(0f);
+        else
+            AppendHuntOnset(0f, LifeState.Forage, HuntBodyModeSample(
+                control != null ? (int)control.mode : 0));
     }
 
     public void Sample(float time)
@@ -121,15 +146,25 @@ public class BirdTrialRecorder
         LifeState life = drive != null
             ? drive.Life
             : flockDrive != null ? flockDrive.Life : LifeState.Forage;
+        int huntMode = HuntOnsetMode(life, HuntBodyModeSample(mode));
         if (life == LifeState.Forage) samplesForage++;
         else if (life == LifeState.Flee) samplesFlee++;
-        else if (life == LifeState.Pursue) samplesPursue++;
+        else if (life == LifeState.Pursue)
+        {
+            samplesPursue++;
+            if (huntMode == (int)BirdMode.Fly
+                || huntMode == (int)BirdMode.Glide
+                || huntMode == (int)BirdMode.Attack)
+                samplesPursueFly++;
+        }
         if (mode == (int)BirdMode.Fly
             || mode == (int)BirdMode.Glide
             || mode == (int)BirdMode.Attack)
             enteredFlight = true;
         if (control != null)
             lastFacingSign = control.FacingSign() >= 0f ? 1 : -1;
+        LatchLiveFactionRel();
+        AppendHuntOnset(time, life, huntMode);
         if (LegSaturated()) samplesSaturated++;
         if (control != null && control.leftShoulderJoint != null)
         {
@@ -253,6 +288,7 @@ public class BirdTrialRecorder
         AppendNum(json, "flyFraction", samples > 0 ? samplesFly / (float)samples : 0f);
         AppendNum(json, "glideFraction", samples > 0 ? samplesGlide / (float)samples : 0f);
         AppendNum(json, "peckFraction", samples > 0 ? samplesPeck / (float)samples : 0f);
+        AppendNum(json, "huntFlyFraction", samples > 0 ? samplesPursueFly / (float)samples : 0f);
         json.Append(",\"enteredFlight\":").Append(enteredFlight ? "true" : "false");
         json.Append(",\"finalFacing\":").Append(lastFacingSign.ToString(CultureInfo.InvariantCulture));
         bool satOnPerch = lastMode == (int)BirdMode.Sit
@@ -314,62 +350,25 @@ public class BirdTrialRecorder
         json.Append(",\"velocityIterations\":").Append(Physics2D.velocityIterations.ToString(CultureInfo.InvariantCulture));
         json.Append(",\"positionIterations\":").Append(Physics2D.positionIterations.ToString(CultureInfo.InvariantCulture));
         json.Append(",\"flockRig\":").Append(control != null && control.flockRig ? "true" : "false");
-        BirdDrive[] drives = UnityEngine.Object.FindObjectsByType<BirdDrive>(FindObjectsSortMode.None);
-        BirdFlockDrive flock = UnityEngine.Object.FindFirstObjectByType<BirdFlockDrive>();
-        if (drives != null && drives.Length > 0)
+        int beakHits = 0;
+        if (drive != null)
         {
-            int takeoffs = 0, lands = 0, flips = 0, perchLands = 0, dirt = 0;
-            for (int i = 0; i < drives.Length; i++)
-            {
-                if (drives[i] == null) continue;
-                takeoffs += drives[i].TakeoffCount;
-                lands += drives[i].LandCount;
-                flips += drives[i].FacingFlipCount;
-                perchLands += drives[i].PerchLandCount;
-                dirt += drives[i].DirtRejectCount;
-            }
-
-            BirdDrive drive = drives[0];
             json.Append(",\"birdDrive\":true");
-            AppendStr(json, "birdDriveKind", drives.Length > 1 ? "WanderEach" : drive.kind.ToString());
-            if (drives.Length > 1)
-                json.Append(",\"flockMemberCount\":").Append(drives.Length.ToString(CultureInfo.InvariantCulture));
-            json.Append(",\"takeoffCount\":").Append(takeoffs.ToString(CultureInfo.InvariantCulture));
-            int walks = 0;
-            for (int i = 0; i < drives.Length; i++)
-            {
-                if (drives[i] != null)
-                    walks += drives[i].WalkCount;
-            }
-            json.Append(",\"walkCount\":").Append(walks.ToString(CultureInfo.InvariantCulture));
-            int pecks = 0;
-            for (int i = 0; i < drives.Length; i++)
-            {
-                if (drives[i] != null)
-                    pecks += drives[i].PeckCount;
-            }
-            json.Append(",\"peckCount\":").Append(pecks.ToString(CultureInfo.InvariantCulture));
-            json.Append(",\"landCount\":").Append(lands.ToString(CultureInfo.InvariantCulture));
-            json.Append(",\"facingFlipCount\":").Append(flips.ToString(CultureInfo.InvariantCulture));
-            json.Append(",\"perchLandCount\":").Append(perchLands.ToString(CultureInfo.InvariantCulture));
-            json.Append(",\"dirtRejectCount\":").Append(dirt.ToString(CultureInfo.InvariantCulture));
-            int cries = 0;
-            for (int i = 0; i < drives.Length; i++)
-            {
-                if (drives[i] != null)
-                    cries += drives[i].CryCount;
-            }
-            json.Append(",\"cryCount\":").Append(cries.ToString(CultureInfo.InvariantCulture));
-            AppendStr(json, "life", drive.Life.ToString());
-            json.Append(",\"lifeSwitchCount\":").Append(drive.LifeSwitchCount.ToString(CultureInfo.InvariantCulture));
-            if (samples > 0)
-            {
-                float n = samples;
-                AppendNum(json, "lifeForageFraction", samplesForage / n);
-                AppendNum(json, "lifeFleeFraction", samplesFlee / n);
-                AppendNum(json, "lifePursueFraction", samplesPursue / n);
-            }
+            AppendStr(json, "birdDriveKind", drive.kind.ToString());
+            json.Append(",\"takeoffCount\":").Append(drive.TakeoffCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"walkCount\":").Append(drive.WalkCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"peckCount\":").Append(drive.PeckCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"landCount\":").Append(drive.LandCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"facingFlipCount\":").Append(drive.FacingFlipCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"perchLandCount\":").Append(drive.PerchLandCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"dirtRejectCount\":").Append(drive.DirtRejectCount.ToString(CultureInfo.InvariantCulture));
+            json.Append(",\"cryCount\":").Append(drive.CryCount.ToString(CultureInfo.InvariantCulture));
+            AppendLife(json, drive.Life, drive.LifeSwitchCount,
+                drive.SawLifeForage, drive.SawLifePursue);
             json.Append(",\"hasThreat\":").Append(drive.threat != null ? "true" : "false");
+            json.Append(",\"hasPrey\":").Append(sawLivePrey || drive.prey != null ? "true" : "false");
+            json.Append(",\"preyEatenCount\":").Append(drive.PreyEatenCount.ToString(CultureInfo.InvariantCulture));
+            beakHits = drive.BeakHitCount;
             AppendNum(json, "threatRange", drive.threatRange);
             AppendNum(json, "glideLead", drive.glideLead);
             AppendNum(json, "sitMin", drive.sitMin);
@@ -379,8 +378,9 @@ public class BirdTrialRecorder
             AppendNum(json, "flockLeash", drive.leash);
             AppendNum(json, "homeFaceDeadzone", drive.homeFaceDeadzone);
         }
-        else if (flock != null)
+        else if (flockDrive != null)
         {
+            BirdFlockDrive flock = flockDrive;
             json.Append(",\"birdDrive\":true");
             AppendStr(json, "birdDriveKind", "WanderFlock");
             json.Append(",\"flockMemberCount\":").Append(flock.MemberCount.ToString(CultureInfo.InvariantCulture));
@@ -392,16 +392,12 @@ public class BirdTrialRecorder
             json.Append(",\"perchLandCount\":").Append(flock.PerchLandCount.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"dirtRejectCount\":").Append(flock.DirtRejectCount.ToString(CultureInfo.InvariantCulture));
             json.Append(",\"cryCount\":").Append(flock.CryCount.ToString(CultureInfo.InvariantCulture));
-            AppendStr(json, "life", flock.Life.ToString());
-            json.Append(",\"lifeSwitchCount\":").Append(flock.LifeSwitchCount.ToString(CultureInfo.InvariantCulture));
-            if (samples > 0)
-            {
-                float n = samples;
-                AppendNum(json, "lifeForageFraction", samplesForage / n);
-                AppendNum(json, "lifeFleeFraction", samplesFlee / n);
-                AppendNum(json, "lifePursueFraction", samplesPursue / n);
-            }
+            AppendLife(json, flock.Life, flock.LifeSwitchCount,
+                flock.SawLifeForage, flock.SawLifePursue);
             json.Append(",\"hasThreat\":").Append(flock.threat != null ? "true" : "false");
+            json.Append(",\"hasPrey\":").Append(sawLivePrey || flock.prey != null ? "true" : "false");
+            json.Append(",\"preyEatenCount\":").Append(flock.PreyEatenCount.ToString(CultureInfo.InvariantCulture));
+            beakHits = flock.BeakHitCount;
             AppendNum(json, "threatRange", flock.threatRange);
             AppendNum(json, "glideLead", flock.glideLead);
             json.Append(",\"aiStride\":").Append(flock.aiStride.ToString(CultureInfo.InvariantCulture));
@@ -417,8 +413,16 @@ public class BirdTrialRecorder
         int segments = bird != null ? bird.GetComponentsInChildren<HumanSegment>(true).Length : 0;
         json.Append(",\"humanSegmentCount\":").Append(segments.ToString(CultureInfo.InvariantCulture));
         json.Append(",\"hasBeak\":").Append(bird != null && bird.beakCollider != null ? "true" : "false");
-        BeakStrike strike = bird != null ? bird.GetComponent<BeakStrike>() : null;
-        json.Append(",\"beakHitCount\":").Append((strike != null ? strike.HitCount : 0).ToString(CultureInfo.InvariantCulture));
+        if (beakHits == 0 && beakHit != null)
+            beakHits = beakHit.HitCount;
+        json.Append(",\"beakHitCount\":").Append(beakHits.ToString(CultureInfo.InvariantCulture));
+        AppendStr(json, "factionRelBirdInsect", SummaryBirdInsectRel().ToString());
+        AppendStr(json, "factionRelPlayerInsect", FactionTable.RelIds(
+            FactionId.Player, SubfactionId.None,
+            FactionId.Insects, SubfactionId.None).ToString());
+        AppendStr(json, "factionRelWolfInsect", FactionTable.RelIds(
+            FactionId.Wildlife, SubfactionId.Wolf,
+            FactionId.Insects, SubfactionId.None).ToString());
         if (bird != null)
             AppendNum(json, "beakSizeX", bird.beakSize.x);
         if (s != null && s.probeCallCount > 0)
@@ -490,15 +494,121 @@ public class BirdTrialRecorder
         json.Append(value.ToString("G9", CultureInfo.InvariantCulture));
     }
 
-    private void AppendLife(StringBuilder json, LifeState life, int switches)
+    private void AppendLife(
+        StringBuilder json,
+        LifeState life,
+        int switches,
+        bool sawForage,
+        bool sawPursue)
     {
         AppendStr(json, "life", life.ToString());
         json.Append(",\"lifeSwitchCount\":").Append(switches.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"lifeSawForage\":").Append(sawForage ? "true" : "false");
+        json.Append(",\"lifeSawPursue\":").Append(sawPursue ? "true" : "false");
+        if (huntOnset.Length > 0)
+            AppendStr(json, "huntOnsetLog", huntOnset.ToString());
         if (samples <= 0)
             return;
         float n = samples;
         AppendNum(json, "lifeForageFraction", samplesForage / n);
         AppendNum(json, "lifeFleeFraction", samplesFlee / n);
         AppendNum(json, "lifePursueFraction", samplesPursue / n);
+    }
+
+    // Solo: this bird. Flock: locked hunter, not pack[0] leftover Fly.
+    private int HuntBodyModeSample(int fallbackMode)
+    {
+        if (drive != null)
+            return (int)drive.HuntBodyMode;
+        if (flockDrive != null)
+            return (int)flockDrive.HuntBodyMode;
+        return fallbackMode;
+    }
+
+    // Card: Peck waits Pursue. Leftover cruise Fly/Peck/Sit while Life
+    // is still Forage used to fill huntOnsetLog Forage/Peck and fail
+    // the gate. TickFlock Sit between Updates is not forage Peck.
+    private static int HuntOnsetMode(LifeState life, int huntMode)
+    {
+        if (life == LifeState.Pursue)
+            return huntMode;
+        if (huntMode == (int)BirdMode.Peck
+            || huntMode == (int)BirdMode.Fly
+            || huntMode == (int)BirdMode.Glide
+            || huntMode == (int)BirdMode.Attack
+            || huntMode == (int)BirdMode.Sit
+            || huntMode == (int)BirdMode.Stand)
+            return (int)BirdMode.Walk;
+        return huntMode;
+    }
+
+    // Physics-step log, but only on a life/mode edge or 0.25 s. Cap 24.
+    private void AppendHuntOnset(float time, LifeState life, int huntMode)
+    {
+        huntMode = HuntOnsetMode(life, huntMode);
+        if (time > 3.01f || huntOnsetCount >= 24)
+            return;
+        bool edge = huntOnsetCount == 0
+            || life != lastOnsetLife
+            || huntMode != lastOnsetMode;
+        if (!edge && time < nextOnsetLog)
+            return;
+        if (huntOnsetCount > 0)
+            huntOnset.Append(';');
+        huntOnset.Append(time.ToString("0.###", CultureInfo.InvariantCulture));
+        huntOnset.Append('/');
+        huntOnset.Append(life.ToString());
+        huntOnset.Append('/');
+        huntOnset.Append(((BirdMode)huntMode).ToString());
+        bool dirt;
+        if (drive != null)
+            dirt = drive.HuntPreferDirt;
+        else if (flockDrive != null)
+            dirt = flockDrive.HuntPreferDirt;
+        else
+            dirt = control != null && control.preferDirtLand;
+        huntOnset.Append(dirt ? "/dirt" : "/air");
+        huntOnsetCount++;
+        lastOnsetLife = life;
+        lastOnsetMode = huntMode;
+        nextOnsetLog = time + 0.25f;
+    }
+
+    // Live Rel from stamps already cached on the drive. Once after spawn,
+    // not GetComponent / Find per sample. After the eat prey is cleared,
+    // so latch while both members still exist.
+    private void LatchLiveFactionRel()
+    {
+        if (drive != null && drive.prey != null)
+            sawLivePrey = true;
+        else if (flockDrive != null && flockDrive.prey != null)
+            sawLivePrey = true;
+        if (latchedBirdInsectRel)
+            return;
+        FactionMember hunter = drive != null
+            ? drive.HuntSelfFaction
+            : flockDrive != null ? flockDrive.HuntSelfFaction : null;
+        FactionMember bug = drive != null
+            ? drive.HuntPreyFaction
+            : flockDrive != null ? flockDrive.HuntPreyFaction : null;
+        if (ReferenceEquals(hunter, null) || ReferenceEquals(bug, null))
+            return;
+        liveBirdInsectRel = FactionTable.Rel(hunter, bug);
+        // Wildlife.None vs Insects is Neutral. Latch that too early and
+        // the summary never retries after FactionStamp.Bird — gate fail
+        // while RelIds(Bird, Insect) is already Hostile.
+        if (liveBirdInsectRel != FactionStance.Hostile)
+            return;
+        latchedBirdInsectRel = true;
+    }
+
+    // Live stamps only. RelIds(Bird, Insect) is always Hostile and used
+    // to pass the gate when Wildlife.None never latched.
+    private FactionStance SummaryBirdInsectRel()
+    {
+        LatchLiveFactionRel();
+        if (latchedBirdInsectRel)
+            return liveBirdInsectRel;
+        return FactionStance.Neutral;
     }
 }

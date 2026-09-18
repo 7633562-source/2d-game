@@ -1,9 +1,9 @@
-﻿# Перебор множителя моментов мышц: ищем, при какой силе человек стоит дольше всего.
+﻿# Sweep the muscle torque multiplier: find the force that stands longest.
 #
 #   .\sweep-muscle.ps1
 #   .\sweep-muscle.ps1 -Values 0.05,0.1,0.2 -Duration 20
 #
-# Плеер должен быть уже собран (см. run-trial.ps1 -Rebuild).
+# The player must already be built (see run-trial.ps1 -Rebuild).
 
 param(
     [double[]]$Values = @(0.05, 0.08, 0.10, 0.15, 0.20, 0.30, 0.50),
@@ -27,7 +27,7 @@ $fresh = Test-TrialBuildFreshness -Paths $paths
 $builtFingerprint = [string]$fresh.Fingerprint
 
 if (-not (Test-Path -LiteralPath $paths.ExePath)) {
-    throw "Плеер не собран: $($paths.ExePath). Запустите run-trial.ps1 -Rebuild."
+    throw "Player is not built: $($paths.ExePath). Run run-trial.ps1 -Rebuild."
 }
 
 New-Item -ItemType Directory -Force -Path $paths.TrialFolder | Out-Null
@@ -56,7 +56,7 @@ foreach ($value in $Values) {
 
     $jsonPath = Join-Path $paths.TrialFolder ($label + ".json")
     if (-not (Test-Path -LiteralPath $jsonPath)) {
-        Write-Host " нет сводки" -ForegroundColor Red
+        Write-Host " no summary" -ForegroundColor Red
         continue
     }
 
@@ -70,7 +70,7 @@ foreach ($value in $Values) {
         RmsCoM    = [math]::Round($summary.rmsComOffset, 3)
         Saturated = [math]::Round($summary.muscleSaturationFraction, 2)
     }
-    Write-Host " простоял $([math]::Round($summary.survivedSeconds,2)) с" -ForegroundColor Cyan
+    Write-Host " stood $([math]::Round($summary.survivedSeconds,2)) s" -ForegroundColor Cyan
 }
 
 $results | Sort-Object -Property Survived -Descending | Format-Table -AutoSize

@@ -48,8 +48,9 @@ not `HingeJoint2D.useMotor`.
 
 # Code
 
-New comments in English. Do not mass-rewrite existing C# comments:
-explain why and the physical meaning, not restate the line.
+All comments MUST be in English (see `docs-english.mdc`). Translate leftover
+Russian comments; do not keep them “because they are old”. Do not mass-rewrite
+English comments: explain why and the physical meaning, not restate the line.
 
 Look up joints, muscles, and `Transform` once in `Awake`, not
 every frame through `transform.Find` or `GetComponents`.

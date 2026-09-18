@@ -3,29 +3,40 @@ using UnityEngine;
 
 public enum BirdRig
 {
-    // Стенд: суставы и мышцы, как проверка стойки.
+    // Stand: joints and muscles, as a stance check.
     Ragdoll = 0,
-    // Сцена: одно тело. Крылья и лапы — картинка. Десятки особей.
+    // Scene: one body. Wings and feet are a picture. Tens of individuals.
     Flock = 1
 }
 
-// Species recipe on the same Bird body. Crow is the flying canon.
+// Species recipe. Spawners may still AddComponent<Bird>() and set kind;
+// Crow / Chicken / Woodpecker override the same hooks when attached as themselves.
 public enum BirdKind
 {
     Crow = 0,
-    Chicken = 1
+    Chicken = 1,
+    Woodpecker = 2
 }
 
-// Сборка сегментарной птицы. Слой тела птицы, не человека.
-// Сегмент берём HumanSegment: это общий 2D-примитив (коробка + Visual),
-// анатомию человека он не содержит. Мышцы и трение — те же актюаторы.
+// How the brain forage loop is built. Body data, not a force.
+public enum BirdForageStyle
+{
+    CrowCruise = 0,
+    ChickenGround = 1,
+    WoodpeckerDrum = 2
+}
+
+// Build a segmental bird. Bird body layer, not the human.
+// The segment is HumanSegment: a shared 2D primitive (box + Visual);
+// it does not contain human anatomy. Muscles and friction are the same actuators.
+// Species layout, flight, and control live on Crow / Chicken / Woodpecker.
 public class Bird : MonoBehaviour
 {
-    [Header("Общая масса, кг")]
+    [Header("Total mass, kg")]
     public float totalMass = 0.5f;
-    [Tooltip("Crow — полёт. Chicken — земля, короткий прыжок.")]
+    [Tooltip("Crow — flight. Chicken — ground, a short hop.")]
     public BirdKind kind = BirdKind.Crow;
-    [Tooltip("Flock — одно тело для стаи. Ragdoll — только стенд стойки.")]
+    [Tooltip("Flock — one body for the flock. Ragdoll — stance stand only.")]
     public BirdRig rig = BirdRig.Flock;
 
     public BirdSensors sensors;
@@ -37,6 +48,8 @@ public class Bird : MonoBehaviour
     public Transform neckVisual;
     public Transform beakVisual;
     public BoxCollider2D beakCollider;
+    public BoxCollider2D bodyCollider;
+    public BoxCollider2D headCollider;
     public BoxCollider2D perchCollider;
     public Transform leftWingRoot;
     public Transform rightWingRoot;
@@ -44,7 +57,53 @@ public class Bird : MonoBehaviour
     public Transform rightUlna;
     public Transform leftThigh;
     public Transform rightThigh;
-    // Только картинка. Scale.x = facing; Rigidbody2D и perch на корпусе не трогаем.
+    public Transform leftShank;
+    public Transform rightShank;
+    public Transform leftFoot;
+    public Transform rightFoot;
+    public Transform tailVisual;
+    // Sit blink / night roost. Build only; LateUpdate must not Find.
+    public SpriteRenderer eyeRenderer;
+    // Rest pupil on Head Visual. Walk / Peck forage, Sit preen / scratch
+    // drop, Sit idleLook glance, Walk hop-turn drop, and Sit hop-turn
+    // drop from here.
+    public Vector3 eyeRestLocal;
+    // Attack stoop nictitating cover. Build only; LateUpdate must not Find.
+    public SpriteRenderer nictRenderer;
+    // Dirt Walk / Peck forage / Sit preen / Sit scratch / Walk
+    // hop-turn / Sit hop-turn lid. Child of the pupil so the drop
+    // rides it.
+    public SpriteRenderer lidRenderer;
+    // Peck swallow gullet. Child of Neck Visual; LateUpdate must not Find.
+    public SpriteRenderer cropRenderer;
+    public Vector3 cropRestLocal;
+    public Vector2 cropRestSize;
+    // Alarm/Call shout / Attack stoop tongue. Child of Beak Visual;
+    // LateUpdate must not Find.
+    public SpriteRenderer tongueRenderer;
+    public Vector3 tongueRestLocal;
+    public Vector2 tongueRestSize;
+    // Hen wattle on Head Visual. Chicken only; LateUpdate must not Find.
+    public SpriteRenderer wattleRenderer;
+    public Vector3 wattleRestLocal;
+    public Vector2 wattleRestSize;
+    // Hen comb on Head Visual. Chicken only; LateUpdate must not Find.
+    // Wattle hang is cryWattleAmp / stoopWattleAmp / walkWattleAmp /
+    // walkTurnWattleAmp / sitLookWattleAmp / sitPreenWattleAmp /
+    // sitScratchWattleAmp / sitTurnWattleAmp / landSettleWattleAmp /
+    // peckWattleAmp / takeoffWattleAmp / landWattleAmp /
+    // alarmLookWattleAmp;
+    // comb nod is cryCombAmp / alarmLookCombAmp /
+    // walkCombAmp / walkTurnCombAmp / sitTurnCombAmp / sitLookCombAmp /
+    // sitPreenCombAmp / sitScratchCombAmp / landSettleCombAmp /
+    // peckCombAmp / takeoffCombAmp / landCombAmp.
+    public SpriteRenderer combFrontRenderer;
+    public Vector3 combFrontRestLocal;
+    public Vector2 combFrontRestSize;
+    public SpriteRenderer combBackRenderer;
+    public Vector3 combBackRestLocal;
+    public Vector2 combBackRestSize;
+    // Picture only. Scale.x = facing; do not touch Rigidbody2D or the perch on the body.
     public Transform lookRoot;
 
     // Layout guide: one semi-transparent box per collider. No Crow/Chicken PNG.
@@ -52,6 +111,40 @@ public class Bird : MonoBehaviour
     private static readonly Color NeckColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
     private static readonly Color HeadColor = new Color(1f, 1f, 0f, 0.5f);
     private static readonly Color BeakColor = new Color(1f, 0.55f, 0.1f, 0.5f);
+    // Hen mark. Crow/woodpecker stay a yellow box; without this the
+    // Chicken scene reads as a fat crow. Picture only — no collider.
+    private static readonly Color CombColor = new Color(0.82f, 0.12f, 0.10f, 0.92f);
+    private static readonly Color WattleColor = new Color(0.70f, 0.08f, 0.08f, 0.88f);
+    // Side-view pupil on Head Visual. Without this idleLook is a blank box.
+    private static readonly Color EyeColor = new Color(0.08f, 0.07f, 0.06f, 0.95f);
+    // Pale nictitating cover over the pupil. Attack stoop only.
+    private static readonly Color NictColor = new Color(0.90f, 0.88f, 0.82f, 0.90f);
+    // Head-colored lid over the pupil. Walk forage squint, not the nict.
+    private static readonly Color LidColor = new Color(0.55f, 0.48f, 0.08f, 0.92f);
+    // Warmer gullet on Neck Visual. Peck swallow / Alarm shout /
+    // Attack stoop crop — not the hen wattle.
+    private static readonly Color CropColor = new Color(0.62f, 0.38f, 0.32f, 0.82f);
+    // Pink tongue in the gape. Alarm/Call shout (`cryTongueAmp`),
+    // Attack stoop (`stoopTongueAmp`), and Fly/Glide dirt swoop
+    // (`swoopTongueAmp`) — not Peck grab, not the crop,
+    // not the hen wattle (shout swing is cryWattleAmp, stoop hang
+    // is stoopWattleAmp, Walk hop is walkWattleAmp, Sit look-down
+    // is sitLookWattleAmp, Sit preen nibble is sitPreenWattleAmp,
+    // Sit scratch kick is sitScratchWattleAmp, Sit hop-turn is
+    // sitTurnWattleAmp, Walk hop-turn is walkTurnWattleAmp,
+    // Sit land-ruffle is landSettleWattleAmp, Peck swallow is
+    // peckWattleAmp, Fly first-air is takeoffWattleAmp, Fly/Glide
+    // flare is landWattleAmp, Alarm glance is alarmLookWattleAmp),
+    // not the hen
+    // comb (shout nod is cryCombAmp, Walk hop nod is walkCombAmp,
+    // Walk hop-turn nod is walkTurnCombAmp, Sit hop-turn nod is
+    // sitTurnCombAmp, Sit look-down nod is sitLookCombAmp,
+    // Sit preen nibble nod is sitPreenCombAmp, Sit scratch kick
+    // nod is sitScratchCombAmp, Sit land-ruffle nod is
+    // landSettleCombAmp, Peck swallow nod is peckCombAmp,
+    // Fly first-air nod is takeoffCombAmp, Fly/Glide flare nod
+    // is landCombAmp, Alarm glance nod is alarmLookCombAmp).
+    private static readonly Color TongueColor = new Color(0.82f, 0.42f, 0.48f, 0.90f);
     private static readonly Color TailColor = new Color(0.1f, 0.75f, 0.85f, 0.5f);
     private static readonly Color HumerusNear = new Color(0f, 0.6f, 0f, 0.5f);
     private static readonly Color HumerusFar = new Color(0.4f, 0.8f, 0.2f, 0.5f);
@@ -66,27 +159,14 @@ public class Bird : MonoBehaviour
     private static readonly Color FootNear = new Color(0.4f, 0f, 0f, 0.5f);
     private static readonly Color FootFar = new Color(0.8f, 0.3f, 0.3f, 0.5f);
 
-    private static PhysicsMaterial2D flockFootMaterial;
-
-    private static PhysicsMaterial2D FlockFootMaterial()
-    {
-        if (flockFootMaterial == null)
-        {
-            flockFootMaterial = new PhysicsMaterial2D("BirdFlockFoot");
-            flockFootMaterial.friction = 0.22f;
-            flockFootMaterial.bounciness = 0f;
-        }
-        return flockFootMaterial;
-    }
-
-    [Header("Ракурс: вид почти в профиль")]
+    [Header("View: almost in profile")]
     public float viewAngleDegrees = 80f;
-    [Tooltip("Не входит в якоря суставов: иначе шаг вперёд, не ракурс.")]
+    [Tooltip("Does not enter joint anchors: otherwise it is a step forward, not a viewpoint.")]
     public float hipHalfSpacing = 0.012f;
     public float visualSideOffset = 0.028f;
     public float jointMarkerDiameter = 0.018f;
 
-    [Header("Размеры сегментов, м")]
+    [Header("Segment sizes, m")]
     public Vector2 bodySize = new Vector2(0.14f, 0.06f);
     public Vector2 neckSize = new Vector2(0.028f, 0.035f);
     public Vector2 headSize = new Vector2(0.042f, 0.038f);
@@ -99,18 +179,18 @@ public class Bird : MonoBehaviour
     public Vector2 shankSize = new Vector2(0.018f, 0.055f);
     public Vector2 footSize = new Vector2(0.05f, 0.022f);
 
-    [Header("Якоря на корпусе")]
+    [Header("Anchors on the body")]
     public float shoulderForward = 0.02f;
     public float hipBack = 0f;
     public float ankleHeelOffset = 0.012f;
 
-    [Header("Минимальная инерция сегмента, кг·м²")]
-    [Tooltip("2D-срез лапы даёт I ~ 10⁻⁶, и шаг 5 мс на таком I либо расходится, либо SPD душит момент.")]
+    [Header("Minimum segment inertia, kg·m²")]
+    [Tooltip("A 2D limb slice gives I ~ 10⁻⁶, and a 5 ms step on that I either diverges or SPD chokes the torque.")]
     public float minLimbInertia = 0.001f;
-    [Tooltip("Слегка тяжелее 2D-среза, чтобы жест взмаха не крутил грудку.")]
+    [Tooltip("Slightly heavier than the 2D slice so the flap gesture does not spin the breast.")]
     public float minBodyInertia = 0.015f;
 
-    [Header("Трение в суставах")]
+    [Header("Joint friction")]
     public float neckFriction = 0.002f;
     public float beakFriction = 0.0012f;
     public float tailFriction = 0.012f;
@@ -121,7 +201,7 @@ public class Bird : MonoBehaviour
     public float kneeFriction = 0.015f;
     public float ankleFriction = 0.008f;
 
-    [Header("Максимальные моменты мышц, Н·м")]
+    [Header("Maximum muscle torques, N·m")]
     public float neckMuscleTorque = 0.12f;
     public float beakMuscleTorque = 0.06f;
     public float tailMuscleTorque = 0.18f;
@@ -163,7 +243,7 @@ public class Bird : MonoBehaviour
     private const int RIGHT_WING_ULNA = 8;
     private const int RIGHT_WING_HAND = 9;
 
-    // Стопы на поверхности groundY: высота корня = цепочка ноги + полкорпуса.
+    // Feet on the groundY surface: root height = the leg chain + half the body.
     public static float StandingRootY(float groundY = -2f)
     {
         return groundY + 0.022f + 0.055f + 0.040f + 0.060f * 0.5f;
@@ -180,7 +260,7 @@ public class Bird : MonoBehaviour
         return owner != null ? owner.StandingRootOffset(groundY) : StandingRootY(groundY);
     }
 
-    // Spawn before the instance exists. Keep in sync with ApplyKind sizes.
+    // Spawn before the instance exists. Keep in sync with species layout sizes.
     public static float KindStandingRootY(BirdKind recipe, float groundY = -2f)
     {
         if (recipe == BirdKind.Chicken)
@@ -196,67 +276,120 @@ public class Bird : MonoBehaviour
             case "chicken":
             case "hen":
                 return BirdKind.Chicken;
+            case "woodpecker":
+            case "pecker":
+                return BirdKind.Woodpecker;
             default:
                 return BirdKind.Crow;
         }
     }
 
-    // Crow numbers are the flying canon. Chicken is heavier, short-winged.
+    // Prefer the derived component when the caller can choose the type.
+    // GameProcess still AddComponent<Bird>() + ApplyKind; that path stays.
+    public static Bird Attach(GameObject host, BirdKind recipe, BirdRig build = BirdRig.Flock)
+    {
+        if (host == null)
+            return null;
+        Bird bird;
+        switch (recipe)
+        {
+            case BirdKind.Chicken:
+                bird = host.AddComponent<Chicken>();
+                break;
+            case BirdKind.Woodpecker:
+                bird = host.AddComponent<Woodpecker>();
+                break;
+            default:
+                bird = host.AddComponent<Crow>();
+                break;
+        }
+
+        bird.rig = build;
+        bird.ApplyKind(recipe);
+        return bird;
+    }
+
+    public virtual bool WantsTreeSeat => kind != BirdKind.Chicken;
+    public virtual bool ScalesFlapWithAirspeed => kind == BirdKind.Crow;
+    public virtual bool UsesDirtLandingFlap => kind == BirdKind.Crow;
+    public virtual BirdMode FleeBodyMode => kind == BirdKind.Chicken ? BirdMode.Walk : BirdMode.Fly;
+    public virtual BirdForageStyle ForageStyle
+    {
+        get
+        {
+            if (kind == BirdKind.Chicken) return BirdForageStyle.ChickenGround;
+            if (kind == BirdKind.Woodpecker) return BirdForageStyle.WoodpeckerDrum;
+            return BirdForageStyle.CrowCruise;
+        }
+    }
+    public virtual float HitHealth => kind == BirdKind.Chicken ? 8f : 10f;
+    public virtual float PeckDamage => kind == BirdKind.Chicken ? 0.35f : (kind == BirdKind.Woodpecker ? 0.7f : 0.5f);
+
+    // Crow numbers are the flying canon. Derived classes override the writes.
     public void ApplyKind(BirdKind recipe)
     {
         kind = recipe;
-        totalMass = 0.5f;
-        bodySize = new Vector2(0.14f, 0.06f);
-        neckSize = new Vector2(0.028f, 0.035f);
-        headSize = new Vector2(0.042f, 0.038f);
-        beakSize = new Vector2(0.032f, 0.012f);
-        tailSize = new Vector2(0.09f, 0.022f);
-        wingHumerusSize = new Vector2(0.032f, 0.055f);
-        wingUlnaSize = new Vector2(0.040f, 0.070f);
-        wingHandSize = new Vector2(0.070f, 0.110f);
-        thighSize = new Vector2(0.022f, 0.040f);
-        shankSize = new Vector2(0.018f, 0.055f);
-        footSize = new Vector2(0.05f, 0.022f);
-        if (recipe != BirdKind.Chicken) return;
+        ApplySpeciesLayout();
+    }
 
-        totalMass = 1.8f;
-        bodySize = new Vector2(0.18f, 0.10f);
-        neckSize = new Vector2(0.024f, 0.048f);
-        headSize = new Vector2(0.040f, 0.036f);
-        beakSize = new Vector2(0.046f, 0.016f);
-        tailSize = new Vector2(0.055f, 0.040f);
-        wingHumerusSize = new Vector2(0.028f, 0.040f);
-        wingUlnaSize = new Vector2(0.030f, 0.048f);
-        wingHandSize = new Vector2(0.042f, 0.058f);
-        thighSize = new Vector2(0.030f, 0.050f);
-        shankSize = new Vector2(0.022f, 0.060f);
-        footSize = new Vector2(0.055f, 0.024f);
-        minBodyInertia = 0.028f;
+    protected virtual void ApplySpeciesLayout()
+    {
+        switch (kind)
+        {
+            case BirdKind.Chicken:
+                Chicken.WriteLayout(this);
+                break;
+            case BirdKind.Woodpecker:
+                Woodpecker.WriteLayout(this);
+                break;
+            default:
+                Crow.WriteLayout(this);
+                break;
+        }
     }
 
     private void ApplyFlightKind()
     {
         if (flight == null) return;
-        if (kind != BirdKind.Chicken) return;
-        // < 1: a hop, not a cruise. Brain should prefer Walk/Sit.
-        flight.hoverMean = 0.55f;
-        flight.forwardThrust = 0.12f;
-        flight.glideLift = 0.32f;
-        flight.pitchTarget = 4f;
-        flight.flarePitch = 14f;
-        flight.verticalDamping = 5.5f;
+        ApplySpeciesFlight();
+    }
+
+    protected virtual void ApplySpeciesFlight()
+    {
+        switch (kind)
+        {
+            case BirdKind.Chicken:
+                Chicken.WriteFlight(flight);
+                break;
+            case BirdKind.Woodpecker:
+                Woodpecker.WriteFlight(flight);
+                break;
+            default:
+                Crow.WriteFlight(flight);
+                break;
+        }
     }
 
     private void ApplyControlKind()
     {
         if (controller == null) return;
-        if (kind != BirdKind.Chicken) return;
-        controller.flapFrequency = 4f;
-        controller.walkThrust = 1.6f;
-        controller.walkSpeed = 0.40f;
-        controller.takeoffDelay = 0f;
-        controller.sitHipAngle = 18f;
-        controller.mode = BirdMode.Sit;
+        ApplySpeciesControl();
+    }
+
+    protected virtual void ApplySpeciesControl()
+    {
+        switch (kind)
+        {
+            case BirdKind.Chicken:
+                Chicken.WriteControl(controller);
+                break;
+            case BirdKind.Woodpecker:
+                Woodpecker.WriteControl(controller);
+                break;
+            default:
+                Crow.WriteControl(controller);
+                break;
+        }
     }
 
     public void BuildBird()
@@ -273,6 +406,7 @@ public class Bird : MonoBehaviour
 
         HumanSegment body = CreateSegment("Body", bodySize, BODY_MASS, BodyColor, BODY_ORDER);
         body.transform.localPosition = Vector3.zero;
+        bodyCollider = body.collider;
         AddBodyAero(body);
         AddBirdFlight(body);
         ApplyFlightKind();
@@ -286,6 +420,7 @@ public class Bird : MonoBehaviour
             -40f, 50f);
         AddFriction(neck, neckFriction, 0.4f);
         AddMuscles(neck, neckMuscleTorque);
+        neckVisual = neck.transform;
 
         HumanSegment head = CreateSegment("Head", headSize, HEAD_MASS, HeadColor, HEAD_ORDER);
         head.transform.localPosition = new Vector3(
@@ -299,7 +434,13 @@ public class Bird : MonoBehaviour
         AddFriction(head, neckFriction, 0.4f);
         AddMuscles(head, neckMuscleTorque);
         headSegment = head;
+        headCollider = head.collider;
         AttachRagdollBeak(head);
+        AttachHenMarks(head.transform, head.visual);
+        AttachEye(head.transform, head.visual);
+        AttachCrop(neck.transform, neck.visual);
+        AttachTongue(beakSegment != null ? beakSegment.transform : null,
+            beakSegment != null ? beakSegment.visual : null);
 
         HumanSegment tail = CreateSegment("Tail", tailSize, TAIL_MASS, TailColor, TAIL_ORDER);
         float bodyBack = -bodySize.x * 0.5f;
@@ -326,6 +467,7 @@ public class Bird : MonoBehaviour
             ThighFar, ShankFar, FootFar);
 
         DisableCollisionsBetweenSegments();
+        StampContactLayers();
 
         sensors = gameObject.AddComponent<BirdSensors>();
         sensors.Initialize();
@@ -368,15 +510,16 @@ public class Bird : MonoBehaviour
         renderer.sortingOrder = 100;
     }
 
-    // Одно тело: масса и коллайдер на корпусе, остальное — дети без физики.
+    // One body: mass and collider on the torso; the rest are children without physics.
     private void BuildFlock()
     {
         HumanSegment body = CreateSegment("Body", bodySize, 1f, BodyColor, BODY_ORDER);
         body.transform.localPosition = Vector3.zero;
+        bodyCollider = body.collider;
         if (body.rb != null)
         {
-            // Headless сравнивает CSV: без интерполяции. В Play — один корпус,
-            // Interpolate дешевле, чем 16 тел, и кадр 60 Гц не дёргает.
+            // Headless compares CSV: no interpolation. In Play there is one body;
+            // Interpolate is cheaper than 16 bodies, and the 60 Hz frame does not jitter.
             body.rb.interpolation = HeadlessTrial.Active
                 ? RigidbodyInterpolation2D.None
                 : RigidbodyInterpolation2D.Interpolate;
@@ -384,18 +527,23 @@ public class Bird : MonoBehaviour
             body.rb.sleepMode = RigidbodySleepMode2D.StartAwake;
         }
 
+        // Perch is a trigger volume on BirdLimb: it finds BirdPerch pads and
+        // dirt, it does not generate solver contacts. Wings and legs are look.
         float legH = thighSize.y + shankSize.y + footSize.y;
-        perchCollider = body.gameObject.AddComponent<BoxCollider2D>();
+        GameObject perchGo = new GameObject("Perch");
+        perchGo.transform.SetParent(body.transform, false);
+        perchGo.transform.localPosition = Vector3.zero;
+        perchCollider = perchGo.AddComponent<BoxCollider2D>();
         perchCollider.size = new Vector2(Mathf.Max(footSize.x, bodySize.x * 0.55f), legH);
         perchCollider.offset = new Vector2(0f, -bodySize.y * 0.5f - legH * 0.5f);
-        perchCollider.sharedMaterial = FlockFootMaterial();
+        perchCollider.isTrigger = true;
 
         AddBodyAero(body);
         AddBirdFlight(body);
         ApplyFlightKind();
 
-        // Разворот — зеркало Look. Корпус с коллайдером всегда scale 1:
-        // иначе perch уезжает и PhysX 2D ломает нормали.
+        // Turn is a Look mirror. The collider body always stays at scale 1:
+        // otherwise the perch slides and PhysX 2D breaks the normals.
         GameObject lookObject = new GameObject("Look");
         lookRoot = lookObject.transform;
         lookRoot.SetParent(body.transform, false);
@@ -411,10 +559,18 @@ public class Bird : MonoBehaviour
         neckVisual = neck;
         headVisual = head;
         headSegment = null;
+        BoxCollider2D headCol = head.gameObject.AddComponent<BoxCollider2D>();
+        headCol.size = headSize;
+        headCollider = headCol;
         AttachFlockBeak(head);
+        AttachHenMarks(head);
+        AttachEye(head);
+        AttachCrop(neck);
+        AttachTongue(beakVisual);
 
         Transform tail = CreateVisualPart("Tail", tailSize, TailColor, TAIL_ORDER, lookRoot);
         tail.localPosition = new Vector3(-bodySize.x * 0.5f - tailSize.x * 0.5f, 0f, 0f);
+        tailVisual = tail;
 
         rightWingRoot = CreateVisualWing(1f, lookRoot);
         leftWingRoot = CreateVisualWing(-1f, lookRoot);
@@ -423,6 +579,8 @@ public class Bird : MonoBehaviour
 
         rightThigh = CreateVisualLeg(1f, lookRoot);
         leftThigh = CreateVisualLeg(-1f, lookRoot);
+
+        StampContactLayers();
 
         sensors = gameObject.AddComponent<BirdSensors>();
         sensors.Initialize();
@@ -433,14 +591,14 @@ public class Bird : MonoBehaviour
         AttachHit();
     }
 
-    // Картинка смотрит в сторону полёта. Физика корпуса не масштабируется.
+    // The picture faces the flight direction. Body physics is not scaled.
     public void ApplyLookFacing(float sign)
     {
         if (lookRoot == null) return;
         lookRoot.localScale = new Vector3(sign >= 0f ? 1f : -1f, 1f, 1f);
     }
 
-    // Flock: спрайт как у сегмента, без HumanSegment на каждом пере.
+    // Flock: a sprite as on a segment, without HumanSegment on every feather.
     private Transform CreateVisualPart(
         string name, Vector2 size, Color color, int order, Transform parent)
     {
@@ -502,6 +660,16 @@ public class Bird : MonoBehaviour
         foot.localPosition = new Vector3(-ankleHeelOffset + footSize.x * 0.5f, -shankSize.y, 0f);
         OffsetVisual(foot, visualShift, -footSize.y * 0.5f);
 
+        if (direction > 0f)
+        {
+            rightShank = shank;
+            rightFoot = foot;
+        }
+        else
+        {
+            leftShank = shank;
+            leftFoot = foot;
+        }
         return thigh;
     }
 
@@ -514,8 +682,8 @@ public class Bird : MonoBehaviour
         Vector2 shoulderRoot = (Vector2)body.transform.localPosition
             + new Vector2(shoulderForward, shoulderY);
 
-        // Сложено вдоль спины: кость смотрит в −X. jointAngle ≈ 90° при
-        // корпусе 0, см. соглашение jointAngle = родитель − свой.
+        // Folded along the back: the bone points toward −X. jointAngle ≈ 90° when
+        // the body is at 0; see the convention jointAngle = parent − self.
         const float foldDeg = -90f;
         Quaternion fold = Quaternion.Euler(0f, 0f, foldDeg);
         Vector2 tipDir = new Vector2(-1f, 0f);
@@ -564,7 +732,7 @@ public class Bird : MonoBehaviour
     {
         float visualShift = direction * visualSideOffset;
         float hipY = -bodySize.y * 0.5f;
-        // Разнос ног только на Visual: ось X — вперёд, не влево-вправо.
+        // Leg spread is only on Visual: the X axis is forward, not left-right.
         Vector2 hipRoot = (Vector2)body.transform.localPosition + new Vector2(-hipBack, hipY);
 
         HumanSegment thigh = CreateSegment(sideName + "Thigh", thighSize, THIGH_MASS, thighColor, thighOrder, HumanVisualShape.Box, true);
@@ -580,7 +748,7 @@ public class Bird : MonoBehaviour
         HumanSegment shank = CreateSegment(sideName + "Shank", shankSize, SHANK_MASS, shankColor, shankOrder, HumanVisualShape.Box, true);
         shank.transform.localPosition = new Vector3(hipRoot.x, hipRoot.y - thighSize.y - shankSize.y * 0.5f, 0f);
         shank.SetVisualOffset(visualShift);
-        // Плюс уводит низ голени назад — как колено человека после разворота.
+        // Plus takes the lower shank backward — as the human knee after the flip.
         shank.ConnectTo(thigh,
             new Vector2(0f, shankSize.y * 0.5f),
             new Vector2(0f, -thighSize.y * 0.5f),
@@ -624,7 +792,7 @@ public class Bird : MonoBehaviour
             segment.rb.sleepMode = rig == BirdRig.Ragdoll
                 ? RigidbodySleepMode2D.NeverSleep
                 : RigidbodySleepMode2D.StartAwake;
-            // Ноги и крылья: 2D-срез даёт I ~ 10⁻⁶, SPD иначе душит момент.
+            // Legs and wings: a 2D slice gives I ~ 10⁻⁶; otherwise SPD chokes the torque.
             if (floorInertia && minLimbInertia > 0f && segment.rb.inertia < minLimbInertia)
                 segment.rb.inertia = minLimbInertia;
             if (name == "Body" && minBodyInertia > 0f && segment.rb.inertia < minBodyInertia)
@@ -642,7 +810,7 @@ public class Bird : MonoBehaviour
     {
         BodyAero aero = body.gameObject.AddComponent<BodyAero>();
         aero.frontalArea = bodySize.x * bodySize.y * 0.85f;
-        // Силу прикладывает BirdFlight: один FixedUpdate на особь, не два.
+        // BirdFlight applies the force: one FixedUpdate per individual, not two.
         aero.generateForce = false;
         aero.enabled = false;
     }
@@ -726,18 +894,201 @@ public class Bird : MonoBehaviour
         beakSegment = null;
     }
 
+    // Hen comb + wattle on Head Visual. Comb rides Peck dip and Walk
+    // bob already on the head, nods on Alarm/Call shout
+    // (`cryCombAmp`), nods on hen Walk hop (`walkCombAmp`),
+    // nods on Walk hop-turn (`walkTurnCombAmp`), nods on
+    // Sit hop-turn (`sitTurnCombAmp`), nods on Sit
+    // look-down (`sitLookCombAmp`), nods on Sit
+    // preen nibble (`sitPreenCombAmp`), nods on Sit
+    // scratch kick (`sitScratchCombAmp`), nods on Sit
+    // land-ruffle (`landSettleCombAmp`), nods on Peck
+    // swallow (`peckCombAmp`), nods on Fly first-air
+    // (`takeoffCombAmp`), nods on Fly/Glide flare
+    // (`landCombAmp`), and nods on Alarm glance
+    // (`alarmLookCombAmp`) — a glued crown over a live
+    // plant / toss / climb / flare / glance wattle read as a statue comb.
+    // Wattle hangs on shout (`cryWattleAmp`), on
+    // Attack stoop (`stoopWattleAmp`), on hen Walk hop
+    // (`walkWattleAmp`), on Sit look-down (`sitLookWattleAmp`), on
+    // Sit preen nibble (`sitPreenWattleAmp`), on Sit scratch
+    // kick (`sitScratchWattleAmp`), on Sit hop-turn
+    // (`sitTurnWattleAmp`), on Walk hop-turn
+    // (`walkTurnWattleAmp`), on Sit land-ruffle
+    // (`landSettleWattleAmp`), on Peck swallow
+    // (`peckWattleAmp`), on Fly first-air
+    // (`takeoffWattleAmp`), on Fly/Glide flare
+    // (`landWattleAmp`), and on Alarm glance
+    // (`alarmLookWattleAmp`).
+    // Crow stays unmarked.
+    private void AttachHenMarks(Transform headBone)
+    {
+        if (headBone == null)
+            return;
+        Transform vis = headBone.Find("Visual");
+        AttachHenMarks(headBone, vis);
+    }
+
+    private void AttachEye(Transform headBone)
+    {
+        if (headBone == null)
+            return;
+        Transform vis = headBone.Find("Visual");
+        AttachEye(headBone, vis);
+    }
+
+    private void AttachCrop(Transform neckBone)
+    {
+        if (neckBone == null)
+            return;
+        Transform vis = neckBone.Find("Visual");
+        AttachCrop(neckBone, vis);
+    }
+
+    private void AttachTongue(Transform beakBone)
+    {
+        if (beakBone == null)
+            return;
+        Transform vis = beakBone.Find("Visual");
+        AttachTongue(beakBone, vis);
+    }
+
+    private void AttachHenMarks(Transform headBone, Transform headVis)
+    {
+        if (kind != BirdKind.Chicken)
+            return;
+        Transform parent = headVis != null ? headVis : headBone;
+        if (parent == null)
+            return;
+        float hy = headSize.y;
+        float hx = headSize.x;
+        Vector3 combFrontPos = new Vector3(hx * 0.08f, hy * 0.52f, 0f);
+        Vector2 combFrontSize = new Vector2(0.016f, 0.024f);
+        combFrontRestLocal = combFrontPos;
+        combFrontRestSize = combFrontSize;
+        combFrontRenderer = MakeHenMark("CombFront", parent, HEAD_ORDER + 2, CombColor,
+            combFrontSize, combFrontPos);
+        Vector3 combBackPos = new Vector3(-hx * 0.16f, hy * 0.44f, 0f);
+        Vector2 combBackSize = new Vector2(0.012f, 0.016f);
+        combBackRestLocal = combBackPos;
+        combBackRestSize = combBackSize;
+        combBackRenderer = MakeHenMark("CombBack", parent, HEAD_ORDER + 2, CombColor,
+            combBackSize, combBackPos);
+        Vector3 wattlePos = new Vector3(hx * 0.28f, -hy * 0.46f, 0f);
+        Vector2 wattleSize = new Vector2(0.012f, 0.018f);
+        wattleRestLocal = wattlePos;
+        wattleRestSize = wattleSize;
+        wattleRenderer = MakeHenMark("Wattle", parent, HEAD_ORDER + 1, WattleColor,
+            wattleSize, wattlePos);
+    }
+
+    // Dark pupil toward the beak. All kinds. Picture only — no collider.
+    private void AttachEye(Transform headBone, Transform headVis)
+    {
+        Transform parent = headVis != null ? headVis : headBone;
+        if (parent == null)
+            return;
+        float hy = headSize.y;
+        float hx = headSize.x;
+        Vector3 eyePos = new Vector3(hx * 0.22f, hy * 0.12f, 0f);
+        eyeRestLocal = eyePos;
+        eyeRenderer = MakeHenMark("Eye", parent, HEAD_ORDER + 1, EyeColor,
+            new Vector2(0.010f, 0.008f), eyePos);
+        // Same slot, one order up: covers the pupil. Starts off —
+        // Attack LateUpdate enables it. Fly/Glide keep the stare.
+        nictRenderer = MakeHenMark("Nict", parent, HEAD_ORDER + 2, NictColor,
+            new Vector2(0.012f, 0.010f), eyePos);
+        nictRenderer.enabled = false;
+        // Child of the pupil: Walk / Peck / Sit-look already move the eye.
+        // Starts off — Walk / Peck / Sit-preen / Sit-scratch / Sit
+        // hop-turn LateUpdate enables it. Sit blink / Attack nict keep
+        // their own lids. Picture only.
+        lidRenderer = MakeHenMark("Lid", eyeRenderer.transform, HEAD_ORDER + 2, LidColor,
+            new Vector2(0.011f, 0.0036f), new Vector3(0f, 0.0032f, 0f));
+        lidRenderer.enabled = false;
+    }
+
+    // Gullet on Neck Visual. Brain already wrote Peck; swallow toss
+    // used to leave a silent grey neck, so eat read as a nod with
+    // nowhere for the bite. Alarm/Call shout reuses it (`cryCropAmp`)
+    // — gape opened, the crop stayed off. Attack stoop reuses it
+    // (`stoopCropAmp`) — gape, nict, tongue, and wattle were live,
+    // the crop stayed off. Starts off — Peck / Cry / Attack
+    // LateUpdate enables it. Picture only — no collider. Woodpecker
+    // drum keeps the brace. Shout tongue is a sibling on the beak
+    // (`cryTongueAmp`) — crop left an empty orange bill. Attack
+    // stoop reuses that sibling (`stoopTongueAmp`). Comb stays
+    // glued on stoop (contrast).
+    private void AttachCrop(Transform neckBone, Transform neckVis)
+    {
+        Transform parent = neckVis != null ? neckVis : neckBone;
+        if (parent == null)
+            return;
+        float ny = neckSize.y;
+        float nx = neckSize.x;
+        Vector3 cropPos = new Vector3(nx * 0.42f, -ny * 0.22f, 0f);
+        Vector2 cropSize = new Vector2(0.010f, 0.008f);
+        cropRestLocal = cropPos;
+        cropRestSize = cropSize;
+        cropRenderer = MakeHenMark("Crop", parent, NECK_ORDER + 1, CropColor,
+            cropSize, cropPos);
+        cropRenderer.enabled = false;
+    }
+
+    // Tongue in the gape. Brain already cried Alarm/Call; crop
+    // and the 0.55 s open-bill were live, the orange box stayed
+    // empty, so Flee still flashed a mute swallow. Attack stoop
+    // reuses it (`stoopTongueAmp`) — gape opened, the bill stayed
+    // empty. Dirt swoop reuses it (`swoopTongueAmp`) — gape already
+    // parts on the dive, the orange box stayed empty. Child of
+    // Beak Visual. Starts off — Cry / Attack / swoop LateUpdate
+    // enables it. Picture only — no collider. Peck grab stays
+    // shut. Glance 8° stays glance. Attack stoop hen wattle is a
+    // sibling on Head Visual (`stoopWattleAmp`).
+    private void AttachTongue(Transform beakBone, Transform beakVis)
+    {
+        Transform parent = beakVis != null ? beakVis : beakBone;
+        if (parent == null)
+            return;
+        float by = beakSize.y;
+        float bx = beakSize.x;
+        Vector3 tonguePos = new Vector3(-bx * 0.06f, -by * 0.38f, 0f);
+        Vector2 tongueSize = new Vector2(0.010f, 0.0032f);
+        tongueRestLocal = tonguePos;
+        tongueRestSize = tongueSize;
+        tongueRenderer = MakeHenMark("Tongue", parent, BEAK_ORDER + 1, TongueColor,
+            tongueSize, tonguePos);
+        tongueRenderer.enabled = false;
+    }
+
+    private static SpriteRenderer MakeHenMark(
+        string name, Transform parent, int order, Color color, Vector2 size, Vector3 localPos)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = localPos;
+        SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = LevelArt.White();
+        sr.color = color;
+        sr.drawMode = SpriteDrawMode.Sliced;
+        sr.size = size;
+        sr.sortingOrder = order;
+        SpriteLighting.ApplyLit(sr);
+        return sr;
+    }
+
     private void AttachHit()
     {
         Damageable life = GetComponent<Damageable>();
         if (life == null)
             life = gameObject.AddComponent<Damageable>();
-        life.maxHealth = kind == BirdKind.Chicken ? 8f : 10f;
+        life.maxHealth = HitHealth;
         life.health = life.maxHealth;
 
         BeakStrike strike = GetComponent<BeakStrike>();
         if (strike == null)
             strike = gameObject.AddComponent<BeakStrike>();
-        strike.damage = kind == BirdKind.Chicken ? 0.35f : 0.5f;
+        strike.damage = PeckDamage;
         strike.Bind(beakCollider);
     }
 
@@ -754,7 +1105,8 @@ public class Bird : MonoBehaviour
         extensor = System.Array.Find(muscles, m => m.direction == -1f);
     }
 
-    // Wood is not a wall. Birds fly through the crown and sit only on BirdPerch.
+    // Wood is not a wall. Birds fly through the crown. BirdPerch pads are
+    // triggers; sit is an attach, not a solver contact.
     public static void GhostTreeWood(Bird[] birds, PlantTree tree)
     {
         if (tree == null)
@@ -793,8 +1145,14 @@ public class Bird : MonoBehaviour
             for (int w = 0; w < wood.Count; w++)
             {
                 Collider2D wc = wood[w];
-                if (wc == null || wc.GetComponent<BirdPerch>() != null)
+                if (wc == null)
                     continue;
+                BirdPerch pad = wc.GetComponent<BirdPerch>();
+                if (pad != null)
+                {
+                    pad.MakeTrigger();
+                    continue;
+                }
                 for (int b = 0; b < birdCols.Count; b++)
                 {
                     if (birdCols[b] != null)
@@ -811,6 +1169,240 @@ public class Bird : MonoBehaviour
         {
             for (int j = i + 1; j < allColliders.Length; j++)
                 Physics2D.IgnoreCollision(allColliders[i], allColliders[j], true);
+        }
+    }
+
+    // Torso and head stay on BirdCore (the only solver fixtures on a flock crow).
+    // Perch and beak are triggers on BirdLimb. Wings and legs have no collider.
+    // Layer matrix drops limb-limb and limb-core between birds; no N² pairs.
+    private void StampContactLayers()
+    {
+        BirdContactLayers.Ensure();
+        if (!BirdContactLayers.Ready)
+            return;
+
+        if (bodyCollider != null)
+            BirdContactLayers.ApplyCore(bodyCollider.gameObject);
+        if (headCollider != null)
+            BirdContactLayers.ApplyCore(headCollider.gameObject);
+
+        // Flock has four fixtures. Stamp them by field — no child scan.
+        if (rig == BirdRig.Flock)
+        {
+            if (perchCollider != null)
+                BirdContactLayers.ApplyLimb(perchCollider.gameObject);
+            if (beakCollider != null)
+                BirdContactLayers.ApplyLimb(beakCollider.gameObject);
+            return;
+        }
+
+        Collider2D[] cols = GetComponentsInChildren<Collider2D>(true);
+        for (int i = 0; i < cols.Length; i++)
+        {
+            Collider2D col = cols[i];
+            if (col == null || BirdContactLayers.IsCore(col.gameObject))
+                continue;
+            BirdContactLayers.ApplyLimb(col.gameObject);
+        }
+    }
+
+    // Pad this bird last sat on (world). BindPerches reads it for homeX/homeY.
+    public Vector2 LastSeatSlot { get; private set; }
+
+    // SeatBirds writes the root transform. After physics has run,
+    // Rigidbody2D.position can stay at the dirt spawn, so the flock
+    // piles on one pad. Write the body RB here too.
+    public void PlaceOnSlot(Vector2 slot, float face)
+    {
+        LastSeatSlot = slot;
+        float y = slot.y;
+        if (perchCollider != null)
+        {
+            float bottom = perchCollider.offset.y - perchCollider.size.y * 0.5f;
+            y = slot.y - bottom;
+        }
+        else
+            y = StandingRootOffset(slot.y);
+
+        Vector2 bodyPos = new Vector2(slot.x, y);
+        transform.position = bodyPos;
+        Rigidbody2D rb = controller != null ? controller.BodyRb : null;
+        if (rb == null)
+        {
+            Transform bodyT = transform.Find("Body");
+            rb = bodyT != null ? bodyT.GetComponent<Rigidbody2D>() : null;
+        }
+
+        if (rb != null)
+        {
+            rb.position = bodyPos;
+            rb.rotation = 0f;
+            rb.linearVelocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+        }
+
+        if (controller != null)
+        {
+            controller.mode = BirdMode.Sit;
+            controller.takeoffDelay = 0f;
+            controller.SetFacing(face);
+        }
+    }
+
+    // Sample pads across the crown X span. First-N of GetPerchSlots is
+    // twigs-first and stacks the flock on one side of the apple.
+    public static void SpreadSeat(Bird[] pack, Vector2[] slots)
+    {
+        if (pack == null || pack.Length == 0)
+            return;
+
+        int n = pack.Length;
+        int slotN = slots != null ? slots.Length : 0;
+        Vector2[] ordered = null;
+        if (slotN > 0)
+        {
+            ordered = new Vector2[slotN];
+            for (int i = 0; i < slotN; i++)
+                ordered[i] = slots[i];
+            System.Array.Sort(ordered, CompareSlotX);
+        }
+
+        for (int i = 0; i < n; i++)
+        {
+            Bird bird = pack[i];
+            if (bird == null || !bird.WantsTreeSeat)
+                continue;
+
+            Vector2 slot;
+            if (ordered != null && ordered.Length > 0)
+            {
+                if (ordered.Length >= n)
+                    slot = ordered[(int)((i + 0.5f) * ordered.Length / n)];
+                else
+                {
+                    slot = ordered[i % ordered.Length];
+                    int stack = i / ordered.Length;
+                    slot.x += (stack % 5 - 2) * 0.28f;
+                    slot.y += (stack / 5) * 0.05f;
+                }
+            }
+            else
+            {
+                Vector2 origin = (Vector2)bird.transform.position;
+                float mid = (n - 1) * 0.5f;
+                slot = new Vector2(origin.x + (i - mid) * 0.55f, origin.y + (i % 3) * 0.12f);
+            }
+
+            bird.PlaceOnSlot(slot, (i & 1) == 0 ? 1f : -1f);
+        }
+    }
+
+    private static int CompareSlotX(Vector2 a, Vector2 b)
+    {
+        int c = a.x.CompareTo(b.x);
+        return c != 0 ? c : a.y.CompareTo(b.y);
+    }
+}
+
+// Same-species bus. Drive writes, drive reads. No Find, no alloc in Update.
+// Drum: a perched woodpecker rising-edge pulse that only crows overlay. Not
+// Alarm (hens would Flee). Crows take off once, then drumStartleCool.
+// Mob: crows share one threat X so the pack dives together. Mob beats drum.
+public static class BirdSocial
+{
+    public const int Cap = 32;
+
+    public static float DrumX;
+    public static float DrumUntil;
+    public static float MobX;
+    public static float MobUntil;
+
+    private static readonly BirdDrive[] hens = new BirdDrive[Cap];
+    private static int henN;
+    private static readonly BirdDrive[] crows = new BirdDrive[Cap];
+    private static int crowN;
+
+    public static int HenCount => henN;
+    public static int CrowDriveCount => crowN;
+
+    public static void PulseDrum(float x, float now, float hold = 0.7f)
+    {
+        DrumX = x;
+        float until = now + hold;
+        if (until > DrumUntil)
+            DrumUntil = until;
+    }
+
+    public static bool Drumming(float now, out float x)
+    {
+        x = DrumX;
+        return now < DrumUntil;
+    }
+
+    public static void PulseMob(float x, float now, float hold)
+    {
+        MobX = x;
+        float until = now + hold;
+        if (until > MobUntil)
+            MobUntil = until;
+    }
+
+    public static bool Mobbing(float now, out float x)
+    {
+        x = MobX;
+        return now < MobUntil;
+    }
+
+    public static void AddHen(BirdDrive d)
+    {
+        Add(hens, ref henN, d);
+    }
+
+    public static void DropHen(BirdDrive d)
+    {
+        Drop(hens, ref henN, d);
+    }
+
+    public static void AddCrow(BirdDrive d)
+    {
+        Add(crows, ref crowN, d);
+    }
+
+    public static void DropCrow(BirdDrive d)
+    {
+        Drop(crows, ref crowN, d);
+    }
+
+    public static BirdDrive HenAt(int i)
+    {
+        if (i < 0 || i >= henN)
+            return null;
+        return hens[i];
+    }
+
+    private static void Add(BirdDrive[] list, ref int n, BirdDrive d)
+    {
+        if (d == null || n >= list.Length)
+            return;
+        for (int i = 0; i < n; i++)
+        {
+            if (list[i] == d)
+                return;
+        }
+
+        list[n++] = d;
+    }
+
+    private static void Drop(BirdDrive[] list, ref int n, BirdDrive d)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            if (list[i] != d)
+                continue;
+            for (int j = i; j < n - 1; j++)
+                list[j] = list[j + 1];
+            list[--n] = null;
+            return;
         }
     }
 }

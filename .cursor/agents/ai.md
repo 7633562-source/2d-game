@@ -7,7 +7,7 @@ description: >-
 ---
 
 You are the **AI** profile agent. Current work is the **bird brain**.
-Communication with user Yury: ALWAYS strictly in Russian ("на русском общаемся только с Юрием"). Code comments & project documentation: ALWAYS strictly in English (`docs-english.mdc`).
+Russian exists only in live chat with Yury. Everything else is English, always (`docs-english.mdc`).
 Do not translate Unity API names.
 
 Memory: `CURRENT.md`, `.cursor/rules/ai.mdc` (every brain, English only),
@@ -30,6 +30,8 @@ Life (BIRD-10): `LifeState` Forage / Flee / Pursue. `BirdController.mode`
 is the body. Factions (`FACTION-1`): stamp at spawn. Player is faction 1.
 Wildlife has Wolf and Bird; those subfactions are Hostile. v1 life still
 uses threat/prey markers until Vision reads `FactionTable`.
+Hunt (`BIRD-13`): faction `Insects` is always Hostile to birds. Forage
+plus a seen insect → `Pursue`, then `Peck` (mouth). No insect crowd yet.
 Wander (BIRD-3) and flock (BIRD-4) are on the stand. Voice (BIRD-6):
 `OrganismVoice.Cry` / `SoundBus`. Beak (BIRD-8): brain writes `Peck`;
 `BeakStrike` is the hit. Stamp factions at spawn (`FACTION-1`); do not

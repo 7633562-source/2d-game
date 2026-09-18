@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class Human : MonoBehaviour
 {
-    [Header("Общая масса тела (кг)")]
+    [Header("Total body mass (kg)")]
     public float totalMass = 70f;
 
     // Each segment gets its own semi-transparent color on the collider box.
@@ -26,18 +26,18 @@ public class Human : MonoBehaviour
     private static readonly Color RightFootColor = new Color(0.4f, 0f, 0f, 0.5f);
     private static readonly Color LeftFootColor = new Color(0.8f, 0.3f, 0.3f, 0.5f);
 
-    [Header("Множители (для логирования)")]
+    [Header("Multipliers (for logging)")]
     public float muscleMultiplier = 1f;
     public float frictionMultiplier = 1f;
 
-    // Ссылки на системы
+    // System references
     public VestibularSystem vestibularSystem;
     public CenterOfMassCalculator comCalculator;
-    public BodyStateEstimator bodyStateEstimator;   // добавлено
+    public BodyStateEstimator bodyStateEstimator;   // added
     public HumanSegment headSegment;
 
-    // Коэффициенты массы. Таз и грудь вместе 0.4346 — как прежний цельный торс,
-    // поэтому суммарная масса тела остаётся 70 кг (de Leva, 1996).
+    // Mass fractions. Pelvis and chest together are 0.4346 — the former whole torso,
+    // so total body mass stays 70 kg (de Leva, 1996).
     private const float PELVIS_MASS_FRACTION = 0.1117f;
     private const float TORSO_MASS_FRACTION = 0.3229f;
     private const float HEAD_MASS_FRACTION = 0.0694f;
@@ -49,15 +49,15 @@ public class Human : MonoBehaviour
     private const float SHIN_MASS_FRACTION = 0.0433f;
     private const float FOOT_MASS_FRACTION = 0.0137f;
 
-    // Камера смотрит под 80° к фронтальной плоскости, то есть почти в профиль.
-    // Поперечные (лево-право) расстояния между парными суставами сжимаются на
-    // экране в cos(80°) ≈ 0.17 раза. В сагиттальной 2D-модели ось X — это
-    // «вперёд-назад», поэтому разнос по X — только визуальный сдвиг ракурса,
-    // а не настоящий шаг: иначе человек вечно стоит в выпаде.
-    [Header("Ракурс: вид почти в профиль")]
+    // The camera looks 80° off the frontal plane, almost in profile.
+    // Left-right spacing between paired joints shrinks on screen by
+    // cos(80°) ≈ 0.17. In the sagittal 2D model the X axis is
+    // forward-back, so an X spread is only a viewpoint shift,
+    // not a real step: otherwise the human stands in a permanent lunge.
+    [Header("Viewpoint: almost profile")]
     public float viewAngleDegrees = 80f;
 
-    [Header("Анатомическое полурасстояние между парными суставами (м)")]
+    [Header("Anatomical half-spacing between paired joints (m)")]
     public float hipHalfSpacing = 0.085f;
     public float shoulderHalfSpacing = 0.185f;
 
@@ -65,105 +65,139 @@ public class Human : MonoBehaviour
 
     // Colored boxes sit on the collider. A side shift was for painted
     // overlap; it slid the rectangle off the BoxCollider2D.
-    [Header("Разнос картинки (только отрисовка)")]
+    [Header("Picture offset (draw only)")]
     public float visualSideOffset = 0f;
 
-    // 0.1 юнита при ширине торса 0.24 давало пятно в пол-туловища на сустав.
-    [Header("Диаметр маркера сустава (м)")]
+    // 0.1 units at torso width 0.24 made a blob half a trunk wide per joint.
+    [Header("Joint marker diameter (m)")]
     public float jointMarkerDiameter = 0.03f;
 
-    // Рост 1.75 м при 70 кг: длины — доли роста по Winter (2009), ширины —
-    // переднезадний размер при виде сбоку (у торса это глубина груди, не плечи).
-    // Вертикальная цепь pelvis+torso+neck+head+thigh+shin+foot = 1.75.
-    [Header("Размеры сегментов")]
+    // Height 1.75 m at 70 kg: lengths are fractions of stature per Winter (2009);
+    // widths are anteroposterior size in side view (torso is chest depth, not shoulders).
+    // Vertical chain pelvis+torso+neck+head+thigh+shin+foot = 1.75.
+    [Header("Segment sizes")]
     public Vector2 pelvisSize = new Vector2(0.24f, 0.16f);
     public Vector2 torsoSize = new Vector2(0.24f, 0.34f);
     public Vector2 headSize = new Vector2(0.20f, 0.23f);
     public Vector2 neckSize = new Vector2(0.12f, 0.09f);
     public Vector2 upperArmSize = new Vector2(0.10f, 0.33f);
     public Vector2 lowerArmSize = new Vector2(0.08f, 0.34f);
-    // 0.32 м было почти предплечье: кисть читалась как третье звено.
-    // Winter: кисть ≈ 0.108 × 1.75 м. Ширина — вид сбоку, не ладонь в фас.
-    // Стойка vis_hand (0.19) принята. Откат на 0.32 без сводки walk не держим.
-    // Физическая длина кисти 0.32 (CoM/запястье). 0.19 ломал walk/стойку fold ~25 с
-    // (handfix0). Короче рисовать — только Visual, не это поле.
+    // 0.32 m was almost a forearm: the hand read as a third link.
+    // Winter: hand ≈ 0.108 × 1.75 m. Width is side view, not a palm in front view.
+    // Stance vis_hand (0.19) was accepted. Do not revert to 0.32 without a walk summary.
+    // Physical hand length is 0.32 (CoM/wrist). 0.19 broke walk/stance fold ~25 s
+    // (handfix0). Draw it shorter on Visual only, not this field.
     public Vector2 handSize = new Vector2(0.06f, 0.16f);
     public Vector2 thighSize = new Vector2(0.16f, 0.43f);
     public Vector2 shinSize = new Vector2(0.11f, 0.43f);
-    // Один прямоугольник: длина взрослой стопы, высота ~подошва плюс подъём.
-    // Двухзвенная плюсна на сотне существ не окупается — см. баланс-правила.
-    public Vector2 footSize = new Vector2(0.26f, 0.07f);
+    // Adult foot length, height ≈ sole plus instep. Split in CreateLeg into
+    // heel + toe of this same length (footHeelShare); do not grow footSize
+    // to add the toe.
+    public Vector2 footSize = new Vector2(0.26f, 0.09f);
 
-    // Сцепление подошвы с грунтом. 0.4 — прежнее поведение: коллайдер без
-    // материала берёт юнитивский дефолт, то есть гладкую подошву. Выше —
-    // обувь. Пара считается как sqrt(µ_стопы · µ_грунта), поэтому одна
-    // стопа не поднимает сцепление выше корня из трения земли.
-    [Header("Трение подошвы о грунт")]
-    public float footFriction = 0.4f;
+    // Heel fraction of footSize.x. Toe is the rest. 0.70 / 0.30 puts the
+    // MTP hinge at the ball, 0.117 m ahead of the ankle, and keeps the
+    // 0.065 m heel and 0.195 m toe arms of the rigid plate.
+    [Header("Foot split (heel / toe)")]
+    [Range(0.4f, 0.85f)]
+    public float footHeelShare = 0.70f;
 
-    // Голеностоп стоит не в середине стопы, а ближе к пятке: 25% длины стопы
-    // назад (6.5 см пятки) и 19.5 см носка вперёд. Поэтому наклониться вперёд
-    // человек может заметно сильнее, чем назад, — как и живой.
-    [Header("Смещение голеностопа к пятке (м)")]
+    // Sole-to-ground grip. 0.4 is the former behavior: a collider with no
+    // material takes Unity's default, i.e. a smooth sole. Higher is
+    // footwear. The pair is sqrt(µ_foot · µ_ground), so one
+    // foot cannot raise grip above the square root of ground friction.
+    [Header("Sole-to-ground friction")]
+    public float footFriction = 1.2f;
+
+    // The ankle sits nearer the heel: 6.5 cm of heel behind it and 19.5 cm
+    // of toe in front, so the foot reaches farther forward than back.
+    [Header("Ankle offset toward the heel (m)")]
     public float ankleHeelOffset = 0.065f;
 
-    // Плечо остаётся на прежней абсолютной высоте +0.125 от корня:
-    // верх груди 0.25 минус этот отступ. Поднимать к анатомической высоте
-    // отдельно — иначе за один шаг меняется и поясница, и рычаг рук.
-    [Header("Плечо относительно верха груди (м)")]
+    // The shoulder stays at the former absolute height +0.125 from the root:
+    // chest top 0.25 minus this drop. Raise it to anatomical height
+    // separately — otherwise one step changes both the lumbar and the arm lever.
+    [Header("Shoulder relative to chest top (m)")]
     public float shoulderDropFromNeck = 0.09f;
 
-    // Масса сегментов та же, размеры меньше — момент инерции торса упал
-    // примерно втрое. Прежнее трение не гасило PD, торс болтался на ~30 Гц.
-    [Header("Трение в суставах")]
+    // Segment masses are the same, sizes are smaller — torso inertia dropped
+    // about threefold. The former friction did not damp PD; the torso wobbled at ~30 Hz.
+    [Header("Joint friction")]
     public float lumbarFriction = 30f;
-    // 40 Н·м насыщается при 76 °/с. Поднять до 80/160/240 не убрало дрожь,
-    // а разогнало её: rmsTorsoAngVel 55 → 74 → 123 → 164 °/с.
+    // 40 N·m saturates at 76 °/s. Raising it to 80/160/240 did not remove chatter,
+    // it sped it up: rmsTorsoAngVel 55 → 74 → 123 → 164 °/s.
     public float lumbarFrictionMaxTorque = 40f;
-    // τ = Ieff/K ≈ 0.20 с при Ieff шеи 0.001567. Прежние 36 приваривали
-    // голову к торсу: стоп-момент режет всё выше Ieff/Δt ≈ 0.31, и K=36
-    // неотличим от K=0.31. SPD держит суставы, сварной шов больше не нужен.
-    // Голова делит это же поле.
+    // τ = Ieff/K ≈ 0.20 s at neck Ieff 0.001567. The former 36 welded
+    // the head to the torso: stop-torque clips everything above Ieff/Δt ≈ 0.31, so K=36
+    // is indistinguishable from K=0.31. SPD holds the joints; the weld is no longer needed.
+    // The head shares this same field.
     public float neckFriction = 0.00784f;
-    // Руки: τ ≈ 0.10 с. Ieff из arm_stand — плечо 0.0177722, локоть
-    // 0.00509677, кисть 0.00117525. Прежние 12 / 12 / 1.2 варили суставы
-    // (stepRatio 3.4 / 11.8 / 5.1). SPD уже держит позу; τ=0.20 роняет
-    // толчок вперёд 24 Н·с, поэтому остановились на 0.10.
+    // Arms: τ ≈ 0.10 s. Ieff from arm_stand — shoulder 0.0177722, elbow
+    // 0.00509677, wrist 0.00117525. The former 12 / 12 / 1.2 welded the joints
+    // (stepRatio 3.4 / 11.8 / 5.1). SPD already holds the pose; τ=0.20 drops
+    // the forward push 24 N·s, so we stopped at 0.10.
     public float shoulderFriction = 0.177722f;
     public float elbowFriction = 0.0509677f;
     public float wristFriction = 0.0117525f;
     public float hipFriction = 12f;
     public float kneeFriction = 12f;
     public float ankleFriction = 3f;
+    // MTP is a light hinge: K here is JointFriction on the toe, not sole
+    // µ (that is footFriction on both boxes). SPD holds the pose, so this
+    // stays below the weld clamp.
+    public float toeFriction = 0.02f;
 
-    // Потолки близки к тому, что нужно для удержания позы: при массе 70 кг
-    // и смещении центра масс 5 см голеностопу требуется около 35 Н·м.
-    // Прежние 150–300 Н·м подавались целиком и разносили тело за два шага физики.
-    [Header("Максимальные моменты мышц")]
-    // Над поясницей ~35 кг, их центр примерно на 0.30 м выше сустава.
-    // Гравитация даёт ≈ 104·sin θ Н·м, то есть 36 Н·м при наклоне 20°.
-    // 90 Н·м — запас 2.5 раза, и всё ещё ниже бедра (100 Н·м).
+    // HingeJoint2D has no spring-on-angle — only this arc plus muscle PD.
+    // Flexion is minus. The arc is the last word on every hip command:
+    // ControlJointToAngleStable clamps its target to joint.limits. The swing
+    // pose asks for swingHipFlex 40 plus the walk boosts (up to 62) and the
+    // step-placement correction (±10), and crouch passes a transient before
+    // the pelvis tilt catches the folding knee. A −45 flexion stop pins all of
+    // that on the stop: the pose saturates and placement loses the room it
+    // needs to lengthen a short step. Flexion keeps the former −90.
+    // Extension is barely used in stance (maxHip ≈ +2), so +45 stops the
+    // back leg of a gravity split without a new motor.
+    [Header("Leg hinge limits (deg)")]
+    public float hipLimitMin = -90f;
+    public float hipLimitMax = 45f;
+    public float kneeLimitMin = 0f;
+    public float kneeLimitMax = 120f;
+    // MTP: minus = toe up (swing clearance), plus = toe down / heel rise
+    // (push-off). jointAngle = heel − toe, same convention as the ankle.
+    public float toeLimitMin = -35f;
+    public float toeLimitMax = 50f;
+
+    // Ceilings are close to what stance needs: at 70 kg
+    // and a 5 cm CoM offset the ankle needs about 35 N·m.
+    // The former 150–300 N·m arrived in full and tore the body apart in two physics steps.
+    [Header("Muscle torque ceilings")]
+    // About 35 kg sits above the lumbar, its center roughly 0.30 m above the joint.
+    // Gravity gives ≈ 104·sin θ N·m, i.e. 36 N·m at a 20° lean.
+    // 90 N·m is a 2.5× margin and still below the hip (100 N·m).
     public float lumbarMuscleTorque = 90f;
     public float neckMuscleTorque = 15f;
     public float shoulderMuscleTorque = 40f;
     public float elbowMuscleTorque = 30f;
     public float wristMuscleTorque = 10f;
     public float hipMuscleTorque = 100f;
-    // 130 Н·м: присед складывает колено далеко от −8°, и 80 Н·м
-    // не держат рычаг бедра. Потолок из плана работ, не из de Leva.
+    // 130 N·m: a squat folds the knee far from −8°, and 80 N·m
+    // cannot hold the thigh lever. Ceiling from the work plan, not from de Leva.
     public float kneeMuscleTorque = 130f;
-    // Голеностоп у человека резко асимметричен: подошвенные сгибатели (икра,
-    // держат от падения вперёд) втрое сильнее тыльных (передняя поверхность
-    // голени, держат от падения назад). В модели это extensor и flexor.
-    // Потолки взяты по геометрии стопы: больший момент стопа всё равно не
-    // передаст, тело просто начнёт вращаться вокруг носка или пятки.
-    // Стопа 0.26 м, пятка 0.065 м, носок 0.195 м, m*g = 70*9.81 ≈ 687 Н.
-    // Вперёд: 687*(носок 0.195)/2 ≈ 67 Н·м на стопу (округлено до 65).
-    // Назад:  687*(пятка 0.065)/2 ≈ 22 Н·м на стопу.
+    // The human ankle is sharply asymmetric: plantar flexors (calf,
+    // hold against a forward fall) are three times stronger than dorsiflexors (front of
+    // the shin, hold against a backward fall). In the model those are extensor and flexor.
+    // Ceilings come from foot geometry: the foot will not transmit a larger moment;
+    // the body simply starts rotating about the toe or the heel.
+    // Foot 0.26 m, heel 0.065 m, toe 0.195 m, m*g = 70*9.81 ≈ 687 N.
+    // Forward: 687*(toe 0.195)/2 ≈ 67 N·m per foot (rounded to 65).
+    // Backward:  687*(heel 0.065)/2 ≈ 22 N·m per foot.
     public float ankleExtensorTorque = 65f;
     public float ankleFlexorTorque = 22f;
+    // Pose hold on the MTP, not a second ankle. 12 N·m on a 0.078 m toe
+    // is ~0.22 BW — enough to keep the plate, not to lift 70 kg.
+    public float toeMuscleTorque = 12f;
 
-    // Порядок отрисовки
+    // Draw order
     private const int LEFT_LEG_THIGH_ORDER = -6;
     private const int LEFT_LEG_SHIN_ORDER = -5;
     private const int LEFT_LEG_FOOT_ORDER = -4;
@@ -187,9 +221,9 @@ public class Human : MonoBehaviour
             Destroy(child.gameObject);
         }
 
-        // Корень остаётся в центре старого цельного торса. Таз и грудь
-        // ставятся так, чтобы бёдра были на y = −0.25, а основание шеи
-        // на y = +0.25: вертикальная цепь и точка спавна не меняются.
+        // The root stays at the center of the old whole torso. Pelvis and chest
+        // are placed so the hips sit at y = −0.25 and the neck base
+        // at y = +0.25: the vertical chain and spawn point do not change.
         float trunkHeight = pelvisSize.y + torsoSize.y;
         float pelvisCenterY = -trunkHeight * 0.5f + pelvisSize.y * 0.5f;
         float torsoCenterY = -trunkHeight * 0.5f + pelvisSize.y + torsoSize.y * 0.5f;
@@ -203,9 +237,9 @@ public class Human : MonoBehaviour
             new Vector2(0, -torsoSize.y * 0.5f),
             new Vector2(0, pelvisSize.y * 0.5f),
             -20f, 20f);
-        // Поясница несёт ~35 кг верха тела: потолок трения по умолчанию
-        // 15 Н·м мал, и вязкость молча упрётся в него. Потолок задаётся
-        // отдельно, чтобы вязкость оставалась линейной на быстрых ударах.
+        // The lumbar carries ~35 kg of upper body: the default friction ceiling
+        // 15 N·m is too small, and viscosity silently hits it. The ceiling is set
+        // separately so viscosity stays linear on fast impacts.
         AddFriction(torso, lumbarFriction, lumbarFrictionMaxTorque);
         AddMuscles(torso, lumbarMuscleTorque);
 
@@ -246,22 +280,22 @@ public class Human : MonoBehaviour
 
         DisableCollisionsBetweenSegments();
 
-        // Сенсоры добавляются только после того, как построены все сегменты:
-        // их Awake ищет тела через transform.Find один раз и больше не
-        // повторяет. VestibularSystem стоял выше по файлу, до создания шеи и
-        // головы, и молча отдавал по ним нули — торс и таз к тому моменту уже
-        // существовали, поэтому наклон торса работал и ошибку ничего не выдало.
+        // Sensors are added only after every segment is built:
+        // their Awake finds bodies via transform.Find once and does not
+        // search again. VestibularSystem used to sit higher in the file, before neck and
+        // head existed, and silently returned zeros for them — torso and pelvis already
+        // existed by then, so torso tilt worked and nothing reported the error.
         vestibularSystem = gameObject.AddComponent<VestibularSystem>();
 
         comCalculator = gameObject.AddComponent<CenterOfMassCalculator>();
         comCalculator.Initialize();
 
-        // Добавляем сенсорный слой
+        // Add the sensor layer
         bodyStateEstimator = gameObject.AddComponent<BodyStateEstimator>();
 
         SetupBalanceController();
 
-        // Трение, затем мышцы — один FixedUpdate, порядок явный.
+        // Friction, then muscles — one FixedUpdate, order is explicit.
         ActuatorDriver actuators = gameObject.AddComponent<ActuatorDriver>();
         actuators.RebuildCache();
 
@@ -300,7 +334,7 @@ public class Human : MonoBehaviour
         HumanSegment segment = segmentObject.AddComponent<HumanSegment>();
         float segmentMass = totalMass * massFraction;
         segment.Initialize(name, size, segmentMass, color, transform, sortingOrder, visualShape, albedoKey);
-        // До ConnectTo: маркер создаётся там и читает этот размер.
+        // Before ConnectTo: the marker is created there and reads this size.
         segment.jointMarkerDiameter = jointMarkerDiameter;
         return segment;
     }
@@ -339,10 +373,10 @@ public class Human : MonoBehaviour
     {
         float shoulderX = direction * shoulderHalfSpacing * LateralProjection;
         float visualShift = direction * visualSideOffset;
-        // Отступ от верха груди, не доля высоты: после разреза торса
-        // абсолютная высота плеча должна остаться +0.125 от корня.
-        // shoulderY — в локали груди (якорь сустава), shoulderRootY — от корня
-        // (расстановка сегментов, они дети Human, а не Torso).
+        // Drop from chest top, not a fraction of height: after the torso split
+        // absolute shoulder height must stay +0.125 from the root.
+        // shoulderY is in chest local (joint anchor); shoulderRootY is from the root
+        // (segment placement — they are children of Human, not Torso).
         float shoulderY = torsoSize.y * 0.5f - shoulderDropFromNeck;
         float shoulderRootY = torso.transform.localPosition.y + shoulderY;
 
@@ -377,8 +411,8 @@ public class Human : MonoBehaviour
         AddMuscles(hand, wristMuscleTorque);
     }
 
-    // Один материал на обе стопы: Box2D комбинирует трение пары как
-    // sqrt(µ1 · µ2), поэтому величина имеет смысл только вместе с грунтом.
+    // One material for both feet: Box2D combines pair friction as
+    // sqrt(µ1 · µ2), so the value only makes sense together with the ground.
     private PhysicsMaterial2D soleMaterial;
 
     private PhysicsMaterial2D SoleMaterial()
@@ -401,54 +435,82 @@ public class Human : MonoBehaviour
         // Visual-only side swap for legs: keep physics anchors/segments in place,
         // only mirror which leg is drawn closer to the camera.
         float visualShift = -direction * visualSideOffset;
-        // hipY — в локали таза (якорь бедра). Сегменты ноги — дети корня,
-        // поэтому их расставляем от hipRootY = −0.25, как до разреза торса.
+        // hipY is in pelvis local (hip anchor). Leg segments are children of the root,
+        // so they are placed from hipRootY = −0.25, as before the torso split.
         float hipY = -pelvisSize.y * 0.5f;
         float hipRootY = pelvis.transform.localPosition.y + hipY;
 
         HumanSegment thigh = CreateSegment(sideName + "Thigh", thighSize, THIGH_MASS_FRACTION, thighColor, thighOrder);
         thigh.transform.localPosition = new Vector3(hipX, hipRootY - thighSize.y * 0.5f, 0);
         thigh.SetVisualOffset(visualShift);
-        // ±90°: присед уводит таз назад дальше прежнего упора ±60°.
         thigh.ConnectTo(pelvis,
             new Vector2(0, thighSize.y * 0.5f),
             new Vector2(hipX, hipY),
-            -90f, 90f);
+            hipLimitMin, hipLimitMax);
         AddFriction(thigh, hipFriction);
         AddMuscles(thigh, hipMuscleTorque);
 
         HumanSegment shin = CreateSegment(sideName + "Shin", shinSize, SHIN_MASS_FRACTION, shinColor, shinOrder);
         shin.transform.localPosition = new Vector3(hipX, hipRootY - thighSize.y - shinSize.y * 0.5f, 0);
         shin.SetVisualOffset(visualShift);
-        // 0…+120, а не −120…0. jointAngle = угол родителя минус свой, поэтому
-        // положительный угол колена уводит низ голени назад — это человеческое
-        // сгибание при взгляде вправо. Прежний диапазон разрешал только
-        // обратное, страусиное: колено уходило за линию бедро–голеностоп.
+        // 0…+120, not −120…0. jointAngle = parent angle minus own, so
+        // a positive knee angle takes the shin bottom backward — human
+        // flexion when looking right. The former range allowed only
+        // the reverse, ostrich flexion: the knee went past the thigh–ankle line.
         shin.ConnectTo(thigh,
             new Vector2(0, shinSize.y * 0.5f),
             new Vector2(0, -thighSize.y * 0.5f),
-            0f, 120f);
+            kneeLimitMin, kneeLimitMax);
         AddFriction(shin, kneeFriction);
         AddMuscles(shin, kneeMuscleTorque);
 
-        // Центр стопы: пятка на ankleHeelOffset позади голеностопа, носок
-        // впереди. Якорь считается от центра, а не зашит под конкретную длину.
-        float footHalf = footSize.x * 0.5f;
-        float footCenterX = hipX - ankleHeelOffset + footHalf;
-        float ankleAnchorX = hipX - footCenterX;
-        float footY = hipRootY - thighSize.y - shinSize.y - footSize.y * 0.5f;
+        // Heel + toe of the same total length. The ankle stays ankleHeelOffset
+        // behind the heel back (6.5 cm); the MTP sits at the ball. Mass
+        // splits with length so the foot fraction stays 0.0137.
+        float heelShare = Mathf.Clamp(footHeelShare, 0.4f, 0.85f);
+        Vector2 heelSize = new Vector2(footSize.x * heelShare, footSize.y);
+        Vector2 toeSize = new Vector2(footSize.x - heelSize.x, footSize.y);
+        float heelHalf = heelSize.x * 0.5f;
+        float toeHalf = toeSize.x * 0.5f;
+        float heelCenterX = hipX - ankleHeelOffset + heelHalf;
+        float ankleAnchorX = hipX - heelCenterX;
+        // Heel centre sits on the shin tip so the ankle hinge is mid-plate,
+        // not on the top edge. Sole is half a foot-height higher than the
+        // old hang-below-shin layout.
+        float footY = hipRootY - thighSize.y - shinSize.y;
 
-        HumanSegment foot = CreateSegment(sideName + "Foot", footSize, FOOT_MASS_FRACTION, footColor, footOrder);
-        if (foot.collider != null)
-            foot.collider.sharedMaterial = SoleMaterial();
-        foot.transform.localPosition = new Vector3(footCenterX, footY, 0);
-        foot.SetVisualOffset(visualShift);
-        foot.ConnectTo(shin,
-            new Vector2(ankleAnchorX, footSize.y * 0.5f),
+        HumanSegment heel = CreateSegment(sideName + "Foot", heelSize,
+            FOOT_MASS_FRACTION * heelShare, footColor, footOrder);
+        if (heel.collider != null)
+            heel.collider.sharedMaterial = SoleMaterial();
+        heel.transform.localPosition = new Vector3(heelCenterX, footY, 0);
+        heel.SetVisualOffset(visualShift);
+        heel.ConnectTo(shin,
+            new Vector2(ankleAnchorX, 0f),
             new Vector2(0, -shinSize.y * 0.5f),
             -45f, 45f);
-        AddFriction(foot, ankleFriction);
-        AddMuscles(foot, ankleFlexorTorque, ankleExtensorTorque);
+        AddFriction(heel, ankleFriction);
+        AddMuscles(heel, ankleFlexorTorque, ankleExtensorTorque);
+
+        Color toeColor = new Color(footColor.r * 0.5f, footColor.g * 0.5f,
+            footColor.b * 0.5f, footColor.a);
+        float toeCenterX = heelCenterX + heelHalf + toeHalf;
+        HumanSegment toe = CreateSegment(sideName + "Toe", toeSize,
+            FOOT_MASS_FRACTION * (1f - heelShare), toeColor, footOrder);
+        if (toe.collider != null)
+            toe.collider.sharedMaterial = SoleMaterial();
+        toe.transform.localPosition = new Vector3(toeCenterX, footY, 0);
+        toe.SetVisualOffset(visualShift);
+        // MTP at the ball: mid-height of the abutting heel/toe edges.
+        // Zero jointAngle is a flat plate. Plus takes the toe down relative
+        // to the heel (heel can rise, toe stays on the slab). Minus is
+        // clearance in the air.
+        toe.ConnectTo(heel,
+            new Vector2(-toeHalf, 0f),
+            new Vector2(heelHalf, 0f),
+            toeLimitMin, toeLimitMax);
+        AddFriction(toe, toeFriction);
+        AddMuscles(toe, toeMuscleTorque);
     }
 
     private void SetupBalanceController()
@@ -458,9 +520,11 @@ public class Human : MonoBehaviour
         Transform rightThigh = transform.Find("RightLegThigh");
         Transform rightShin = transform.Find("RightLegShin");
         Transform rightFoot = transform.Find("RightLegFoot");
+        Transform rightToe = transform.Find("RightLegToe");
         Transform leftThigh = transform.Find("LeftLegThigh");
         Transform leftShin = transform.Find("LeftLegShin");
         Transform leftFoot = transform.Find("LeftLegFoot");
+        Transform leftToe = transform.Find("LeftLegToe");
 
         if (rightThigh && rightShin && leftThigh && leftShin && rightFoot && leftFoot)
         {
@@ -484,6 +548,9 @@ public class Human : MonoBehaviour
             bc.leftAnkleFlexor = System.Array.Find(lFoot, m => m.direction == 1f);
             bc.leftAnkleExtensor = System.Array.Find(lFoot, m => m.direction == -1f);
         }
+
+        BindMusclePair(rightToe, out bc.rightToeFlexor, out bc.rightToeExtensor);
+        BindMusclePair(leftToe, out bc.leftToeFlexor, out bc.leftToeExtensor);
 
         Transform torsoTransform = transform.Find("Torso");
         if (torsoTransform)

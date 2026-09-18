@@ -5,11 +5,11 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
-// Сборка плеера для headless-прогонов.
-// Вызывается из командной строки:
-//   Unity.exe -batchmode -projectPath <проект> -executeMethod HeadlessBuild.BuildTrialPlayer -logFile -
-// Плеер собирается один раз, а параметры баланса передаются ему аргументами,
-// поэтому перебор коэффициентов не требует пересборки.
+// Player build for headless runs.
+// Invoked from the command line:
+//   Unity.exe -batchmode -projectPath <project> -executeMethod HeadlessBuild.BuildTrialPlayer -logFile -
+// The player is built once; balance parameters are passed as arguments,
+// so a coefficient sweep does not need a rebuild.
 public static class HeadlessBuild
 {
     private const string SCENE_PATH = "Assets/Scenes/SampleScene.unity";
@@ -30,7 +30,7 @@ public static class HeadlessBuild
 
         string exePath = Path.Combine(folder, "BalanceTrial.exe");
 
-        // Без этого плеер в batchmode может засыпать, потеряв фокус.
+        // Without this the player in batchmode may sleep after losing focus.
         PlayerSettings.runInBackground = true;
 
         BuildPlayerOptions options = new BuildPlayerOptions
@@ -61,6 +61,49 @@ public static class HeadlessBuild
     {
         string projectRoot = Directory.GetParent(Application.dataPath).FullName;
         return Path.Combine(projectRoot, "Build", "Headless");
+    }
+
+    public static void BuildWebGL()
+    {
+        string folder = GetStringArg("-buildOut",
+            Path.Combine(Directory.GetParent(DefaultBuildFolder()).FullName, "WebGL"));
+        Directory.CreateDirectory(folder);
+
+        PlayerSettings.runInBackground = true;
+
+        // GitHub Pages does not serve Content-Encoding for .br/.gz, so disable
+        // compression or the build fails to load in the browser.
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+
+        BuildPlayerOptions options = new BuildPlayerOptions
+        {
+            scenes = new[]
+            {
+                "Assets/Scenes/World.unity",
+                "Assets/Scenes/Level1.unity",
+                "Assets/Scenes/Bird.unity",
+                "Assets/Scenes/BirdFlock50.unity",
+                "Assets/Scenes/Chicken.unity",
+                "Assets/Scenes/Dog.unity",
+                "Assets/Scenes/Tree.unity",
+                "Assets/Scenes/Campfire.unity",
+            },
+            locationPathName = folder,
+            target = BuildTarget.WebGL,
+            targetGroup = BuildTargetGroup.WebGL,
+            options = BuildOptions.None
+        };
+
+        BuildReport report = BuildPipeline.BuildPlayer(options);
+        BuildSummary summary = report.summary;
+        bool succeeded = summary.result == BuildResult.Succeeded;
+
+        if (succeeded)
+            Debug.Log($"WEBGL_BUILD_OK {folder}");
+        else
+            Debug.LogError($"WEBGL_BUILD_FAILED result={summary.result} errors={summary.totalErrors}");
+
+        EditorApplication.Exit(succeeded ? 0 : 1);
     }
 
     private static void WriteBuildInfo(string folder, string exePath, BuildSummary summary)

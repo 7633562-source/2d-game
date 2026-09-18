@@ -13,10 +13,11 @@ characters on screen at once, not a crowd.
   and is not a way to raise FPS.
 - `humanCount` 10–50 is allowed only as a laboratory load in
   `SampleScene`, not as the `World` game mode.
-- In the `World` game keep `birdCount = 0` and `treeCount = 0`. Watch
-  flight in scene `Bird`, the tree in scene `Tree`, not together with
-  the human: a `Sway` tree is about 15 bodies, same as one `Human`.
-  A grove is `TreeRig.Static` only.
+- In the `World` game `treeCount` stays 0 (grove is `TreeRig.Static`).
+  The yard may hold a small Flock, hens, and a few leftover dogs.
+  Off-camera NPCs rest (`NpcRest`): Kinematic, no 200 Hz drive.
+  The hero Human stays at 200 Hz. Watch flight in scene `Bird`, the
+  tree in scene `Tree`. Do not plant `Sway` in World.
 - In the game, `Physics2D jobs` may be on. `HeadlessTrial` must turn
   them off: one-leg probe `oneg_r` determinism depends on it.
 - Keep `Maximum Allowed Timestep` low, about 0.05 s, not 0.333 s,

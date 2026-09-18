@@ -278,10 +278,18 @@ MonoBehaviour:
   birdOffsetX: 0
   birdSpacing: 1.2
   cameraFollowsBird: 0
-  treeCount: 5
+  treeCount: 9
   treeOffsetX: -6.8
   treeSpacing: 3.4
   cameraFollowsTree: 1
+  dogCount: 0
+  dogOffsetX: 0
+  dogSpacing: 1.5
+  cameraFollowsDog: 0
+  dogPreyOffsetX: 1.4
+  flowerCount: 12
+  flowerOffsetX: -3.3
+  flowerSpacing: 0.55
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

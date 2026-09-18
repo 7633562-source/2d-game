@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-// Глобальный логгер, записывающий состояния выбранных людей в один текстовый файл.
-// Файл разбит на блоки: для каждого человека свой заголовок, затем строка с параметрами,
-// затем заголовок таблицы и строки данных.
-// Путь сохранения: жёстко задан "E:\Games\Unity3D LOGS".
+// Global logger that writes the chosen humans' states into one text file.
+// The file is split into blocks: each human has its own header, then a parameter
+// line, then the table header and data rows.
+// Save path is hard-coded: "E:\Games\Unity3D LOGS".
 public class GlobalHumanLogger : MonoBehaviour
 {
     private const string DEFAULT_LOG_FOLDER = @"E:\Games\Unity3D LOGS";
 
-    [Header("Настройки логирования")]
+    [Header("Logging settings")]
     public string fileName = "human_log.txt";
     public string logFolderPath = "";
     public float logIntervalSeconds = 0.033f;
@@ -20,21 +20,48 @@ public class GlobalHumanLogger : MonoBehaviour
     private List<Human> humansToLog = new List<Human>();
     private List<int> humanNumbers = new List<int>();
     private Dictionary<int, List<string>> logBuffers = new Dictionary<int, List<string>>();
+    // Find only in BuildCache (SetHumansToLog). LogHumanState reads the fields.
+    private List<HumanLogCache> humanCaches = new List<HumanLogCache>();
 
     private float nextLogTime = 0f;
     private bool isInitialized = false;
+
+    private class HumanLogCache
+    {
+        public Human human;
+        public int number;
+        public bool hasTorso;
+        public Rigidbody2D torsoRb;
+        public HingeJoint2D hipJoint;
+        public HingeJoint2D kneeJoint;
+        public HingeJoint2D ankleJoint;
+        public HingeJoint2D neckJoint;
+        public HingeJoint2D headJoint;
+        public Muscle hipFlexor;
+        public Muscle hipExtensor;
+        public Muscle kneeFlexor;
+        public Muscle kneeExtensor;
+        public Muscle ankleFlexor;
+        public Muscle ankleExtensor;
+        public Muscle neckFlexor;
+        public Muscle neckExtensor;
+        public Muscle headFlexor;
+        public Muscle headExtensor;
+    }
 
     public void SetHumansToLog(Human[] humans, int[] numbers)
     {
         humansToLog.Clear();
         humanNumbers.Clear();
         logBuffers.Clear();
+        humanCaches.Clear();
 
         for (int i = 0; i < humans.Length; i++)
         {
             humansToLog.Add(humans[i]);
             humanNumbers.Add(numbers[i]);
             logBuffers[numbers[i]] = new List<string>();
+            humanCaches.Add(BuildCache(humans[i], numbers[i]));
         }
         isInitialized = true;
     }
@@ -42,7 +69,7 @@ public class GlobalHumanLogger : MonoBehaviour
     void Start()
     {
         nextLogTime = Time.time + logIntervalSeconds;
-        Debug.Log($"Глобальный логгер инициализирован. Файл: {Path.Combine(DEFAULT_LOG_FOLDER, fileName)}");
+        Debug.Log($"Global logger initialized. File: {Path.Combine(DEFAULT_LOG_FOLDER, fileName)}");
     }
 
     void FixedUpdate()
@@ -51,36 +78,60 @@ public class GlobalHumanLogger : MonoBehaviour
 
         if (Time.time >= nextLogTime)
         {
-            for (int i = 0; i < humansToLog.Count; i++)
+            for (int i = 0; i < humanCaches.Count; i++)
             {
-                LogHumanState(humansToLog[i], humanNumbers[i]);
+                LogHumanState(humanCaches[i]);
             }
             nextLogTime += logIntervalSeconds;
         }
     }
 
-    private void LogHumanState(Human human, int number)
+    private HumanLogCache BuildCache(Human human, int number)
     {
+        var cache = new HumanLogCache { human = human, number = number };
+        if (human == null) return cache;
+
         Transform torsoTransform = human.transform.Find("Torso");
-        if (torsoTransform == null) return;
-        Rigidbody2D torsoRb = torsoTransform.GetComponent<Rigidbody2D>();
+        cache.hasTorso = torsoTransform != null;
+        cache.torsoRb = torsoTransform != null ? torsoTransform.GetComponent<Rigidbody2D>() : null;
+        cache.hipJoint = GetJoint(human, "LeftLegThigh");
+        cache.kneeJoint = GetJoint(human, "LeftLegShin");
+        cache.ankleJoint = GetJoint(human, "LeftLegFoot");
+        cache.neckJoint = GetJoint(human, "Neck");
+        cache.headJoint = GetJoint(human, "Head");
+        cache.hipFlexor = GetMuscle(human, "LeftLegThigh", 1f);
+        cache.hipExtensor = GetMuscle(human, "LeftLegThigh", -1f);
+        cache.kneeFlexor = GetMuscle(human, "LeftLegShin", 1f);
+        cache.kneeExtensor = GetMuscle(human, "LeftLegShin", -1f);
+        cache.ankleFlexor = GetMuscle(human, "LeftLegFoot", 1f);
+        cache.ankleExtensor = GetMuscle(human, "LeftLegFoot", -1f);
+        cache.neckFlexor = GetMuscle(human, "Neck", 1f);
+        cache.neckExtensor = GetMuscle(human, "Neck", -1f);
+        cache.headFlexor = GetMuscle(human, "Head", 1f);
+        cache.headExtensor = GetMuscle(human, "Head", -1f);
+        return cache;
+    }
 
-        HingeJoint2D hipJoint = GetJoint(human, "LeftLegThigh");
-        HingeJoint2D kneeJoint = GetJoint(human, "LeftLegShin");
-        HingeJoint2D ankleJoint = GetJoint(human, "LeftLegFoot");
-        HingeJoint2D neckJoint = GetJoint(human, "Neck");
-        HingeJoint2D headJoint = GetJoint(human, "Head");
+    private void LogHumanState(HumanLogCache cache)
+    {
+        if (cache == null || cache.human == null || !cache.hasTorso) return;
 
-        Muscle hipFlexor = GetMuscle(human, "LeftLegThigh", 1f);
-        Muscle hipExtensor = GetMuscle(human, "LeftLegThigh", -1f);
-        Muscle kneeFlexor = GetMuscle(human, "LeftLegShin", 1f);
-        Muscle kneeExtensor = GetMuscle(human, "LeftLegShin", -1f);
-        Muscle ankleFlexor = GetMuscle(human, "LeftLegFoot", 1f);
-        Muscle ankleExtensor = GetMuscle(human, "LeftLegFoot", -1f);
-        Muscle neckFlexor = GetMuscle(human, "Neck", 1f);
-        Muscle neckExtensor = GetMuscle(human, "Neck", -1f);
-        Muscle headFlexor = GetMuscle(human, "Head", 1f);
-        Muscle headExtensor = GetMuscle(human, "Head", -1f);
+        Rigidbody2D torsoRb = cache.torsoRb;
+        HingeJoint2D hipJoint = cache.hipJoint;
+        HingeJoint2D kneeJoint = cache.kneeJoint;
+        HingeJoint2D ankleJoint = cache.ankleJoint;
+        HingeJoint2D neckJoint = cache.neckJoint;
+        HingeJoint2D headJoint = cache.headJoint;
+        Muscle hipFlexor = cache.hipFlexor;
+        Muscle hipExtensor = cache.hipExtensor;
+        Muscle kneeFlexor = cache.kneeFlexor;
+        Muscle kneeExtensor = cache.kneeExtensor;
+        Muscle ankleFlexor = cache.ankleFlexor;
+        Muscle ankleExtensor = cache.ankleExtensor;
+        Muscle neckFlexor = cache.neckFlexor;
+        Muscle neckExtensor = cache.neckExtensor;
+        Muscle headFlexor = cache.headFlexor;
+        Muscle headExtensor = cache.headExtensor;
 
         float time = Time.time;
         float torsoAngle = torsoRb != null ? Mathf.DeltaAngle(0f, torsoRb.rotation) : 0f;
@@ -103,6 +154,7 @@ public class GlobalHumanLogger : MonoBehaviour
         float headFlex = headFlexor != null ? headFlexor.activation : 0f;
         float headExt = headExtensor != null ? headExtensor.activation : 0f;
 
+        int number = cache.number;
         string line = $"{time:F3};{number};{torsoAngle:F2};{torsoAngularVelocity:F2};" +
                       $"{hipAngle:F2};{kneeAngle:F2};{ankleAngle:F2};{neckAngle:F2};{headAngle:F2};" +
                       $"{hipFlex:F3};{hipExt:F3};{kneeFlex:F3};{kneeExt:F3};" +
@@ -112,13 +164,13 @@ public class GlobalHumanLogger : MonoBehaviour
         if (logToConsole) Debug.Log(line);
     }
 
-    private HingeJoint2D GetJoint(Human human, string childName)
+    private static HingeJoint2D GetJoint(Human human, string childName)
     {
         Transform t = human.transform.Find(childName);
         return t != null ? t.GetComponent<HingeJoint2D>() : null;
     }
 
-    private Muscle GetMuscle(Human human, string segmentName, float direction)
+    private static Muscle GetMuscle(Human human, string segmentName, float direction)
     {
         Transform seg = human.transform.Find(segmentName);
         if (seg == null) return null;
@@ -142,14 +194,14 @@ public class GlobalHumanLogger : MonoBehaviour
 
                 writer.WriteLine($"### Human {num} ###");
 
-                // Записываем параметры человека
+                // Write the human's parameters
                 writer.WriteLine("Parameters:");
                 writer.WriteLine($"TotalMass:{human.totalMass:F2};MuscleMultiplier:{human.muscleMultiplier:F3};FrictionMultiplier:{human.frictionMultiplier:F3}");
                 writer.WriteLine($"HipTorque:{human.hipMuscleTorque:F2};KneeTorque:{human.kneeMuscleTorque:F2};AnkleExtTorque:{human.ankleExtensorTorque:F2};AnkleFlexTorque:{human.ankleFlexorTorque:F2};NeckTorque:{human.neckMuscleTorque:F2};ShoulderTorque:{human.shoulderMuscleTorque:F2};ElbowTorque:{human.elbowMuscleTorque:F2};WristTorque:{human.wristMuscleTorque:F2}");
                 writer.WriteLine($"HipFriction:{human.hipFriction:F2};KneeFriction:{human.kneeFriction:F2};AnkleFriction:{human.ankleFriction:F2};NeckFriction:{human.neckFriction:F2};ShoulderFriction:{human.shoulderFriction:F2};ElbowFriction:{human.elbowFriction:F2};WristFriction:{human.wristFriction:F2}");
                 writer.WriteLine();
 
-                // Заголовок таблицы
+                // Table header
                 writer.WriteLine("Time;HumanNumber;TorsoAngle;TorsoAngularVelocity;HipAngle;KneeAngle;AnkleAngle;NeckAngle;HeadAngle;" +
                                  "HipFlexor;HipExtensor;KneeFlexor;KneeExtensor;AnkleFlexor;AnkleExtensor;NeckFlexor;NeckExtensor;HeadFlexor;HeadExtensor");
                 foreach (string line in lines)
@@ -159,7 +211,7 @@ public class GlobalHumanLogger : MonoBehaviour
                 writer.WriteLine();
             }
         }
-        Debug.Log($"Логи сохранены в: {fullPath}");
+        Debug.Log($"Logs saved to: {fullPath}");
     }
 
     void OnDestroy()

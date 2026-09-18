@@ -1,20 +1,31 @@
 using UnityEngine;
 
-// Компонент, реализующий вязкое трение в суставе через прямые моменты.
-// Формула: M = -K * ω, где ω — относительная угловая скорость в радианах/с.
-// Момент прикладывается к обоим телам равными и противоположными значениями,
-// что соответствует третьему закону Ньютона и сохраняет суммарный момент системы.
+// Viscous joint friction via direct torques.
+// Formula: M = -K * ω, where ω is relative angular velocity in rad/s.
+// Equal and opposite torques go to both bodies,
+// matching Newton's third law and keeping the system's net torque.
+// ActuatorDriver calls Apply before muscles; FixedUpdate is a fallback.
 [RequireComponent(typeof(HingeJoint2D))]
+[DefaultExecutionOrder(50)]
 public class JointFriction : MonoBehaviour
 {
-    [Tooltip("Коэффициент вязкого трения (K). Чем больше, тем сильнее сопротивление.")]
+    [Tooltip("Viscous friction coefficient (K). Larger means more resistance.")]
     public float damping = 2f;
 
-    [Tooltip("Максимальный момент трения. Ограничивает силу, чтобы не было разлёта при ударах.")]
+    [Tooltip("Maximum friction torque. Caps the force so impacts do not blow the joint apart.")]
     public float maxTorque = 15f;
+
+    // true — ActuatorDriver calls Apply; this FixedUpdate stays silent.
+    [System.NonSerialized]
+    public bool drivenExternally;
 
     private HingeJoint2D joint;
     private Rigidbody2D rbSelf;
+
+    // 1/I₁ + 1/I₂. In Awake Rigidbody2D.inertia is not yet from the collider —
+    // cache only on the first Apply (same moment SPD computes lazily).
+    private float cachedInvInertia;
+    private bool invInertiaCached;
 
     void Awake()
     {
@@ -23,33 +34,43 @@ public class JointFriction : MonoBehaviour
 
         if (joint == null || rbSelf == null)
         {
-            Debug.LogError("JointFriction должен быть на том же объекте, что и HingeJoint2D и Rigidbody2D.");
+            Debug.LogError("JointFriction must be on the same object as HingeJoint2D and Rigidbody2D.");
         }
     }
 
     void FixedUpdate()
     {
+        if (drivenExternally) return;
+        Apply();
+    }
+
+    public void Apply()
+    {
         if (joint == null || joint.connectedBody == null || rbSelf == null) return;
 
-        // Относительная скорость: Unity хранит angularVelocity в градусах/с.
+        // Relative speed: Unity stores angularVelocity in degrees/s.
         float relativeAngularVelocityRad =
             (rbSelf.angularVelocity - joint.connectedBody.angularVelocity) * Mathf.Deg2Rad;
 
-        // Пара τ, −τ даёт относительное ускорение τ·(1/I₁ + 1/I₂).
-        // Кинематические и статические тела имеют inertia = 0 — их в сумму не берём.
-        float invInertia = 0f;
-        if (rbSelf.inertia > 0f) invInertia += 1f / rbSelf.inertia;
-        float connectedInertia = joint.connectedBody.inertia;
-        if (connectedInertia > 0f) invInertia += 1f / connectedInertia;
-        if (invInertia <= 0f) return;
+        // The pair τ, −τ gives relative acceleration τ·(1/I₁ + 1/I₂).
+        // Kinematic and static bodies have inertia = 0 — leave them out of the sum.
+        if (!invInertiaCached)
+        {
+            cachedInvInertia = 0f;
+            if (rbSelf.inertia > 0f) cachedInvInertia += 1f / rbSelf.inertia;
+            float connectedInertia = joint.connectedBody.inertia;
+            if (connectedInertia > 0f) cachedInvInertia += 1f / connectedInertia;
+            invInertiaCached = true;
+        }
+        if (cachedInvInertia <= 0f) return;
 
         float torque = -damping * relativeAngularVelocityRad;
 
-        // Явный демпфер устойчив только при K·Δt/I < 2. У шеи это превышено
-        // в 57 раз, у локтя в 4 — потолок maxTorque лишь маскировал расходимость,
-        // превращая её в предельный цикл. τ_max гасит относительную скорость
-        // ровно за шаг и не даёт перелететь через нуль.
-        float stopTorque = Mathf.Abs(relativeAngularVelocityRad) / (invInertia * Time.fixedDeltaTime);
+        // An explicit damper is stable only at K·Δt/I < 2. At the neck this is exceeded
+        // 57 times, at the elbow 4 — the maxTorque ceiling only hid divergence,
+        // turning it into a limit cycle. τ_max kills relative speed
+        // in one step and does not overshoot through zero.
+        float stopTorque = Mathf.Abs(relativeAngularVelocityRad) / (cachedInvInertia * Time.fixedDeltaTime);
         torque = Mathf.Clamp(torque, -stopTorque, stopTorque);
         torque = Mathf.Clamp(torque, -maxTorque, maxTorque);
 

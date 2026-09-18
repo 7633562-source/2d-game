@@ -1,5 +1,5 @@
-﻿# Общие функции headless-стенда. Подключается из run-trial.ps1, не запускать напрямую.
-# Пути не зашиты в E: / F: — корень проекта выводится из расположения Tools.
+﻿# Shared helpers for the headless stand. Dot-sourced from run-trial.ps1; do not run directly.
+# Paths are not hard-coded to E: / F: — the project root is derived from Tools.
 
 Set-StrictMode -Version Latest
 
@@ -200,7 +200,7 @@ function Assert-UnityEditorClosedForRebuild {
     $editor = @(Get-UnityEditorProcesses)
     if ($editor.Count -gt 0) {
         $pids = ($editor | ForEach-Object { $_.Id }) -join ', '
-        throw "Unity Editor запущен (PID $pids). Закройте редактор перед пересборкой. Запуск уже собранного плеера редактор не блокирует."
+        throw "Unity Editor is running (PID $pids). Close the editor before a rebuild. Running an already-built player does not require the editor to be closed."
     }
 }
 
@@ -283,8 +283,8 @@ function Find-UnityEditor {
     }
 
     $hint = $version
-    if (-not $hint) { $hint = 'из ProjectSettings/ProjectVersion.txt' }
-    throw "Не найден Unity Editor для версии '$hint'. Задайте -UnityPath или переменную UNITY_EDITOR."
+    if (-not $hint) { $hint = 'from ProjectSettings/ProjectVersion.txt' }
+    throw "Unity Editor not found for version '$hint'. Pass -UnityPath or set UNITY_EDITOR."
 }
 
 function Resolve-TrialPaths {
@@ -395,22 +395,22 @@ function Test-TrialBuildFreshness {
     }
 
     if (-not (Test-Path -LiteralPath $Paths.ExePath)) {
-        throw "Плеер не собран: $($Paths.ExePath). Запустите с -Rebuild."
+        throw "Player is not built: $($Paths.ExePath). Run with -Rebuild."
     }
 
     if (-not (Test-Path -LiteralPath $manifestFile)) {
-        throw "Нет build-manifest.json рядом с плеером ($manifestFile). Запустите с -Rebuild."
+        throw "No build-manifest.json next to the player ($manifestFile). Run with -Rebuild."
     }
 
     $manifest = Read-TrialJsonFile -Path $manifestFile
     if (-not $manifest -or [string]::IsNullOrWhiteSpace([string]$manifest.fingerprint)) {
-        throw "build-manifest.json не содержит fingerprint: $manifestFile. Запустите с -Rebuild."
+        throw "build-manifest.json has no fingerprint: $manifestFile. Run with -Rebuild."
     }
 
     $current = Get-TrialSourceFingerprint -ProjectPath $Paths.ProjectPath
     $built = [string]$manifest.fingerprint
     if ($current.Fingerprint -ne $built) {
-        throw ("STALE_BUILD: исходники $($current.Fingerprint), билд $built. Нужен -Rebuild. Текущий hash исходников не подставляется в прогон как hash старого билда.")
+        throw ("STALE_BUILD: sources $($current.Fingerprint), build $built. Need -Rebuild. The current source hash is not substituted into the run as the old build hash.")
     }
 
     return [pscustomobject]@{

@@ -5,7 +5,8 @@ Stay out of `World` / `SampleScene`.
 
 ## One sentence
 
-The bird sits, takes off, turns along ±X, glides, lands, repeats.
+The bird sits, walks on dirt, sometimes takes off, turns along ±X,
+glides, lands, repeats.
 Seeded random, not a chase.
 
 ## Contract

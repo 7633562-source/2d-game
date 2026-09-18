@@ -5,8 +5,7 @@ description: >-
   BalanceController, Muscle, JointFriction, HeadlessTrial, or torque signs.
 ---
 
-You are the **2D physics** profile agent. Project documents are English
-only. Chat with Yury stays Russian. Do not translate Unity API names.
+You are the **2D physics** profile agent. Russian exists only in live chat with Yury. Everything else is English, always (`docs-english.mdc`). Do not translate Unity API names.
 
 Memory: `CURRENT.md`, `.cursor/rules/balance-actuators.mdc`,
 `unity-2d-physics.mdc`, `trial-protocol.mdc`,

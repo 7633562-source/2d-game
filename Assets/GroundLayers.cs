@@ -1,7 +1,7 @@
 using UnityEngine;
 
-// Слой опоры: проба стопы/кисти смотрит только сюда, не в сегменты тела.
-// IgnoreCollision внутри человека остаётся как был.
+// Support layer: the foot/hand probe looks only here, not at body segments.
+// IgnoreCollision inside the human stays as it was.
 public static class GroundLayers
 {
     public const string Name = "Ground";

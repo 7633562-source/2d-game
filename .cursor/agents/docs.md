@@ -6,8 +6,7 @@ description: >-
   Does not write physics, muscles, PD, or scenes.
 ---
 
-You are the **docs** profile agent. Project files are English only, always
-(`.cursor/rules/docs-english.mdc`). Chat with Yury stays Russian.
+You are the **docs** profile agent. Russian exists only in live chat with Yury. Everything else is English, always (`docs-english.mdc`).
 Do not translate Unity API names.
 
 Memory: `DOCS.md`, `CURRENT.md`, `.cursor/rules/docs-map.mdc`,

@@ -1,14 +1,14 @@
 ---
 description: Recursive tree physics — segments, spring, no muscles
-globs: Assets/PlantTree.cs, Assets/TreeSpring.cs, Assets/TreeDriver.cs
+globs: Assets/PlantTree.cs, Assets/TreeSpring.cs, Assets/TreeDriver.cs, Assets/PlantFlower.cs, Assets/FlowerKinds.cs
 alwaysApply: false
 ---
 
 # Plants
 
-Separate layer. Do not touch `Human`, `BalanceController`, `HeadlessTrial`,
-or the yard. Play is scene `Tree`. Keep `treeCount = 0` in `SampleScene`
-and `World`.
+Separate layer. Do not retune human PD or 200 Hz. Play is scene `Tree`.
+Keep `treeCount = 0` and `flowerCount = 0` in `SampleScene` and `World`
+(`LevelGrove` is the yard picture, not `treeCount`).
 
 The builder class is `PlantTree`, not `Tree`: Unity already has
 `UnityEngine.Tree`. A segment is `HumanSegment` (box + Visual), same as
@@ -21,6 +21,13 @@ the bird. Size is `collider.size`, not `localScale`. Leaves are
 |---|---|---|
 | `Sway` | scene `Tree`, headless `-tree 1` | static stump + up to 15 dynamic hinges |
 | `Static` | yard grove, Tree-scene extras | **picture only**: no `Rigidbody2D`, no wood collider |
+
+Static **Apple** (Level1 `YardApple`) look-sways the picture in
+`LateUpdate`: wind plus the same fly-by unit as `ApplyBirdWake`.
+Wood transforms and `BirdPerch` pads stay at the grow pose, so Ground
+colliders are not dragged. Do not promote that apple to `Sway` — one
+Human of hinges next to the Level1 flock is too dear. World grove
+kinds (oak…poplar) stay frozen.
 
 One `Sway` tree costs about one `Human` in body count. Do not plant a
 `Sway` grove in `World`.
@@ -41,17 +48,34 @@ Sway keep the old 31-body clamp; Static may grow to 255 segments.
 `TreeKind` picks the recipe. **Oak** is the hold/perch canon (same
 numbers as 30.08). Pine is tall and sparse, willow wide (Sway weeps
 a little), bush short with a three-way root, poplar thin.
-`KindFromPlantIndex` cycles 0…4. Scene `Tree` plants five (first
-`Sway`, rest `Static`). Yard grove stays `Static` and uses the same
-kinds. Headless default is oak: `-treeKind pine`. Do not plant a
-`Sway` row in `World`.
+**Apple** is opt-in (`ParseKind "apple"`, not in the yard 0…4 cycle):
+3 m leader, wide fork, fruit sprites only. Sway uses the same hold
+path and the Human-sized 15-body cap. Level1 plants it `Static` via
+`LevelGrove`, not `treeCount`, and `PlantTree` look-sways that picture.
+Static Apple grows a denser crown (depth 5, three-way forks on the
+first two levels, cap 96 picture segments), fruit on outer twigs
+(2–3 per twig), perch on wood tips and mid-span (pads cap 48). World
+grove is not Apple.
+Four Play-gallery kinds (not in the yard cycle): **Lilac** (green
+Y-stem, purple ellipse blooms), **Hazel** (three trunks, catkin
+ellipses), **Cedar** (layered near-horizontal fans), **Plum** (square
+fruit clusters). Sway stays inside the 31-body cap; Static may grow
+deeper (depth 4–6). Look-sway is Apple + those four. Oak…Poplar
+Static stay frozen (World grove).
+`KindFromPlantIndex` cycles 0…4 (yard grove). `KindFromGalleryIndex`
+is Oak…Poplar then Lilac Hazel Cedar Plum. Scene `Tree` plants nine
+(first `Sway`, rest `Static`). Headless default is oak; `-treeKind
+pine` / `-treeKind apple` / `-treeKind lilac`.
+Do not plant a `Sway` row in `World`.
 
 ## Hold pose, still bend
 
 Wood gravity is cancelled at the grow pose (`TreeSpring.holdTorque`).
 Without that, a side branch sags to the hinge limit — it looks like the
 branch fell off. Extra mass (a bird on `Ground`) is not in the hold
-sum, so `stiffness` still bends the joint.
+sum, so `stiffness` still bends the joint. Apple Sway also applies
+`worldStiffness` on the trunk (stump is Static); forks stay on the
+joint spring so a world error cannot yank the crown.
 
 Human hinges: `+AddTorque` (CCW) **decreases** `jointAngle`. Wood spring
 is `+k·(θ−θ_rest)`, not textbook `−k·θ`. Cap by `maxTorque` only —
@@ -59,9 +83,10 @@ a one-step `springStop` is < 1 N·m on wood inertia and kills the pose.
 
 Sway wood colliders use the `Ground` layer; a bird does not collide
 with them (`Bird.GhostTreeWood`). Static wood has no collider.
-Sit points are `BirdPerch` pads from `EnsureBirdPerches` (top of twigs,
-cap 20). `GetPerchSlots` / `SeatBirds` / `NearPerch` stay the handshake
-with agent `ai`. Play flock: `BirdFlock50` has `treeCount = 1` (Sway).
+Sit points are `BirdPerch` pads from `EnsureBirdPerches` (oak: top of
+twigs, cap 20; Apple: wood tip and mid-span, cap 48). `GetPerchSlots` /
+`SeatBirds` / `NearPerch` stay the handshake with agent `ai`. Play flock:
+`BirdFlock50` has `treeCount = 1` (Sway).
 Headless: `-tree 1`, Static grove `-treeRig static`. With birds
 `-bird 1 -tree 1`. Do not plant pads in World unless a bird is there.
 
@@ -69,14 +94,41 @@ Accepted 02.09 (`plant_static_cheap_02.md`): Static oak is 0 RB / 0
 wood collider. Sway hold still ≈ 0.002°. One flock bird on Static
 pads: `perchLandCount` 7, `fell` false.
 
+Pass 03.09: Static build skips mass normalize, `SyncTransforms`, and
+hold bind. Perch slots are collected once. Leaves are a sprite on the
+twig, not a `HumanSegment`. Sway path is unchanged.
+
 ## Do not
 
 - No muscles and no `HingeJoint2D.useMotor`. Wood is `TreeSpring` +
   `JointFriction`.
 - Do not put a wood `Rigidbody2D` or wood collider back on Static.
 - Forces only in `FixedUpdate` through `TreeDriver` (spring → damping →
-  wind).
+  wind → bird wake). Look-sway of Static Apple is picture only
+  (`LateUpdate`), not a force.
 - Wind is `½ ρ v² S` on the segment, not an "up" force.
+- A flying bird near a Sway branch adds a local horizontal gust
+  (`ApplyBirdWake`). Wood is ghost to the bird, so there is no solver
+  contact; the wake is the fly-by reaction. Sit / Walk / Static stay
+  quiet on the solver. Static Apple still look-bends from the same
+  fly-by unit (`lookBirdSwayDegrees`). No force on the bird. No Linecast.
+  Not an "up" force.
 - The stump is Static. The tree does not fall like a human ragdoll.
 - Do not bake bark/leaf textures here: card `VIS-TREE`, do not change
   collider size.
+
+## Garden flowers (not a tree)
+
+Small plants are `PlantFlower`, not `PlantTree`. Twelve subclasses
+lock `FlowerKind`: Rose, Tulip, Daisy, Poppy, Sunflower, Lily,
+Daffodil, Violet, Crocus, Lavender, Iris, Bluebell.
+
+Picture only: `HumanSegment.InitializeVisualOnly`. No `Rigidbody2D`,
+no collider, no `TreeSpring`, no wind, no `BirdPerch`. A bird does
+not sit on a bloom. Cost is sprites, not 15 bodies.
+
+Stem is 9–42 cm (crocus … sunflower). Play gallery is scene `Tree`
+(`flowerCount = 12`). World and `SampleScene` stay `flowerCount = 0`.
+Headless: `-flower 1` (row of 12) or `-flower 1 -flowerKind rose`.
+Do not plant a Sway grove of flowers. A yard bed is a later level
+card, not this layer.
