@@ -295,6 +295,12 @@ public class Human : MonoBehaviour
 
         SetupBalanceController();
 
+        // LEVEL 2 pose drive. The component is always built, but it only takes
+        // the joints over when -poseDrive 1 is on the command line; with the
+        // switch off the tree behaves exactly as before (rollback is one flag).
+        PoseDriveController poseDrive = gameObject.AddComponent<PoseDriveController>();
+        poseDrive.Initialize(this, GetComponent<BalanceController>());
+
         // Friction, then muscles — one FixedUpdate, order is explicit.
         ActuatorDriver actuators = gameObject.AddComponent<ActuatorDriver>();
         actuators.RebuildCache();

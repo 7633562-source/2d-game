@@ -4391,6 +4391,22 @@ public partial class BalanceController : MonoBehaviour
         walkComVelFiltered += (raw - walkComVelFiltered) * alpha;
     }
 
+    // LEVEL 2: -poseDrive 1. The pose library takes every joint on the step it
+    // is active, so it is the single writer, and it is resolved lazily because
+    // Human adds it after this component exists.
+    private PoseDriveController poseDrive;
+    private bool poseDriveResolved;
+
+    private bool PoseDriveActive()
+    {
+        if (!poseDriveResolved)
+        {
+            poseDriveResolved = true;
+            poseDrive = GetComponent<PoseDriveController>();
+        }
+        return poseDrive != null && poseDrive.active;
+    }
+
     void FixedUpdate()
     {
         float comOffset = comCalculator != null ? comCalculator.GetCoMOffsetX() : 0f;
@@ -4408,6 +4424,15 @@ public partial class BalanceController : MonoBehaviour
         if (stepPhaseDriver == null || !stepPhaseDriver.walkActive)
             TryCaptureStandHipReference();
         UpdateLocomotionState(comOffset);
+
+        // LEVEL 2 pose drive. One switch, one writer: while it is on, every
+        // joint belongs to the pose library and the automaton below is skipped.
+        // The old path stays in the file and still runs with -poseDrive 0.
+        if (PoseDriveActive())
+        {
+            poseDrive.Tick(comOffset);
+            return;
+        }
 
         // GETUP-1: prone heap (−70° plank) + walk key is TickGetUp.
         // A mid-walk dump under GetUpProneDeg stays StandingRestore so
