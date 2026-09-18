@@ -124,8 +124,10 @@ public class Human : MonoBehaviour
     // only lift the torso while the hand holds the slab, so the palm gets a
     // material instead of Unity's smooth default. Same pairing rule as the
     // sole — sqrt(µ_palm · µ_ground).
+    // 1.0 gripped less than the sole (1.2): a press that slides is a press that
+    // lifts nothing, so the palm is over the sole value on purpose.
     [Header("Palm-to-ground friction")]
-    public float handFriction = 1.0f;
+    public float handFriction = 1.4f;
 
     // Segment masses are the same, sizes are smaller — torso inertia dropped
     // about threefold. The former friction did not damp PD; the torso wobbled at ~30 Hz.
