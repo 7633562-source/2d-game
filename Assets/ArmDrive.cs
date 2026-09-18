@@ -300,6 +300,9 @@ public class ArmDrive : MonoBehaviour
     private float shTorqueBase = 40f, elTorqueBase = 30f;
     private float hipSpeedHold;
     private float walkBlend;
+    // Filled lazily from the human's own walk driver. The swing must follow the
+    // walker's decision to walk, not the hip jitter the swing itself creates.
+    private StepPhaseDriver stepDriver;
     private readonly float[] hipMean = new float[2];
     private readonly float[] hipDev = new float[2];
     private readonly float[] hipVar = new float[2];
@@ -461,6 +464,9 @@ public class ArmDrive : MonoBehaviour
 
     private void UpdateWalkSwing(float dt)
     {
+        if (stepDriver == null) stepDriver = GetComponent<StepPhaseDriver>();
+        bool walkActive = stepDriver != null && stepDriver.walkActive;
+
         float hipSpeed = 0f;
         for (int i = 0; i < 2; i++)
         {
@@ -470,10 +476,16 @@ public class ArmDrive : MonoBehaviour
         if (hipSpeed >= walkHipSpeedDegPerSec) hipSpeedHold = walkHoldSeconds;
         else hipSpeedHold = Mathf.Max(0f, hipSpeedHold - dt);
 
-        // The swing rides the hips, so it needs no walkActive bit from the walk
-        // worker: it engages on any locomotion this rig produces and drops out
-        // the moment the body is down (the press owns the arms then).
-        float target = hipSpeedHold > 0f && !down ? 1f : 0f;
+        // The gate needs a moving hip AND a walk the walker actually asked for.
+        // The hip test alone is a trap: the swing shakes the torso, the torso
+        // drives the hips, so the hip speed that switched the swing on is made by
+        // the swing itself. In a quiet stand that loop latched the swing on for
+        // 99.6% of the frames (18.09 21:15: shoulder RMS 181.7 deg/s, elbow 311.6,
+        // torsoAngVel 63.0) while the same build with -armSwing 0 stands at
+        // 7.4 / 21.5 / 3.9, i.e. exactly the pre-regression stand. The walker's
+        // own walkActive reads 0 in all 8001 stand frames and 1 in 7000 of 8001
+        // walk frames, so it separates the two states instead of inverting them.
+        float target = hipSpeedHold > 0f && walkActive && !down ? 1f : 0f;
         walkBlend = Mathf.MoveTowards(walkBlend, target, dt / Mathf.Max(0.05f, walkRampSeconds));
         WalkSwingLevel = walkBlend;
 
