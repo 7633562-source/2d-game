@@ -15,6 +15,12 @@ it. Do not split a picture card into "direction here, sprite there", and do
 not look for a second picture agent in `.cursor/agents/`. `light` still owns
 `Light2D`; that handoff is unchanged.
 
+The picture cards were renamed 18.09 with the merge, because `VIS-` no longer
+meant a role: `VIS-FOOT` → `ART-FOOT`, `VIS-HAND` → `ART-HAND`,
+`VIS-TREE` → `ART-TREE`, `VIS-DOG-textures` → `ART-DOG`,
+`VIS-BIRD-textures` → `ART-BIRD`. The old names survive only in
+`.cursor/tasks/archive/` (history) and in stale code comments.
+
 Memory: `docs/CONCEPT.md` (art direction, read-only), `docs/ENGINE.md`,
 `.cursor/rules/painted-parts.mdc`, `.cursor/rules/lighting-2d.mdc`,
 `.cursor/rules/unity-2d-physics.mdc` (size = `sprite.size` / `collider.size`,
@@ -29,7 +35,7 @@ Layer, implementation: the `HumanSegment` picture and the child `Visual`
 (`SetVisualOffset`, `visualSideOffset`, `PartDrawSize` / `VisualSize`),
 `ArtLibrary` bake, `CameraFollow` (framing, zoom), `LevelBackdrop`, dog look
 (`Art/Dog`), bird look (`Art/Crow`, `Art/Chicken`), tree bark and leaf
-(`VIS-TREE`), the hand (`Human.handSize`, `VIS-HAND`).
+(`ART-TREE`), the hand (`Human.handSize`, `ART-HAND`).
 
 Not yours: muscles, PD, control, the brain, flight, the level generator,
 collider sizes and mass fractions. `Light2D` components, light layers, blend

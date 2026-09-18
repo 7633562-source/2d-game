@@ -38,8 +38,8 @@ folder (same as GPU-10). Night report: `Trials/Runs/docs_daily/` and
 | Static grove | `Trials/Runs/plant_static_cheap_02.md` | Sway hinges in World, wood RB on grove |
 | Garden flowers | `.cursor/rules/plant-physics.mdc`, card `PLANT-3-flowers` | `PlantTree`, perch, World bed |
 | Dog stance | `.cursor/rules/dog-physics.mdc`, `Trials/Runs/dog_cycles.md` | human `BalanceController` |
-| Dog look | `Assets/Resources/Art/Dog/`, card `VIS-DOG-textures` | dog sizes / stance gains |
-| Bird look | `Art/Crow/`, `Art/Chicken/`, card `VIS-BIRD-textures` | `BirdFlight` / `BirdKind` sizes |
+| Dog look | `Assets/Resources/Art/Dog/`, card `ART-DOG` | dog sizes / stance gains |
+| Bird look | `Art/Crow/`, `Art/Chicken/`, card `ART-BIRD` | `BirdFlight` / `BirdKind` sizes |
 | Painted parts | `.cursor/rules/painted-parts.mdc` | judging crops instead of Play |
 
 User-facing concept docs (Russian, edited by Yury): `docs/CONCEPT.md`,
@@ -92,7 +92,7 @@ By layer: `balance-actuators`, `unity-2d-physics`, `level-generation`,
 1. **Baseline.** Root `README` and `Trials/README` used to name
    `Baselines/current/` as canon. Since 2026-08-30 the pointer is
    `stable-pd/`. The `curr_*` files stayed on disk.
-2. **Hand.** In `Human.cs` default `handSize.y = 0.32`. Card `VIS-HAND`
+2. **Hand.** In `Human.cs` default `handSize.y = 0.32`. Card `ART-HAND`
    still asks for `0.19`. `current-front` records that `0.19` folded walk
    at ~25 s and the physical length was restored to 0.32. Stance `vis_hand`
    at `0.19` was accepted on its own. Do not close the card silently.

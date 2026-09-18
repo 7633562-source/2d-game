@@ -1,4 +1,4 @@
-# VIS-FOOT — the foot is painted as a ski
+# ART-FOOT — the foot is painted as a ski
 
 Date: 2026-09-01. Dispatcher: this chat (human balance).
 Owner: **artist**. Physics side is closed and must not move.
@@ -50,7 +50,7 @@ muscles, or the walk driver.
   `localPosition` (`unity-2d-physics.mdc`).
 - `PartDrawSize` exempts `Human/hand` by name today. Generalizing the
   exemption or adding the foot by name are both fine; do not change the
-  hand's own numbers — see `VIS-HAND.md`, where a body-size edit folded
+  hand's own numbers — see `ART-HAND.md`, where a body-size edit folded
   walk at ~25 s.
 - Do not touch mass fractions.
 

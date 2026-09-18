@@ -114,7 +114,7 @@ twig, not a `HumanSegment`. Sway path is unchanged.
   fly-by unit (`lookBirdSwayDegrees`). No force on the bird. No Linecast.
   Not an "up" force.
 - The stump is Static. The tree does not fall like a human ragdoll.
-- Do not bake bark/leaf textures here: card `VIS-TREE`, do not change
+- Do not bake bark/leaf textures here: card `ART-TREE`, do not change
   collider size.
 
 ## Garden flowers (not a tree)

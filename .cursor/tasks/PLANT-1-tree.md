@@ -35,4 +35,4 @@ cycles the same kinds on `Static`. CLI `-treeKind`.
 | Bush | 12.6° / drop 0 | 10 | short, three-way root |
 | Poplar | 0.003° / drop 0 | 15 | tall thin |
 
-Textures are not this card (`VIS-TREE`).
+Textures are not this card (`ART-TREE`).

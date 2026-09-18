@@ -1,4 +1,4 @@
-# VIS-TREE — bark and leaf
+# ART-TREE — bark and leaf
 
 One sentence: tree segments should read as bark and foliage, not as a
 tinted human capsule.

@@ -169,7 +169,7 @@ foreach ($f in $scan) {
 
 # handSize contradiction (report only)
 $humanCs = Join-Path $ProjectPath "Assets\Human.cs"
-$visHand = Join-Path $ProjectPath ".cursor\tasks\VIS-HAND.md"
+$visHand = Join-Path $ProjectPath ".cursor\tasks\ART-HAND.md"
 $handCode = $null
 $handCard = $null
 if (Test-Path -LiteralPath $humanCs) {

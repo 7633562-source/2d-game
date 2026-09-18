@@ -1,4 +1,4 @@
-# VIS-BIRD — crow and chicken parts
+# ART-BIRD — crow and chicken parts
 
 Picture only. Do not change `Bird` sizes, `BirdFlight`, or `BirdKind`
 recipe numbers.

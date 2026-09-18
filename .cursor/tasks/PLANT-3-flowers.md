@@ -25,5 +25,5 @@ Acceptance (04.09, fingerprint `db775813…3288b5b`):
 - `-flower 1 -flowerKind rose` → `flower_rose.json`: count 1, stem 0.22.
 - No wood joints, no perch slots.
 
-Textures are not this card (`VIS-TREE` is bark/leaf). A painted petal
+Textures are not this card (`ART-TREE` is bark/leaf). A painted petal
 set is a later artist card. A World flower bed is a later level card.

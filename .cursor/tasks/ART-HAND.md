@@ -1,4 +1,4 @@
-# VIS-HAND — hands are not shovels
+# ART-HAND — hands are not shovels
 
 Date: 2026-08-29. Dispatcher: TEAM LEAD.
 Owner: **artist** (picture). The number lives in `Human.handSize` —

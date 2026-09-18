@@ -9,15 +9,15 @@ without reading `CURRENT.md` and the card body.
 | `VEST-2-balance.md` | physics — per-foot quiet ankle; VEST-1 archived |
 | `WALK-1-physics.md` | physics (paused: vestibular first) |
 | `WALK-2.md` | physics — CaptureWalk canonical (`-captureWalk 1`); FallCatch card leftover |
-| `VIS-HAND.md` | artist (stance accepted; Play after build) |
+| `ART-HAND.md` | artist (stance accepted; Play after build) |
 | `PERF-1-optimization.md` | optimization — lab + `opt_agent_proposals.md` (pre-grove, pre-yard) |
 | `OPT-3-distant-rest.md` | optimization — off-camera NPC rest (`NpcRest`); hero stays 200 Hz |
 | `PLANT-1-tree.md` | plant (sway tree in scene `Tree`) |
 | `PLANT-3-flowers.md` | plant (12 garden kinds, picture only) |
-| `VIS-TREE.md` | artist (bark/leaf on; Play scene `Tree`) |
-| `VIS-FOOT.md` | artist — foot art stretched ×2.42, collider stays 0.26×0.07 |
-| `VIS-DOG-textures.md` | artist — painted dog parts, sizes unchanged |
-| `VIS-BIRD-textures.md` | artist — crow and chicken parts, flight unchanged |
+| `ART-TREE.md` | artist (bark/leaf on; Play scene `Tree`) |
+| `ART-FOOT.md` | artist — foot art stretched ×2.42, collider stays 0.26×0.07 |
+| `ART-DOG.md` | artist — painted dog parts, sizes unchanged |
+| `ART-BIRD.md` | artist — crow and chicken parts, flight unchanged |
 | `DOCS-DAILY.md` | docs (nightly 02:00) |
 | `DOG-1-physics.md` | dog — first 52 cycles; leftover c39 sit, c52 columns fold |
 | `DOG-2-stance-10.md` | dog — c53–c62 done; leftover rake −25/+25 + startupHip 8/0.25, drop 0.193 sit |

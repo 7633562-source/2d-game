@@ -1,4 +1,4 @@
-# VIS-DOG — painted dog parts
+# ART-DOG — painted dog parts
 
 Picture only. Do not change `Dog` sizes, masses, hinges, or
 `DogStanceController`.
