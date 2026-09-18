@@ -18,6 +18,12 @@ public class AppleTrialRecorder
     private float lastCrownY;
     private float settleAbsJoint;
     private bool settled;
+    // Yury 18.09 sway-never-topple metrics.
+    private float maxTrunkLeanDeg;
+    private float maxPinnedFraction;
+    private float maxBaseSlideM;
+    private float startCrownTipX;
+    private float swayAmpM;
 
     public AppleTrialRecorder(TreeBase tree, TrialRunInfo info)
     {
@@ -40,6 +46,18 @@ public class AppleTrialRecorder
         if (crown < minCrownY) minCrownY = crown;
         sumAbsJoint += abs;
         sumJointSq += abs * abs;
+        // Sway-never-topple: track the stem lean, hinge pinning, base slide
+        // and the crown tip's horizontal excursion over the whole run.
+        float trunkLean = tree.GetTrunkLeanDeg();
+        if (trunkLean > maxTrunkLeanDeg) maxTrunkLeanDeg = trunkLean;
+        float pinned = tree.GetHingePinnedFraction();
+        if (pinned > maxPinnedFraction) maxPinnedFraction = pinned;
+        float baseSlide = tree.GetBaseSlideM();
+        if (baseSlide > maxBaseSlideM) maxBaseSlideM = baseSlide;
+        Vector2 crownTip = tree.GetCrownTip();
+        if (samples == 0) startCrownTipX = crownTip.x;
+        float amp = Mathf.Abs(crownTip.x - startCrownTipX);
+        if (amp > swayAmpM) swayAmpM = amp;
         if (!settled && time >= 2f)
         {
             settleAbsJoint = abs;
@@ -80,6 +98,10 @@ public class AppleTrialRecorder
         AppendNum(json, "startCrownY", startCrownY);
         AppendNum(json, "minCrownY", minCrownY < float.MaxValue ? minCrownY : 0f);
         AppendNum(json, "finalCrownY", lastCrownY);
+        AppendNum(json, "maxTrunkLeanDeg", maxTrunkLeanDeg);
+        AppendNum(json, "hingePinnedFraction", maxPinnedFraction);
+        AppendNum(json, "baseSlideM", maxBaseSlideM);
+        AppendNum(json, "swayAmpM", swayAmpM);
         if (tree != null)
         {
             json.Append(",\"treeSegmentCount\":").Append(tree.SegmentCount.ToString(CultureInfo.InvariantCulture));

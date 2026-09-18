@@ -33,19 +33,28 @@ public abstract class TreeBase : PlantBase
     [Tooltip("Fork scatter, degrees. Local Random, not UnityEngine.Random.")]
     public float forkJitter = 4f;
 
-    [Header("Wood")]
-    public float trunkBendLimit = 16f;
-    public float twigBendLimit = 40f;
-    [Tooltip("Trunk stiffness, N·m/rad.")]
-    public float trunkStiffness = 180f;
+    [Header("Per-order wood — Yury 18.09: the stem is strong, the crown sways")]
+    [Tooltip("Bend limit per branch order, deg. Order 0 = trunk (near rigid), 1 = main limbs, 2 = secondary, 3 = twigs. The sway lives in the crown, never in the stem.")]
+    public float trunkBendLimit = 1.5f;
+    public float limbBendLimit = 5f;
+    public float secondaryBendLimit = 12f;
+    public float twigBendLimit = 28f;
+    [Tooltip("Torsion stiffness per order, N·m/rad. The stem is very stiff; stiffness falls by order.")]
+    public float trunkStiffness = 500f;
+    public float limbStiffness = 120f;
+    public float secondaryStiffness = 45f;
     public float twigStiffness = 22f;
-    public float trunkFriction = 8f;
+    [Tooltip("Joint damping per order, N·m·s/rad.")]
+    public float trunkFriction = 9f;
+    public float limbFriction = 2.2f;
+    public float secondaryFriction = 0.6f;
     public float twigFriction = 0.35f;
-    public float trunkSpringMaxTorque = 250f;
+    [Tooltip("Spring torque cap per order, N·m.")]
+    public float trunkSpringMaxTorque = 600f;
     public float twigSpringMaxTorque = 40f;
     public float minSegmentInertia = 0.008f;
-    [Tooltip("1 = the trunk also holds world-up (the static stump absorbs the reaction); 0 = joint spring only.")]
-    public float worldHoldScale = 1f;
+    [Tooltip("World hold on the trunk, 0..1. Keeps the stem near vertical (the static stump absorbs the reaction); forks stay on the joint spring so a world error cannot yank the crown.")]
+    public float trunkWorldHold = 1f;
 
     // Leader stays close to the parent axis; the side takes the full fork.
     // A subclass may change these for its crown recipe.
@@ -78,6 +87,7 @@ public abstract class TreeBase : PlantBase
     private System.Random rng;
     private TreeSpring[] springs = System.Array.Empty<TreeSpring>();
     private JointFriction[] frictions = System.Array.Empty<JointFriction>();
+    private float baseSpawnX;
     private const float AirDensity = 1.2f;
     private const float SpreadLimbDeg = 5f;
 
@@ -117,6 +127,7 @@ public abstract class TreeBase : PlantBase
         stump.transform.localPosition = new Vector3(0f, stumpHeight * 0.5f, 0f);
         stump.transform.localRotation = Quaternion.identity;
         stump.rb.bodyType = RigidbodyType2D.Static;
+        baseSpawnX = stump.transform.position.x;
         nodes.Add(new Node
         {
             segment = stump,
@@ -194,9 +205,9 @@ public abstract class TreeBase : PlantBase
             parent,
             new Vector2(0f, -length * 0.5f),
             new Vector2(0f, parent.size.y * 0.5f),
-            -BendLimit(width),
-            BendLimit(width));
-        AddWoodActuators(seg, width, length, heading);
+            -BendLimitForOrder(OrderOfDepth(depth)),
+            BendLimitForOrder(OrderOfDepth(depth)));
+        AddWoodActuators(seg, width, length, heading, depth);
         TreeSpring spring = seg.GetComponent<TreeSpring>();
 
         nodes.Add(new Node
@@ -236,34 +247,67 @@ public abstract class TreeBase : PlantBase
         Grow(seg, heading, depth + 1, nextLen * sideLengthScale, nextWid, sideHeading, cap);
     }
 
-    private void AddWoodActuators(HumanSegment segment, float width, float length, float heading)
+    private void AddWoodActuators(HumanSegment segment, float width, float length, float heading, int depth)
     {
-        float t = ThicknessT(width);
-        float thick = t * t * t;
+        int order = OrderOfDepth(depth);
         float lengthScale = trunkLength / Mathf.Max(0.05f, length);
 
         TreeSpring spring = segment.gameObject.AddComponent<TreeSpring>();
-        spring.stiffness = Mathf.Lerp(twigStiffness, trunkStiffness, thick) * lengthScale;
+        spring.stiffness = StiffnessForOrder(order) * lengthScale;
         spring.restAngle = 0f;
         spring.restWorldAngle = heading;
-        spring.worldStiffness = worldHoldScale > 0.001f
-            ? worldHoldScale * Mathf.Lerp(55f, 280f, thick) * lengthScale
+        // World hold on the trunk only. The stem stays near vertical while the
+        // forks sway on their own joint spring (a world error cannot yank the
+        // crown). TreeSpring.Apply only honours worldStiffness when the parent
+        // is static — the trunk — so deeper orders are joint-spring only.
+        spring.worldStiffness = order == 0 && trunkWorldHold > 0.001f
+            ? trunkWorldHold * trunkStiffness * lengthScale
             : 0f;
-        spring.maxTorque = Mathf.Lerp(twigSpringMaxTorque, trunkSpringMaxTorque, thick);
+        spring.maxTorque = order == 0 ? trunkSpringMaxTorque : twigSpringMaxTorque;
 
         JointFriction friction = segment.gameObject.AddComponent<JointFriction>();
-        friction.damping = Mathf.Lerp(twigFriction, trunkFriction, t);
+        friction.damping = DampingForOrder(order);
         friction.maxTorque = spring.maxTorque;
     }
 
-    private float BendLimit(float width)
+    // Branch order from growth depth: 0 = trunk, 1 = main limbs, 2 = secondary,
+    // 3 = twigs. Deeper growth is clamped to the twig recipe.
+    private static int OrderOfDepth(int depth)
     {
-        return Mathf.Lerp(twigBendLimit, trunkBendLimit, ThicknessT(width));
+        return Mathf.Clamp(depth, 0, 3);
     }
 
-    private float ThicknessT(float width)
+    private float BendLimitForOrder(int order)
     {
-        return Mathf.Clamp01((width - minWidth) / Mathf.Max(0.001f, trunkWidth - minWidth));
+        switch (order)
+        {
+            case 0: return trunkBendLimit;
+            case 1: return limbBendLimit;
+            case 2: return secondaryBendLimit;
+            default: return twigBendLimit;
+        }
+    }
+
+    private float StiffnessForOrder(int order)
+    {
+        switch (order)
+        {
+            case 0: return trunkStiffness;
+            case 1: return limbStiffness;
+            case 2: return secondaryStiffness;
+            default: return twigStiffness;
+        }
+    }
+
+    private float DampingForOrder(int order)
+    {
+        switch (order)
+        {
+            case 0: return trunkFriction;
+            case 1: return limbFriction;
+            case 2: return secondaryFriction;
+            default: return twigFriction;
+        }
     }
 
     protected virtual Color BarkColor(int depth, bool farSide)
@@ -453,6 +497,69 @@ public abstract class TreeBase : PlantBase
             if (top > y) y = top;
         }
         return y;
+    }
+
+    // Trunk lean from world-up, deg. The stem must stay near vertical; the
+    // trunk hinge is limited to +-trunkBendLimit, so this reads the real bend.
+    public float GetTrunkLeanDeg()
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (n.depth != 0 || !n.dynamic || n.segment == null) continue;
+            if (n.segment.rb != null)
+                return Mathf.Abs(Mathf.DeltaAngle(0f, n.segment.rb.rotation));
+            return Mathf.Abs(Mathf.DeltaAngle(0f, n.segment.transform.eulerAngles.z));
+        }
+        return 0f;
+    }
+
+    // Fraction of dynamic hinges sitting AT their limit (pinned). 0 = none.
+    // A hinge pinned at its stop means the tree has sagged or blown to a limit.
+    public float GetHingePinnedFraction()
+    {
+        int dynamic = 0, pinned = 0;
+        const float epsDeg = 0.2f;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (!n.dynamic || n.segment == null || n.segment.joint == null) continue;
+            dynamic++;
+            JointAngleLimits2D lim = n.segment.joint.limits;
+            float angle = n.segment.joint.jointAngle;
+            if (Mathf.Abs(angle - lim.min) <= epsDeg || Mathf.Abs(angle - lim.max) <= epsDeg)
+                pinned++;
+        }
+        return dynamic > 0 ? (float)pinned / dynamic : 0f;
+    }
+
+    // Base slide, m. The stump is static, so this is 0 by construction — but
+    // it is read from the actual stump transform, not hardcoded.
+    public float GetBaseSlideM()
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            if (nodes[i].depth == -1 && nodes[i].segment != null)
+                return Mathf.Abs(nodes[i].segment.transform.position.x - baseSpawnX);
+        }
+        return 0f;
+    }
+
+    // Highest crown tip in world space, along the segment's own heading, so
+    // the horizontal excursion is the sway rather than a fixed box corner.
+    public Vector2 GetCrownTip()
+    {
+        Vector2 best = transform.position;
+        float bestY = float.MinValue;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            HumanSegment seg = nodes[i].segment;
+            if (seg == null) continue;
+            Vector2 tip = (Vector2)seg.transform.position
+                + HeadingDir(seg.transform.eulerAngles.z) * (seg.size.y * 0.5f);
+            if (tip.y > bestY) { bestY = tip.y; best = tip; }
+        }
+        return best;
     }
 
     public Vector2 GetFollowPoint()

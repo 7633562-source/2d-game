@@ -44,9 +44,11 @@ public class AppleTree : TreeBase
 
     protected override void ApplyRecipe()
     {
-        // Apple crown. The physics follows the oak hold canon (fork 28,
-        // no world spring) so the empty hold stays tight; the apple
-        // character is the low rounded crown + red fruit, not a looser rig.
+        // Apple crown: low and wide with fruit. Wood is per-order (Yury 18.09
+        // stem rule) and inherited from TreeBase's defaults — the trunk is near
+        // rigid (world hold + +-1.5 deg limit) and the sway lives in the
+        // order-3 twigs. The apple character is the crown shape + fruit, not a
+        // looser rig.
         trunkLength = 0.82f;
         trunkWidth = 0.16f;
         stumpHeight = 0.22f;
@@ -59,10 +61,6 @@ public class AppleTree : TreeBase
         forkJitter = 4f;
         leaderForkShare = 0.28f;
         totalMass = 28f;
-        trunkStiffness = 180f;
-        twigStiffness = 22f;
-        twigSpringMaxTorque = 40f;
-        worldHoldScale = 0f;
         sideLengthScale = 1f;
         growsLeaves = true;
 
