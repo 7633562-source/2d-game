@@ -4423,16 +4423,19 @@ public partial class BalanceController : MonoBehaviour
         // kinematic thigh+shin fallback.
         if (stepPhaseDriver == null || !stepPhaseDriver.walkActive)
             TryCaptureStandHipReference();
-        UpdateLocomotionState(comOffset);
 
         // LEVEL 2 pose drive. One switch, one writer: while it is on, every
-        // joint belongs to the pose library and the automaton below is skipped.
-        // The old path stays in the file and still runs with -poseDrive 0.
+        // joint belongs to the pose library and the automaton below is skipped,
+        // including the locomotion automaton - the pose tick names the state
+        // itself (getUpAttempts 7000 came from entering the old get up every
+        // step of a pose run). The old path still runs with -poseDrive 0.
         if (PoseDriveActive())
         {
             poseDrive.Tick(comOffset);
             return;
         }
+
+        UpdateLocomotionState(comOffset);
 
         // GETUP-1: prone heap (−70° plank) + walk key is TickGetUp.
         // A mid-walk dump under GetUpProneDeg stays StandingRestore so

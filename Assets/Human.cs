@@ -120,6 +120,13 @@ public class Human : MonoBehaviour
     [Header("Shoulder relative to chest top (m)")]
     public float shoulderDropFromNeck = 0.09f;
 
+    // Palm-to-ground grip. The fall press is a closed chain: the elbow can
+    // only lift the torso while the hand holds the slab, so the palm gets a
+    // material instead of Unity's smooth default. Same pairing rule as the
+    // sole — sqrt(µ_palm · µ_ground).
+    [Header("Palm-to-ground friction")]
+    public float handFriction = 1.0f;
+
     // Segment masses are the same, sizes are smaller — torso inertia dropped
     // about threefold. The former friction did not damp PD; the torso wobbled at ~30 Hz.
     [Header("Joint friction")]
@@ -305,6 +312,13 @@ public class Human : MonoBehaviour
         ActuatorDriver actuators = gameObject.AddComponent<ActuatorDriver>();
         actuators.RebuildCache();
 
+        // Arms. Owns the shoulder/elbow activations only, and rewrites them
+        // after BalanceController (order 0) and before the actuator pass above
+        // applies them (order 50): reciprocal swing on the walk, press on the
+        // fall. Everything else on the arm stays with the balance controller.
+        ArmDrive armDrive = gameObject.AddComponent<ArmDrive>();
+        armDrive.Bind();
+
         Damageable life = gameObject.AddComponent<Damageable>();
         life.maxHealth = 100f;
         life.health = 100f;
@@ -415,6 +429,10 @@ public class Human : MonoBehaviour
             -60f, 60f);
         AddFriction(hand, wristFriction);
         AddMuscles(hand, wristMuscleTorque);
+        // The fall press is a closed chain: the elbow cannot lift the torso
+        // off a smooth slab, so the palm carries a material beside the sole.
+        if (hand.collider != null)
+            hand.collider.sharedMaterial = PalmMaterial();
     }
 
     // One material for both feet: Box2D combines pair friction as
@@ -431,6 +449,20 @@ public class Human : MonoBehaviour
         }
 
         return soleMaterial;
+    }
+
+    private PhysicsMaterial2D palmMaterial;
+
+    private PhysicsMaterial2D PalmMaterial()
+    {
+        if (palmMaterial == null)
+        {
+            palmMaterial = new PhysicsMaterial2D("HumanPalm");
+            palmMaterial.friction = Mathf.Max(0f, handFriction);
+            palmMaterial.bounciness = 0f;
+        }
+
+        return palmMaterial;
     }
 
     private void CreateLeg(string sideName, float direction, HumanSegment pelvis,

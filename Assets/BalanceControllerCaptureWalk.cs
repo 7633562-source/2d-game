@@ -433,7 +433,10 @@ public partial class BalanceController
 
     public int CaptureWalkStateCode => (int)captureState;
     public float CaptureWalkStateAge => captureStateAge;
-    public int CaptureWalkStepCount => captureWalkStepAcc + captureStepCount;
+    // LEVEL 2: the pose drive publishes its own step count here, so walkSwap in
+    // the trial JSON measures the gait that actually ran, whichever it is.
+    public int poseDriveStepCount;
+    public int CaptureWalkStepCount => captureWalkStepAcc + captureStepCount + poseDriveStepCount;
     public int CaptureWalkBothAirSteps => captureBothAirSteps;
     public int CaptureWalkWatchdogCount => captureWatchdogCount;
     public int CaptureStanceFootSign => captureStanceSign >= 0 ? 1 : -1;

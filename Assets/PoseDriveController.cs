@@ -29,8 +29,13 @@ public class PoseDriveController : MonoBehaviour
     private bool walkEnabled;
     private float swingDuration = 0.35f;
     private float stanceDuration = 0.45f;
-    private float swingLiftMeters = 0.24f;
+    private float swingLiftMeters = 0.22f;
+    private float swingLandShare = 0.8f;
     private float heightGainDegPerMeter = 400f;
+    // 25 is the value the 40 s stand was verified on (p_ds 09:44, 15 mm drop).
+    // The sign is the one that held: a rising pelvis extends the leg. Do not
+    // flip it without a trial - the 09:58 build with this term at 0 and the
+    // knee clamp one sided ran 2 m forward and face planted.
     private float heightDampDegPerMeterPerSecond = 25f;
     private float placementMarginMeters = 0.04f;
     private float comLeadSwapMeters = 0.16f;
@@ -71,6 +76,13 @@ public class PoseDriveController : MonoBehaviour
     private float leftShoulderInertia, rightShoulderInertia;
     private float leftElbowInertia, rightElbowInertia;
     private float leftWristInertia, rightWristInertia;
+
+    // ─── quiet ankle loop ──────────────────────────────────────────────────
+    // The law is the standing controller's, unchanged: command = P*(offset/ref)
+    // + D*(speed/ref) with offsets in metres, so a 7 mm CoM offset already asks
+    // for the whole ankle. The two factors scale that pair from the CLI.
+    private float ankleBalanceP = 1.0f;
+    private float ankleBalanceD = 1.0f;
 
     // ─── stand frame ───────────────────────────────────────────────────────
     private bool standCaptured;
@@ -140,6 +152,7 @@ public class PoseDriveController : MonoBehaviour
         swingDuration = Mathf.Max(0.05f, GetFloat("-poseSwingT", swingDuration));
         stanceDuration = Mathf.Max(0.05f, GetFloat("-poseStanceT", stanceDuration));
         swingLiftMeters = Mathf.Max(0f, GetFloat("-poseLift", swingLiftMeters));
+        swingLandShare = Mathf.Clamp(GetFloat("-poseLandShare", swingLandShare), 0.3f, 0.98f);
         heightGainDegPerMeter = GetFloat("-poseHeightGain", heightGainDegPerMeter);
         heightDampDegPerMeterPerSecond =
             GetFloat("-poseHeightDamp", heightDampDegPerMeterPerSecond);
@@ -149,6 +162,8 @@ public class PoseDriveController : MonoBehaviour
         stepMaxMeters = Mathf.Max(stepMinMeters + 0.01f, GetFloat("-poseStepMax", stepMaxMeters));
         standCaptureSeconds = GetFloat("-poseStandCap", standCaptureSeconds);
         armSwingDeg = GetFloat("-poseArmSwing", armSwingDeg);
+        ankleBalanceP = GetFloat("-poseAnkleP", ankleBalanceP);
+        ankleBalanceD = GetFloat("-poseAnkleD", ankleBalanceD);
     }
 
     // ─── one physics step ──────────────────────────────────────────────────
@@ -193,8 +208,12 @@ public class PoseDriveController : MonoBehaviour
             ? BalanceController.BalanceState.Recovery
             : BalanceController.BalanceState.Balancing;
 
-        float pelvisHeight = pelvisY - groundY;
+        float pelvisHeight = pelvisY - groundY;   // kept for the walk log
         poseHeightError = standPelvisY - pelvisY;
+        // The recorder reads CaptureWalkStepCount for walkSwap. The pose gait
+        // owns the steps while the switch is on, so it publishes its own count
+        // there instead of the recorder learning a second source.
+        balance.poseDriveStepCount = poseStepCount;
 
         if (walkKey && walkEnabled && standCaptured && (leftDown || rightDown))
         {
@@ -251,7 +270,7 @@ public class PoseDriveController : MonoBehaviour
         // owns both hips, and on planted legs that is also the hip pose.
         DriveOneLeg(true, float.NaN, knee, false, 0f, 0f, 0f);
         DriveOneLeg(false, float.NaN, knee, false, 0f, 0f, 0f);
-        DriveHipsToWorldUpright(pelvisTilt, pelvisAngVel, 0f, true, true);
+        DriveHips(pelvisTilt, pelvisAngVel, 0f, true, true, 0f, false);
         DriveAnkleBalance(comX, comVelX, leftDown, rightDown);
         DriveToes(0f, 0f);
         DriveArms(0f, 0f, balance.elbowBaseAngle, balance.elbowBaseAngle);
@@ -260,13 +279,18 @@ public class PoseDriveController : MonoBehaviour
     }
 
     // Stance knee target from the pelvis height. A low pelvis needs a longer
-    // leg, and on this chain length is cos(knee/2) — so the sign is minus.
+    // leg, and on this chain length is cos(knee/2) — so the sign is minus. The
+    // rate term extends further while the pelvis is still descending: the
+    // damping must push the same way as the error term, or a sinking pelvis
+    // commands a deeper knee and the loop feeds itself.
     private float KneeForHeight(float pelvisY, float pelvisVelY)
     {
         float error = standPelvisY - pelvisY;
         float knee = balance.kneeBaseAngle
             - heightGainDegPerMeter * error
             - heightDampDegPerMeterPerSecond * pelvisVelY;
+        // Extension only past the base pose was tried and made it worse, so the
+        // band stays the verified [-10, 60] window of the 09:44 stand.
         return Mathf.Clamp(knee, 0f, 60f);
     }
 
@@ -280,6 +304,7 @@ public class PoseDriveController : MonoBehaviour
         float halfCycle = swingDuration + stanceDuration;
         float swingFootX = swingSign > 0 ? leftFootX : rightFootX;
         float stanceX = swingSign > 0 ? rightFootX : leftFootX;
+        bool swingPlanted = swingSign > 0 ? leftDown : rightDown;
 
         stepClock += dt;
         // Rule: the step comes from the CoM leaving the support area. During
@@ -287,9 +312,15 @@ public class PoseDriveController : MonoBehaviour
         // that has already passed the stance foot by comLeadSwapMeters starts
         // the next swing early instead of letting the body topple over it.
         float lead = comX - stanceFootX;
+        // A swap while the swing foot is still airborne is a flight phase: the
+        // body free falls, lands on folded legs and the 130 N*m knee ceiling
+        // cannot straighten it again (p_dsw 5.30, both soles up 0.08 s, pelvis
+        // 55 mm down and sinking). So the swap waits for the foot to be planted,
+        // with a hard timeout so a swing that never lands cannot stall the gait.
+        bool maySwap = swingPlanted || stepClock >= halfCycle + 0.15f;
         bool clockDone = stepClock >= halfCycle;
         bool ledOut = stepClock >= swingDuration && lead > comLeadSwapMeters;
-        if (clockDone || ledOut)
+        if (maySwap && (clockDone || ledOut))
         {
             stepClock -= Mathf.Min(stepClock, halfCycle);
             swingSign = -swingSign;
@@ -313,10 +344,13 @@ public class PoseDriveController : MonoBehaviour
         float standAnkle = standAnkleY;
         // Swing leg: ankle travels from where it left the ground, through the
         // pass under the pelvis, to the placement. The lift at mid swing is
-        // what makes the knee fold - a high tucked foot is a folded knee.
-        float eased = s * s * (3f - 2f * s);
+        // what makes the knee fold - a high tucked foot is a folded knee. The
+        // foot is down at sLand of the swing and holds the ground after that,
+        // so the support is handed over instead of a flight phase.
+        float air = Mathf.Clamp01(s / swingLandShare);
+        float eased = air * air * (3f - 2f * air);
         float ankleX = Mathf.Lerp(swingFootX0, placeX, eased);
-        float ankleY = standAnkle + swingLiftMeters * Mathf.Sin(Mathf.PI * s);
+        float ankleY = standAnkle + swingLiftMeters * Mathf.Sin(Mathf.PI * air);
         float swingKnee;
         float swingHip;
         SolveLegIk(ankleX, ankleY, pelvisY, pelvisTilt, out swingHip, out swingKnee);
@@ -337,7 +371,9 @@ public class PoseDriveController : MonoBehaviour
 
         // Stance hip stays on the pelvis upright law: the planted thigh follows
         // the body passing over it, which is what carries the weight forward.
-        DriveHipsToWorldUpright(pelvisTilt, pelvisAngVel, 0f, swingSign < 0, swingSign > 0);
+        // No hip pose hold here: a step IS hip travel past the band.
+        DriveHips(pelvisTilt, pelvisAngVel, 0f, swingSign < 0, swingSign > 0,
+            0f, false);
         DriveAnkleBalance(comX, comVelX, leftDown, rightDown);
         DriveToes(swingSign > 0 ? -10f : 0f, swingSign > 0 ? 0f : -10f);
 
@@ -362,7 +398,10 @@ public class PoseDriveController : MonoBehaviour
         float b = human.shinSize.y;
         float hipY = pelvisY - human.pelvisSize.y * 0.5f;
         float dx = ankleX - pelvisBody.position.x;
-        float dy = ankleY - hipY;
+        // The ankle is always below the hip: the planar solve has no branch for
+        // a target above it, and a pelvis that has sunk under its own feet must
+        // not hand the IK a degenerate direction.
+        float dy = Mathf.Min(ankleY - hipY, -0.12f);
         float reach = Mathf.Sqrt(dx * dx + dy * dy);
         float maxReach = (a + b) * 0.995f;
         float length = Mathf.Clamp(reach, (a + b) * 0.45f, maxReach);
@@ -419,19 +458,39 @@ public class PoseDriveController : MonoBehaviour
             flexor, extensor, ref inertia);
     }
 
-    // Pelvis to world vertical through the hips: the planted thigh is tied to
-    // the ground, so hip torque is a moment on the pelvis. Same law and same
-    // sign as the old quiet stance - the error is pelvis tilt, not joint angle.
-    private void DriveHipsToWorldUpright(float pelvisTilt, float pelvisAngVel,
-                                         float targetTilt, bool driveLeft, bool driveRight)
+    // Pelvis to world vertical through the hips, plus the quiet-stance hip
+    // hold. The pelvis law alone leaves the hips free to splay: past
+    // hipHoldBand the same signal gets the joint PD toward the pose angle, so
+    // a stand cannot drift into a 44 deg lunge (p_ds 5.0 hipL +14 hipR -8,
+    // CoM 0.30 m ahead of the stand frame).
+    private void DriveHips(float pelvisTilt, float pelvisAngVel, float targetTilt,
+                           bool driveLeft, bool driveRight,
+                           float holdAngle, bool allowHold)
     {
         float error = Mathf.DeltaAngle(pelvisTilt, targetTilt)
             / Mathf.Max(1f, balance.pelvisErrorReferenceDegrees);
         float speed = pelvisAngVel / Mathf.Max(1f, balance.speedReferenceDegPerSec);
         float signal = Mathf.Clamp(
             balance.pelvisPGain * error - balance.pelvisDGain * speed, -1f, 1f);
-        if (driveLeft) ApplyHipSignal(true, signal);
-        if (driveRight) ApplyHipSignal(false, signal);
+        if (driveLeft) ApplyHipSignal(true, MixHipHold(signal, leftHipJoint, holdAngle, allowHold));
+        if (driveRight) ApplyHipSignal(false, MixHipHold(signal, rightHipJoint, holdAngle, allowHold));
+    }
+
+    // Same mix as the old quiet stance: inside the band the pelvis law owns the
+    // hip, past it the joint pose takes over smoothly.
+    private float MixHipHold(float pelvisSignal, HingeJoint2D hip, float holdAngleDeg, bool allowHold)
+    {
+        if (!allowHold || hip == null) return pelvisSignal;
+        float band = balance.hipHoldBand;
+        if (band < 0.5f) return pelvisSignal;
+        float excess = Mathf.Abs(hip.jointAngle - holdAngleDeg) - band;
+        if (excess <= 0f) return pelvisSignal;
+        float poseError = Mathf.DeltaAngle(hip.jointAngle, holdAngleDeg)
+            / Mathf.Max(1f, balance.errorReferenceDegrees);
+        float poseSpeed = hip.jointSpeed / Mathf.Max(1f, balance.speedReferenceDegPerSec);
+        float pose = Mathf.Clamp(balance.hipPGain * poseError - balance.hipDGain * poseSpeed, -1f, 1f);
+        float mix = Mathf.Clamp01(excess / Mathf.Max(1f, band));
+        return Mathf.Clamp(pelvisSignal + pose * mix, -1f, 1f);
     }
 
     private void ApplyHipSignal(bool left, float signal)
@@ -443,16 +502,17 @@ public class PoseDriveController : MonoBehaviour
     }
 
     // Quiet ankle loop: torque against the CoM offset, not a spring to an
-    // angle. Unchanged gain and reference from the standing controller.
+    // angle. Identical to the standing controller's law, scaled by the two
+    // factors above.
     private void DriveAnkleBalance(float comX, float comVelX, bool leftDown, bool rightDown)
     {
         if (state == null) return;
-        float supportX = state.supportCenterX;
-        float offset = comX - supportX;
+        float offset = comX - state.supportCenterX;
         float offsetN = offset / Mathf.Max(0.01f, balance.comOffsetReference);
         float velN = comVelX / Mathf.Max(0.05f, balance.comVelocityReference);
         float command = Mathf.Clamp(
-            balance.ankleComP * offsetN + balance.ankleComD * velN, -1f, 1f);
+            ankleBalanceP * (balance.ankleComP * offsetN)
+            + ankleBalanceD * (balance.ankleComD * velN), -1f, 1f);
         if (leftDown) DriveAnkle(true, command);
         if (rightDown) DriveAnkle(false, command);
     }
