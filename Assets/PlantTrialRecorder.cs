@@ -249,6 +249,11 @@ public class PlantTrialRecorder
             AppendNum(json, "treeWindScale", tree.windScale);
             AppendNum(json, "treeWindGust", tree.windGust);
             AppendNum(json, "treeWindPeriod", tree.windPeriod);
+            // Injected sitter load: a run that bends the crown must say which
+            // load bent it, or the number is not evidence.
+            AppendNum(json, "treePerchLoadKg", tree.perchLoadKg);
+            json.Append(",\"treePerchLoadSlot\":").Append(tree.perchLoadSlot.ToString(CultureInfo.InvariantCulture));
+            AppendNum(json, "treePerchLoadUntil", tree.perchLoadUntilSeconds);
             tree.GetHoldStats(out float meanHold, out float maxHold);
             AppendNum(json, "meanAbsHoldTorque", meanHold);
             AppendNum(json, "maxAbsHoldTorque", maxHold);

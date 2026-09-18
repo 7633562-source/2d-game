@@ -132,3 +132,59 @@ Stem is 9–42 cm (crocus … sunflower). Play gallery is scene `Tree`
 Headless: `-flower 1` (row of 12) or `-flower 1 -flowerKind rose`.
 Do not plant a Sway grove of flowers. A yard bed is a later level
 card, not this layer.
+
+## Perch load — the plant owns it (Yury 18.09, option a)
+
+A sitter's weight reaches the tree as a load the plant applies itself, like
+`ApplyBirdWake`: `TreeDriver.FixedUpdate` calls `PlantTree.ApplyPerchLoad(dt)`.
+The bird's brain stays clean and never calls `AddForce`.
+
+Acceptance for the perch is measured with an INJECTED test load, not with the
+bird layer, so a broken bird can never again make a tree look like it passes:
+
+- `-treePerchLoad <kg>` — the load, at `-treePerchSlot <i>` (twigs first, same
+  order as `GetPerchSlots`);
+- `-treePerchLoadUntil <s>` — release the load, so ONE run shows the bend AND
+  the return (`finalAbsJointAngle` / `finalCrownY` back at the hold pose);
+- the run must not sag to a joint limit and must not creep: `settleAbsJointAngle`
+  (t=2 s) stays level with `finalAbsJointAngle` (t=8 s) while the load is held.
+
+MEASURED 18.09 on build 4612d145, with the bird layer itself: 8 and 50 crows
+seated on the oak (`tree_flock8`, `tree_flock50`) leave `maxAbsJointAngle`
+0.00103° and `crownDrop` 0 — the load does not reach the wood at all. That is
+why the acceptance runs on the injected load.
+
+The old numbers — 23.6° / 11 cm (`tree_perch8.json`) and 24.6° / 7 cm
+(`tree_perch50.json`, 30.08) — predate BIRD-9 (01.09) and are VOID until
+re-measured with the injected load. The real bird perch stays a later
+integration, measured against the same load.
+
+## Sway, never topple (Yury 18.09)
+
+A tree sways lightly and returns; it never falls over. Acceptance is measured, not judged:
+trunk lean under 4 deg from vertical (a strong stem), no hinge ever pinned at its limit, base slide under
+5 mm, and the sway decays to rest with wind off (settle under 0.5 deg). With wind on the
+sway stays bounded and the same limits hold. A tree that sags, keeps swinging or falls
+over fails, however pretty it looks.
+
+## The stem is strong, the crown sways (Yury 18.09)
+
+The trunk is a strong stem: it must be HARD to bend. The sway lives in the crown, never in
+the trunk. Stiffness falls by branch order and the wind acts on the crown's sail:
+- trunk hinge: near rigid, limit +-1.5 deg, a very stiff spring; the trunk must not bend
+  visibly - maxTrunkLeanDeg under 4 deg at wind 0.12;
+- order 1 limbs +-5 deg, order 2 +-12 deg, order 3 twigs +-28 deg - the movement belongs
+  there, not in the stem;
+
+## Visual design, all plants (Yury 18.09)
+
+A plant must read as grown, not as a symmetric geometric figure, and it stays segmented:
+- asymmetric silhouette from the seed (per-node jitter on angle, length, thickness);
+- branch orders with their own thickness and bark tone; order-3 twigs picture-only;
+- 3-4 foliage variants per species chosen by seed, so no two crowns repeat;
+- fruit / bloom sizes and positions varied, never a uniform grid;
+- bark, roots and minor twigs at the base;
+- never flatten a plant into one static sprite;
+- budget: Rigidbody2D and HingeJoint2D only on the structural skeleton (about 15-24
+  dynamic segments per tree); twigs, foliage, fruit, bark and root flair are
+  picture-only children.

@@ -34,7 +34,14 @@ using UnityEngine.Rendering;
 //   -treeKind oak|pine|willow|bush|poplar|apple|lilac|hazel|cedar|plum — crown recipe (default oak)
 //   -treeSeed 1 — local fork Random
 //   -treePerch 1 — seat birds on PlantTree.GetPerchSlots
+//   -treePerchLoad 4 — injected sitter load, kg, at one perch slot (plant applies it)
+//   -treePerchSlot 0 — which slot (twigs first, same order as GetPerchSlots)
+//   -treePerchLoadUntil 4 — release the load at 4 s, so one run shows bend + return
 //   -treeWind 0 — no sail (check that branches hold the pose)
+//   -apple 1 — apple tree (AppleTree : TreeBase : PlantBase; sway + fruit)
+//   -appleSeed 1 — local fork Random
+//   -appleWind 0 — no sail (hold); default 0.12 sways the crown
+//   -appleHeight 2.5 — force crown height, m (overrides the seed-derived 2–5 m)
 //   -bird 1 — run a bird instead of a human (human flags are not read)
 //   -birdMode stand|fly|walk|glide|sit|attack -takeoffDelay 0 — stance with no takeoff
 //   -birdRig ragdoll|flock — ragdoll for stance, flock for a pack (one body)
@@ -313,6 +320,9 @@ public class HeadlessTrial : MonoBehaviour
     private bool treePerch;
     private PlantTree plantTree;
     private PlantTrialRecorder plantRecorder;
+    private bool spawnApple;
+    private AppleTree appleTree;
+    private AppleTrialRecorder appleRecorder;
     private PlantFlower[] trialFlowers;
     private FlowerTrialRecorder flowerRecorder;
     private bool spawnDog;
@@ -411,6 +421,7 @@ public class HeadlessTrial : MonoBehaviour
         spawnBird = GetFloatArg("-bird", 0f) > 0.5f;
         spawnTree = GetFloatArg("-tree", 0f) > 0.5f;
         spawnFlower = GetFloatArg("-flower", 0f) > 0.5f;
+        spawnApple = GetFloatArg("-apple", 0f) > 0.5f;
         treePerch = GetFloatArg("-treePerch", spawnTree && spawnBird ? 1f : 0f) > 0.5f;
         birdDriveKind = GetStringArg("-birdDrive", "").Trim().ToLowerInvariant();
         trialBirdKind = Bird.ParseKind(GetStringArg("-birdKind", "crow"));
@@ -719,6 +730,9 @@ public class HeadlessTrial : MonoBehaviour
         if (spawnTree)
             BuildTreeScene();
 
+        if (spawnApple)
+            BuildAppleScene();
+
         if (spawnFlower)
             BuildFlowerScene();
 
@@ -737,7 +751,7 @@ public class HeadlessTrial : MonoBehaviour
             return;
         }
 
-        if (spawnTree || spawnFlower)
+        if (spawnTree || spawnFlower || spawnApple)
             return;
 
         GameObject humanObject = new GameObject("TrialHuman");
@@ -951,6 +965,7 @@ public class HeadlessTrial : MonoBehaviour
         c.walkElbowFlex = GetFloatArg("-dogWalkElbowFlex", c.walkElbowFlex);
         c.walkPawPlant = GetFloatArg("-dogWalkPlant", c.walkPawPlant);
         c.walkFrontPlantScale = GetFloatArg("-dogWalkFrontPlant", c.walkFrontPlantScale);
+        c.walkStanceSweepDeg = GetFloatArg("-dogWalkSweep", c.walkStanceSweepDeg);
         c.walkChestTilt = GetFloatArg("-dogWalkChest", c.walkChestTilt);
         c.walkLumbarP = GetFloatArg("-dogWalkLumbarP", c.walkLumbarP);
         c.walkHipP = GetFloatArg("-dogWalkHipP", c.walkHipP);
@@ -1251,7 +1266,26 @@ public class HeadlessTrial : MonoBehaviour
             plantTree.rig = TreeRig.Static;
         plantTree.seed = Mathf.RoundToInt(GetFloatArg("-treeSeed", 1f));
         plantTree.windScale = GetFloatArg("-treeWind", plantTree.windScale);
+        // Injected perch load: bend and return are measured with THIS, so a
+        // broken bird layer can never make the tree look like it passes.
+        plantTree.perchLoadKg = GetFloatArg("-treePerchLoad", 0f);
+        plantTree.perchLoadSlot = Mathf.RoundToInt(GetFloatArg("-treePerchSlot", 0f));
+        plantTree.perchLoadUntilSeconds = GetFloatArg("-treePerchLoadUntil", 0f);
         plantTree.BuildTree();
+    }
+
+    private void BuildAppleScene()
+    {
+        GameObject appleObject = new GameObject("TrialAppleTree");
+        appleObject.transform.position = new Vector2(0f, PlantBase.RootY(-2f));
+        appleTree = appleObject.AddComponent<AppleTree>();
+        appleTree.seed = Mathf.RoundToInt(GetFloatArg("-appleSeed", 1f));
+        float forcedHeight = GetFloatArg("-appleHeight", 0f);
+        if (forcedHeight > 0f)
+            appleTree.appleHeightM = forcedHeight;
+        appleTree.windScale = GetFloatArg("-appleWind", appleTree.windScale);
+        appleTree.windSpeed = GetFloatArg("-appleWindSpeed", appleTree.windSpeed);
+        appleTree.Build();
     }
 
     private void SeatTrialBirdsOnTree()
@@ -1299,6 +1333,38 @@ public class HeadlessTrial : MonoBehaviour
                 }
             }
 
+            if (Time.realtimeSinceStartup > realDeadline)
+            {
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
+                break;
+            }
+        }
+
+        Finish(simulated, Time.realtimeSinceStartup - trialWallStart);
+    }
+
+    private IEnumerator RunAppleTrial()
+    {
+        appleRecorder = new AppleTrialRecorder(appleTree, runInfo);
+        float trialWallStart = Time.realtimeSinceStartup;
+        float simulated = 0f;
+        float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
+        int lastShot = -1;
+        while (simulated < duration)
+        {
+            yield return FixedStep;
+            simulated += Time.fixedDeltaTime;
+            appleRecorder.Sample(simulated);
+            if (visual)
+            {
+                int shotIdx = (int)(simulated / 0.2f);
+                if (shotIdx != lastShot)
+                {
+                    lastShot = shotIdx;
+                    string shotPath = Path.Combine(outputFolder, "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
+                    yield return CaptureVisualFrame(shotPath);
+                }
+            }
             if (Time.realtimeSinceStartup > realDeadline)
             {
                 Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
@@ -3062,7 +3128,19 @@ public class HeadlessTrial : MonoBehaviour
         CameraFollow follow = cam.GetComponent<CameraFollow>();
         if (follow == null)
             follow = cam.gameObject.AddComponent<CameraFollow>();
-        if (human == null && plantTree != null)
+        if (appleTree != null)
+        {
+            // Apple trial: fixed lens on the tree. Zoomed tighter than the
+            // Play `Tree` scene so the crown fills the 1080p frame.
+            follow.frameFullBody = false;
+            float height = appleTree.HeightMeters;
+            cam.orthographicSize = height * 0.62f + 0.5f;
+            cam.transform.position = new Vector3(
+                appleTree.transform.position.x,
+                appleTree.transform.position.y + height * 0.5f,
+                -10f);
+        }
+        else if (human == null && plantTree != null)
         {
             // Tree trial: the same lens as Play scene `Tree` (GameProcess
             // treeOnly: size 4.6, offset 1.1). frameFullBody off — the stand
@@ -3124,6 +3202,12 @@ public class HeadlessTrial : MonoBehaviour
         if (spawnFlower && !spawnTree)
         {
             yield return RunFlowerTrial();
+            yield break;
+        }
+
+        if (spawnApple)
+        {
+            yield return RunAppleTrial();
             yield break;
         }
 
@@ -3698,6 +3782,11 @@ public class HeadlessTrial : MonoBehaviour
             {
                 File.WriteAllText(csvPath, "t\n");
                 summary = plantRecorder.BuildSummaryJson(simulated, wallSeconds);
+            }
+            else if (spawnApple)
+            {
+                File.WriteAllText(csvPath, "t\n");
+                summary = appleRecorder.BuildSummaryJson(simulated, wallSeconds);
             }
             else if (spawnFlower)
             {

@@ -15,13 +15,24 @@ Hold: wood gravity is `holdTorque` at the grow pose. Branches must not
 sag to the hinge limit. A bird on a branch is extra load — the spring
 bends, then returns.
 
-Acceptance (30.08 hold + perch):
+Acceptance (hold + perch):
 - Empty `-tree 1 -treeWind 0` 8 s: `maxAbsJointAngle` **0.002°**,
-  `crownDrop` **0** (`tree_hold.json`).
-- 8 Sit `-birdRig flock -treePerch 1`: angle **23.6°**, drop **11 cm**
-  (`tree_perch8.json`).
-- 50 Sit (twigs first): angle **24.6°**, drop **7 cm** (`tree_perch50.json`).
+  `crownDrop` **0** (`tree_hold.json`); 18.09 re-measured 0.00103°
+  (`tree_job1`).
+- Perch: measured with the INJECTED load the plant applies itself
+  (`-treePerchLoad <kg> -treePerchSlot <i> [-treePerchLoadUntil <s>]`,
+  see `plant-physics.mdc`), never with the bird layer. The bend must stay
+  off a joint limit and the crown must come back to the hold pose after
+  the release.
+- VOID until re-measured with that load: 8 Sit **23.6°** / **11 cm**
+  (`tree_perch8.json`) and 50 Sit **24.6°** / **7 cm** (`tree_perch50.json`)
+  — both predate BIRD-9 (01.09). Measured 18.09 with the bird layer itself
+  (`-birdRig flock -birdCount 8` / `50`): 0.00103°, drop 0 — the birds sit
+  on the branches and the wood does not feel them.
 - Play `BirdFlock50` (`treeCount = 1`) seats on `GetPerchSlots` (twigs first).
+
+Frames: the tree trial writes `shot_<label>_NN.png` (18.09, PLANT-1 job 1 —
+before that every tree acceptance was numbers only).
 
 Kinds (31.08): `TreeKind` Oak / Pine / Willow / Bush / Poplar.
 Play `Tree` is a row of five (first Sway, rest Static). Yard grove

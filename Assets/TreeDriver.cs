@@ -74,6 +74,10 @@ public class TreeDriver : MonoBehaviour
             tree.ApplyWind();
         if (tree.birdWakeForce > 0f && tree.birdWakeRange > 0f)
             tree.ApplyBirdWake();
+        // Injected sitter load: the plant owns its own load, so the perch
+        // acceptance never depends on the bird layer.
+        if (tree.perchLoadKg > 0f)
+            tree.ApplyPerchLoad(Time.fixedDeltaTime);
     }
 
     void LateUpdate()

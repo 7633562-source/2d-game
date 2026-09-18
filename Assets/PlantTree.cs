@@ -112,6 +112,14 @@ public class PlantTree : MonoBehaviour
     [Tooltip("Ignore slower birds, m/s. Sit and walk stay quiet.")]
     public float birdWakeMinSpeed = 0.7f;
 
+    [Header("Perch load — injected test load")]
+    [Tooltip("Sitter load, kg, applied by the plant itself at one perch slot. 0 = off.")]
+    public float perchLoadKg = 0f;
+    [Tooltip("Perch slot index, twigs first — same order as GetPerchSlots().")]
+    public int perchLoadSlot = 0;
+    [Tooltip("Seconds after which the load is released, so one run shows the bend AND the return. 0 = hold.")]
+    public float perchLoadUntilSeconds = 0f;
+
     [Header("Look sway — Static Apple")]
     [Tooltip("Tip picture bend from wind, degrees. 0 = frozen. Sway trees ignore this.")]
     public float lookSwayDegrees = 5.5f;
@@ -325,6 +333,13 @@ public class PlantTree : MonoBehaviour
     private static readonly List<PlantTree> Live = new List<PlantTree>(64);
     private readonly List<PerchPoint> perchAcc = new List<PerchPoint>(256);
     private Vector2[] perchSlots = System.Array.Empty<Vector2>();
+    // Injected sitter load state. Bound once per slot: the sit point rides
+    // the wood (pads are children), so a bent twig takes the load where the
+    // sitter actually sits. No per-step InverseTransformPoint.
+    private float perchLoadElapsed;
+    private bool perchLoadBound;
+    private int perchLoadBoundSlot = -1;
+    private Vector3 perchLoadLocal;
     private Bounds perchBounds;
     private bool perchBoundsValid;
     private bool birdPerchesReady;
@@ -2137,6 +2152,44 @@ public class PlantTree : MonoBehaviour
                 new Vector2(u * birdWakeForce * HeadingSailMul(LiveWoodHeading(n)), 0f),
                 ForceMode2D.Force);
         }
+    }
+
+    // Injected sitter load. A sitter's weight reaches the tree as a load the
+    // plant applies itself, like ApplyBirdWake: the bird's brain stays clean
+    // and never calls AddForce. The acceptance for the perch is measured with
+    // THIS load, not with the bird layer, so a broken bird can never again
+    // make a tree look like it passes. Force, not impulse: kg * g, down, at
+    // the pad point on the wood that owns the slot. Released after
+    // perchLoadUntilSeconds so one run shows the bend AND the return.
+    // Extra mass is not in the hold sum, so the spring still bends.
+    public void ApplyPerchLoad(float deltaSeconds)
+    {
+        if (rig != TreeRig.Sway) return;
+        if (perchLoadKg <= 0f) return;
+        if (perchAcc.Count == 0) return;
+
+        // Driven from FixedUpdate, so the release time is the physics clock,
+        // not a wall clock. Past the release the load simply stops.
+        perchLoadElapsed += deltaSeconds;
+        if (perchLoadUntilSeconds > 0f && perchLoadElapsed >= perchLoadUntilSeconds)
+            return;
+
+        int slot = Mathf.Clamp(perchLoadSlot, 0, perchAcc.Count - 1);
+        HumanSegment wood = perchAcc[slot].wood;
+        if (wood == null || wood.rb == null) return;
+
+        if (!perchLoadBound || perchLoadBoundSlot != slot)
+        {
+            perchLoadLocal = wood.transform.InverseTransformPoint(perchAcc[slot].p);
+            perchLoadBoundSlot = slot;
+            perchLoadBound = true;
+        }
+
+        float weight = perchLoadKg * Mathf.Abs(Physics2D.gravity.y);
+        wood.rb.AddForceAtPosition(
+            new Vector2(0f, -weight),
+            wood.transform.TransformPoint(perchLoadLocal),
+            ForceMode2D.Force);
     }
 
     // Static Apple picture: wind + fly-by. Wood transforms stay so
