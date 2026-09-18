@@ -367,6 +367,32 @@ public class TrialRecorder
             .Append("armPressPhaseL").Append(';')
             .Append("armPressPhaseR").Append(';')
             .Append("armPressRequest").Append(';')
+            // Press evidence per side, per frame: the running stroke extension,
+            // the latch of the latched palm from the shoulder pivot, the shoulder
+            // rise inside the stroke (the push itself, with the palm fixed) and
+            // how far past its stop the plant asked the elbow to fold. One
+            // averaged shoulderAngle hid the counter phase; one arm-press number
+            // hides which palm is planted and which arm is doing the pushing.
+            .Append("armStrokeExtL").Append(';')
+            .Append("armStrokeExtR").Append(';')
+            .Append("armStrokesL").Append(';')
+            .Append("armStrokesR").Append(';')
+            .Append("armShoulderLiftL").Append(';')
+            .Append("armShoulderLiftR").Append(';')
+            .Append("armPlantOffsetL").Append(';')
+            .Append("armPlantOffsetR").Append(';')
+            .Append("armPlantFoldL").Append(';')
+            .Append("armPlantFoldR").Append(';')
+            .Append("armAimSignL").Append(';')
+            .Append("armAimSignR").Append(';')
+            .Append("armPivotYL").Append(';')
+            .Append("armPivotYR").Append(';')
+            .Append("armPalmYL").Append(';')
+            .Append("armPalmYR").Append(';')
+            .Append("armHaveL").Append(';')
+            .Append("armHaveR").Append(';')
+            .Append("armRestL").Append(';')
+            .Append("armRestR").Append(';')
             // down = on the ground this frame, fell = latched at the first
             // down frame, so the frame the flag turns true is in the CSV.
             .Append("down").Append(';')
@@ -827,6 +853,26 @@ public class TrialRecorder
             .Append((armDrive != null ? armDrive.PressPhaseL : 0).ToString(CultureInfo.InvariantCulture)).Append(';')
             .Append((armDrive != null ? armDrive.PressPhaseR : 0).ToString(CultureInfo.InvariantCulture)).Append(';')
             .Append(F(armDrive != null ? armDrive.PressRequest : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressStrokeExtensionL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressStrokeExtensionR : 0f)).Append(';')
+            .Append((armDrive != null ? armDrive.PressStrokesL : 0).ToString(CultureInfo.InvariantCulture)).Append(';')
+            .Append((armDrive != null ? armDrive.PressStrokesR : 0).ToString(CultureInfo.InvariantCulture)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressShoulderLiftL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressShoulderLiftR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPlantOffsetL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPlantOffsetR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPlantFoldL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPlantFoldR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimSignL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimSignR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPivotYL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPivotYR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPalmYL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressPalmYR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimHaveL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressAimHaveR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressRestL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressRestR : 0f)).Append(';')
             .Append(downNow ? "1" : "0").Append(';')
             .Append(physicalFallTime >= 0f ? "1" : "0").AppendLine();
     }
@@ -1089,6 +1135,18 @@ public class TrialRecorder
         AppendNum(json, "armPressShoulderMaxDegL", armDrive != null ? armDrive.PressStrokeShoulderExtL : 0f);
         AppendNum(json, "armPressShoulderMaxDegR", armDrive != null ? armDrive.PressStrokeShoulderExtR : 0f);
         AppendNum(json, "armPressLiftMaxMeters", armDrive != null ? armDrive.PressLiftMax : 0f);
+        // Shoulder rise inside a stroke, per side: with the palm latched on the
+        // slab this is the push itself. The pelvis number above only follows it
+        // if the legs hold, so on its own it cannot say whether the arms worked.
+        AppendNum(json, "armPressShoulderLiftL", armDrive != null ? armDrive.PressShoulderLiftL : 0f);
+        AppendNum(json, "armPressShoulderLiftR", armDrive != null ? armDrive.PressShoulderLiftR : 0f);
+        AppendNum(json, "armPressPlantOffsetL", armDrive != null ? armDrive.PressPlantOffsetL : 0f);
+        AppendNum(json, "armPressPlantOffsetR", armDrive != null ? armDrive.PressPlantOffsetR : 0f);
+        // The elbow angle the plant asked for, degrees: the fold the stroke starts
+        // from, so the extension it had available. A stroke that starts near 0 had
+        // no room and could not be a press whatever the body did.
+        AppendNum(json, "armPressPlantFoldL", armDrive != null ? armDrive.PressPlantFoldL : 0f);
+        AppendNum(json, "armPressPlantFoldR", armDrive != null ? armDrive.PressPlantFoldR : 0f);
         AppendNum(json, "armPressRequest", armDrive != null ? armDrive.PressRequest : 0f);
         AppendNum(json, "armMaxHandY", maxArmHandY);
         AppendNum(json, "muscleMultiplier", human.muscleMultiplier);
