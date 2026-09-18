@@ -124,8 +124,21 @@ public class DogStanceController : MonoBehaviour
     public float getUpStandPitchDeg = 18f;
     [Tooltip("CoM/pelvis drop below this means upright enough to BeginWalk, m.")]
     public float getUpStandDrop = 0.12f;
+    [Tooltip("Paws that must be planted to call the dog upright (3, not 4: a trot passes through three-paw frames).")]
+    public int getUpStandMinPaws = 3;
     [Tooltip("Paws must stay planted this long before BeginWalk, s.")]
     public float getUpPlantSeconds = 0.20f;
+    // PHYSICAL stand reference. getUpStandDrop above was serialised but never
+    // read, so GetUpIsStanding could only see grounded paws + pitch — and in a
+    // side view a dog lying prone has a level trunk too: dog_gu5 read
+    // getUpSuccess true at 4.58 s with the trunk 0.325 m below the standing
+    // pose and the paws off the floor (the human fall-flag defect class).
+    // These two are the highest trunk pose measured while the dog was provably
+    // on its paws (TryCaptureGetUpStandTrunk), and a fall NEVER clears them:
+    // they are what the rise is measured against.
+    public float getUpStandChestY;
+    public float getUpStandPelvisY;
+    public bool getUpStandTrunkValid;
     // Tuck then rise — DriveQuietPlant alone left attempts=1 and a
     // −98° freeze to run end (same hole as human GETUP-1). Local
     // overrides only; do not retune quiet hipP / kneeP.
@@ -1496,6 +1509,7 @@ public class DogStanceController : MonoBehaviour
             pelvisVelY = 0f;
         prevPelvisY = pelvisY;
         hasPrevPelvisY = true;
+        TryCaptureGetUpStandTrunk();
         if (!hasHeightTarget)
         {
             targetPelvisY = pelvisY;
@@ -1603,6 +1617,11 @@ public class DogStanceController : MonoBehaviour
 
     private void EnterFallingOrFallen(bool keepWalkWish)
     {
+        // Stale success is a lie in the other direction: the flag latched at
+        // 4.58 s on a standing dog and was still true while the body lay
+        // 0.325 m down for the next 10-25 s. Clear it the frame the fall is
+        // seen; the next attempt has to re-earn it.
+        getUpSuccess = false;
         if (getUpFallTime < 0f)
             getUpFallTime = Time.fixedTime;
         if (!keepWalkWish)
@@ -1652,6 +1671,7 @@ public class DogStanceController : MonoBehaviour
     {
         currentState = StanceState.GettingUp;
         getUpAttempts++;
+        getUpSuccess = false;
         getUpBorn = Time.fixedTime;
         getUpPlantBorn = -1f;
         getUpRiseBlend = 0f;
@@ -1690,19 +1710,60 @@ public class DogStanceController : MonoBehaviour
             getUpPlantBorn = -1f;
     }
 
+    // The measured standing trunk pose, in world metres: the highest chest /
+    // pelvis pose seen while the dog was provably on its paws — all four
+    // grounded and the chest inside the upright pitch band — so a later
+    // heap on the floor can never lower it (a prone dog in a side view has a
+    // level trunk as well; only the height tells them apart). Never updated
+    // during a get-up and never cleared by a fall: it is the bar the rise is
+    // measured against. Skipped on a leap — a jump is not a stance.
+    private void TryCaptureGetUpStandTrunk()
+    {
+        if (!hasCom || IsLeap())
+            return;
+        if (currentState == StanceState.GettingUp
+            || currentState == StanceState.Falling
+            || currentState == StanceState.Fallen)
+            return;
+        if (!AllPawsGrounded())
+            return;
+        if (Mathf.Abs(chestPitch - chestTargetTilt) > getUpStandPitchDeg)
+            return;
+        if (!getUpStandTrunkValid)
+        {
+            getUpStandChestY = chestY;
+            getUpStandPelvisY = pelvisY;
+            getUpStandTrunkValid = true;
+            return;
+        }
+        // Both ends advance together, from ONE frame: mixing the best chest of
+        // one stride with the best pelvis of another inflates the bar past what
+        // the dog is holding (measured spread 4 cm on dog_side04).
+        if (chestY > getUpStandChestY && pelvisY > getUpStandPelvisY)
+        {
+            getUpStandChestY = chestY;
+            getUpStandPelvisY = pelvisY;
+        }
+    }
+
     private bool GetUpIsStanding()
     {
-        if (!AllPawsGrounded() || !hasCom)
+        // PHYSICAL test, the same rule the recorder applies (DogTrialRecorder
+        // DOG_UP_DROP / paws >= 3): the trunk back within getUpStandDrop of the
+        // measured standing pose with at least getUpStandMinPaws planted, and
+        // the plant has to hold getUpPlantSeconds (TickGetUpSense). A state
+        // name, a timer or a level chest alone is not success — with those
+        // alone the dog called itself up at 4.58 s while lying 0.325 m down.
+        if (!hasCom || !getUpStandTrunkValid)
             return false;
-        float pitchErr = Mathf.Abs(chestPitch - chestTargetTilt);
-        if (pitchErr > getUpStandPitchDeg)
+        if (GroundedPawCount() < getUpStandMinPaws)
+            return false;
+        float riseDrop = Mathf.Max(getUpStandChestY - chestY,
+            getUpStandPelvisY - pelvisY);
+        if (riseDrop > getUpStandDrop)
             return false;
         if (Mathf.Abs(chestPitch) >= getUpFallenAbsPitch)
             return false;
-        // standComHeight is cleared on EnterGettingUp. Do not gate on
-        // WalkStandDrop / WalkSinkCollapsed — a stale pre-fall bar
-        // froze GettingUp for the rest of the run (human BodyCollapsed).
-        // Pitch + plant is the stand band; BeginWalk re-measures.
         return true;
     }
 
@@ -9624,6 +9685,18 @@ public class DogStanceController : MonoBehaviour
     public bool AllPawsGrounded()
     {
         return frontRightGrounded && frontLeftGrounded && rearRightGrounded && rearLeftGrounded;
+    }
+
+    // Planted paws this physics step. The get-up gate and the walk acceptance
+    // both need per-paw contact, not the all-or-nothing flag.
+    public int GroundedPawCount()
+    {
+        int n = 0;
+        if (frontRightGrounded) n++;
+        if (frontLeftGrounded) n++;
+        if (rearRightGrounded) n++;
+        if (rearLeftGrounded) n++;
+        return n;
     }
 
     public float MaxStanceActivation()

@@ -193,6 +193,26 @@ dog_gu5: dogDownSeconds 25.14 of 40 s, dogGetUpAttempts 0, getUpSuccess false wh
 the dog state machine claims true at 4.58 s. The quiet run dog_gu6 is clean (0 s down,
 no false positives), so the recorder is trustworthy now.
 
+## Dog get-up flag fixed - physical stand test, 18.09 15:50
+
+`DogStanceController.GetUpIsStanding` read only `AllPawsGrounded() + pitch`, and in a
+side view a prone dog has a level trunk too, so the flag was a state name. It now uses
+the recorder's rule: the trunk back within `getUpStandDrop` 0.12 m of a measured
+standing pose with at least `getUpStandMinPaws` 3 planted (held `getUpPlantSeconds`
+0.20 s). The bar is `getUpStandChestY/PelvisY` (`TryCaptureGetUpStandTrunk`): the
+highest trunk pose seen with all four paws down and the chest inside the upright band,
+both ends from the same frame, never updated during a get-up, never cleared by a fall.
+`getUpSuccess` is also cleared in `EnterFallingOrFallen` / `EnterGettingUp`, so a stale
+true cannot outlive the stand it described.
+Build 0faedd47509af633, label `dog_uf2` (40 s, `-dogWalk 1`): 0 of 3715 down frames
+carry `upSuccess` 1 (the old flag was 1 in all of them from 4.58 s); the flip is at
+11.84 s with a trunk drop of 0.011 m and 4 paws, at the frame the pitch comes back
+-72 -> -12; the lying window 21.6-40 s (pelvis 0.32 m down) stays false. Quiet run
+`dog_uf1` clean: `fourFeet` 1.0, `trunkDrop` 0.025, no fall, no flag.
+Still open: the dog does not try - `dogGetUpAttempts` 0 (the automaton's own
+`getUpAttempts` 2 is entry counting, not a push), so a rise from a physical heap is
+still unproven. Next: the tuck-push sequence, then the loaded stance.
+
 ## Rule: every collider gets an explicit friction material - Yury 18.09
 
 No object with a collider may rely on the engine default (0.4). Box2D pairs friction as
@@ -201,3 +221,31 @@ dog NOTHING (its AddFriction is joint friction, not contact). Rule file:
 .cursor/rules/collider-materials.mdc. Measured trap: on the dog, more grip made it
 slower (ice 0.339 m/s, stock 0.129, sticky -0.015), so set materials explicit first,
 raise mu only after the gait has a loaded push.
+
+
+## Expert audit 18.09 - the measured transfer window (read before any walk edit)
+
+Verified on build f550de9831e6e2 / guid 1c2e0baa by an independent audit; all
+records are in F:/hermes-data/expert-audit.
+
+- 5.2 s swing foot lifts - the claim "the swing knee never bends" is WRONG.
+- 5.4 s first role swap counted, both knee activations high.
+- 5.6-5.8 s BOTH contact flags read airborne, pelvis rises first.
+- 6.0 s both feet grounded, knees ~103/~69 deg, pelvis dropping.
+- Independent detector: collapse onset 6.035 s. JSON `fell` only at 8.4151 s.
+  The fall flag LIES - never quote it as acceptance on its own.
+- 8 swaps counted, 6 after the collapse began. The swap counter is a timer/contact
+  proxy, NOT completed steps.
+
+Order of work from here: instrument (requested vs applied torque, clearance, load,
+owner per joint, swap reason) with FROZEN gains -> quiet stand -> single support on
+each leg -> ONE transfer with lift, placement, landing, load -> then sustained walk.
+No tuning while instrumentation is missing.
+
+REFUTED, do not retry: flipping the pose controller's height-damper sign. Measured
+default 8.4151 s, zero damping 5.135 s, reversed 1.225 s (fails before the walk
+starts). Also: the arm-swing parameter is NOT inert (0 vs 60 changed the trace).
+
+Stale numbers are worse than no numbers: check `sourceFingerprint` in the JSON
+against the build manifest before quoting anything, and never test a build older
+than the sources.

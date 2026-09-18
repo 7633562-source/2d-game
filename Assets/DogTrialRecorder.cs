@@ -95,6 +95,15 @@ public class DogTrialRecorder
     private int samplesOnsetWindow;
     private int samplesOnsetCollapsed;
     private int samplesOnsetPosed;
+    // Independent witness of the automaton's get-up flag: the trunk drop (from
+    // THIS recorder's own start-of-run stance) and the paw count at the frame
+    // DogStanceController first said getUpSuccess. The old flag was a state
+    // name, so it turned true at 4.58 s with the trunk 0.325 m down; these two
+    // numbers say whether the claim was physical.
+    private bool sawAutomatonUp;
+    private float automatonUpTime = -1f;
+    private float automatonUpTrunkDrop;
+    private int automatonUpPaws;
 
     public DogTrialRecorder(Dog dog, TrialRunInfo info)
     {
@@ -108,7 +117,7 @@ public class DogTrialRecorder
         DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
         preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell");
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess");
     }
 
     public void MarkPush(float time, float impulse)
@@ -172,6 +181,16 @@ public class DogTrialRecorder
         int pawsGrounded = (stance.frontRightGrounded ? 1 : 0) + (stance.frontLeftGrounded ? 1 : 0)
             + (stance.rearRightGrounded ? 1 : 0) + (stance.rearLeftGrounded ? 1 : 0);
         dogDownNow = trunkDropNow >= DOG_DOWN_DROP && pawsGrounded <= 2;
+
+        // The automaton's own claim, witnessed: recorded at the frame it turns
+        // true, from this recorder's stance, never from the automaton's bar.
+        if (!sawAutomatonUp && stance.getUpSuccess)
+        {
+            sawAutomatonUp = true;
+            automatonUpTime = time;
+            automatonUpTrunkDrop = trunkDropNow;
+            automatonUpPaws = pawsGrounded;
+        }
 
         if (dogDownNow)
         {
@@ -307,6 +326,7 @@ public class DogTrialRecorder
         // frame (dogFallTime), so the frame the flag turns true is in the CSV.
         // Appended LAST: every reader indexes columns by name (DictReader).
         rows.Append(',').Append(dogFallTime >= 0f ? '1' : '0');
+        rows.Append(',').Append(stance.getUpSuccess ? '1' : '0');
         rows.AppendLine();
 
         samples++;
@@ -408,6 +428,18 @@ public class DogTrialRecorder
         json.Append(",\"getUpSuccess\":").Append(stance.getUpSuccess ? "true" : "false");
         AppendNum(json, "getUpSeconds", stance.getUpSeconds);
         AppendNum(json, "getUpFallTime", stance.getUpFallTime);
+        // Witness of the automaton's claim: the trunk drop and the paw count at
+        // the frame getUpSuccess first turned true, measured from this
+        // recorder's start-of-run stance. A physical rise reads <= 0.12 m with
+        // >= 3 paws; the old state-name flag read 0.325 m with 0 paws.
+        AppendNum(json, "getUpSuccessTime", automatonUpTime);
+        AppendNum(json, "getUpSuccessTrunkDrop", sawAutomatonUp ? automatonUpTrunkDrop : -1f);
+        json.Append(",\"getUpSuccessPaws\":").Append(automatonUpPaws.ToString(CultureInfo.InvariantCulture));
+        // The automaton's own standing bar (highest provable stance pose) —
+        // published so a reader can check the flag against the value it used.
+        json.Append(",\"getUpStandTrunkValid\":").Append(stance.getUpStandTrunkValid ? "true" : "false");
+        AppendNum(json, "getUpStandChestY", stance.getUpStandChestY);
+        AppendNum(json, "getUpStandPelvisY", stance.getUpStandPelvisY);
         // Physical get-up measurement, beside the automaton's own counters:
         // the stance machine can call GettingUp while the dog lies flat.
         json.Append(",\"dogGetUpAttempts\":").Append(dogGetUpAttempts.ToString(CultureInfo.InvariantCulture));
