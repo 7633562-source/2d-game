@@ -163,3 +163,10 @@ arms lift the body. Then the feet come under the centre of mass and the legs
 stand him up. Without the knee tuck and the arm push it does not count, even if
 he ends up standing. The hand colliders exist, so the push is physically
 possible, it is simply never driven.
+
+## Swing leg must fold - Yury 18.09
+
+From a drawing of a walker: in the swing the leg folds under the body, the knee
+bends 60 to 80 deg while the foot is off the ground, clearance 30 mm or more, the
+foot passes under the pelvis instead of trailing behind, and the knee extends to
+under 20 deg before landing. The stance leg stays extended and carries the weight.
