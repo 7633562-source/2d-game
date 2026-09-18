@@ -117,6 +117,35 @@ twig, not a `HumanSegment`. Sway path is unchanged.
 - Do not bake bark/leaf textures here: card `ART-TREE`, do not change
   collider size.
 
+## Measured 18.09 — where the ordered stop has to live (build 7ed1ff4d)
+
+Attempt 1 at the stiff stem for the oak was ROLLED BACK, and these four numbers
+are why. Run `tree_oak_bind` / `tree_oak_rollback_*`, oak, 8 s, fixedDelta 0.005:
+
+- The HingeJoint2D stop is measured in the **parent's frame**, not from the grow
+  pose. At bind a limb grown at 26° reports `jointAngle` **25.99°** (order 2
+  18.62°, order 3 19.53°, the bole 0.00°). A symmetric ±5° stop therefore sits
+  21° outside the pose and the solver folds the limb on the first step; centring
+  it (`rel = DeltaAngle(parentHeading, heading)`, assigned inside `ConnectTo`
+  where the joint is created) still left the crown folding 16-45° in STILL air.
+- The stops are **soft**: a joint was measured 45° past its own stop.
+- The trunk spring (180 N·m/rad) is **below** the trunk's gravity gradient
+  (259.7 N·m/rad = the whole tree's weight about the bole hinge, measured and
+  reported as `treeOrder0GravityGradient`). The oak's stem is therefore held up
+  by the ±16° stop, not by the spring — that is the rubber trunk, and it is why
+  the oak sits at `maxTrunkLeanDeg` 16.05 and `hingePinnedFraction` 0.20 under
+  wind 0.12. Order 1 is barely better: k 67.5 vs gradient 45.0, with the limb
+  bound 25.99° sitting 0.76° under its 26.75° stop.
+- So a stiff stem means k above the gravity gradient with a margin, and the
+  per-order stops have to be added on top of that — not instead of it. The
+  ordered values tried (k 90/30/14 over the same gravity load) are not enough.
+
+`PlantTrialRecorder` now writes the four numbers (`maxTrunkLeanDeg`,
+`hingePinnedFraction`, `baseSlideM`, `swayAmpM`) plus `treeOrder{0..3}`
+`MaxAngleDeg` / `BindDeg` / `LimitDeg` / `Stiffness` / `GravityGradient`, and
+`tree-probe-metrics.py` prints them, so the next attempt starts from a
+measurement instead of a guess.
+
 ## Garden flowers (not a tree)
 
 Small plants are `PlantFlower`, not `PlantTree`. Twelve subclasses

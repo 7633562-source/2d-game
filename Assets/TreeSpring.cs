@@ -26,6 +26,9 @@ public class TreeSpring : MonoBehaviour
     [Tooltip("Cap on the spring part only. Hold is applied in full.")]
     public float maxTorque = 40f;
 
+    [Tooltip("Gravity gradient of this joint's subtree, N·m/rad. Read-only: BindGravityHold sets it.")]
+    public float gravityGradient;
+
     [System.NonSerialized]
     public bool drivenExternally;
 

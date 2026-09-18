@@ -17,6 +17,18 @@ public class PlantTrialRecorder
     private float lastCrownY;
     private float settleAbsJoint;
     private bool settled;
+    // Sway-never-topple metrics, same four keys as AppleTrialRecorder so the
+    // oak and the apple stand are read by one probe script.
+    private float maxTrunkLeanDeg;
+    private float maxPinnedFraction;
+    private float maxBaseSlideM;
+    private float startCrownTipX;
+    private float swayAmpM;
+    private readonly float[] orderMaxAngle = new float[4];
+    private readonly float[] orderLimitDeg = new float[4];
+    private readonly float[] orderStiffness = new float[4];
+    private readonly float[] orderGradient = new float[4];
+    private readonly float[] orderBindDeg = new float[4];
 
     public PlantTrialRecorder(PlantTree tree, TrialRunInfo info)
     {
@@ -41,6 +53,19 @@ public class PlantTrialRecorder
             minCrownY = crown;
         sumAbsJoint += abs;
         sumJointSq += abs * abs;
+        // Sway-never-topple: stem lean, hinge pinning, base slide and the
+        // crown tip's horizontal excursion over the whole run.
+        float trunkLean = tree.GetTrunkLeanDeg();
+        if (trunkLean > maxTrunkLeanDeg) maxTrunkLeanDeg = trunkLean;
+        float pinned = tree.GetHingePinnedFraction();
+        if (pinned > maxPinnedFraction) maxPinnedFraction = pinned;
+        float baseSlide = tree.GetBaseSlideM();
+        if (baseSlide > maxBaseSlideM) maxBaseSlideM = baseSlide;
+        Vector2 crownTip = tree.GetCrownTip();
+        if (samples == 0) startCrownTipX = crownTip.x;
+        float amp = Mathf.Abs(crownTip.x - startCrownTipX);
+        if (amp > swayAmpM) swayAmpM = amp;
+        tree.SampleOrderMaxAngles(orderMaxAngle);
         if (!settled && time >= 2f)
         {
             settleAbsJoint = abs;
@@ -81,6 +106,24 @@ public class PlantTrialRecorder
         AppendNum(json, "startCrownY", startCrownY);
         AppendNum(json, "minCrownY", minCrownY < float.MaxValue ? minCrownY : 0f);
         AppendNum(json, "finalCrownY", lastCrownY);
+        AppendNum(json, "maxTrunkLeanDeg", maxTrunkLeanDeg);
+        AppendNum(json, "hingePinnedFraction", maxPinnedFraction);
+        AppendNum(json, "baseSlideM", maxBaseSlideM);
+        AppendNum(json, "swayAmpM", swayAmpM);
+        if (tree != null)
+        {
+            // Ordered-stem design + per-order peak angle, so the next kind's
+            // numbers are sized from a measurement rather than a guess.
+            tree.GetOrderDesign(orderLimitDeg, orderStiffness, orderGradient, orderBindDeg);
+            for (int o = 0; o < orderMaxAngle.Length; o++)
+            {
+                AppendNum(json, "treeOrder" + o + "MaxAngleDeg", orderMaxAngle[o]);
+                AppendNum(json, "treeOrder" + o + "BindDeg", orderBindDeg[o]);
+                AppendNum(json, "treeOrder" + o + "LimitDeg", orderLimitDeg[o]);
+                AppendNum(json, "treeOrder" + o + "Stiffness", orderStiffness[o]);
+                AppendNum(json, "treeOrder" + o + "GravityGradient", orderGradient[o]);
+            }
+        }
         if (tree != null)
         {
             json.Append(",\"treeSegmentCount\":").Append(tree.SegmentCount.ToString(CultureInfo.InvariantCulture));

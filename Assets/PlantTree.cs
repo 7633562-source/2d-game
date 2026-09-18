@@ -96,6 +96,18 @@ public class PlantTree : MonoBehaviour
     public float twigSpringMaxTorque = 40f;
     public float minSegmentInertia = 0.008f;
 
+    [Header("Stiff stem — ordered flex (oak first, Yury 18.09)")]
+    [Tooltip("The stem is strong, the crown sways: near-rigid bole, flex by branch order. Off = old thickness rule.")]
+    public bool orderedStem = false;
+    [Tooltip("Bend limit per branch order, deg: 0 bole, 1 limbs, 2 branches, 3 twigs.")]
+    public float[] orderBendLimitDeg = { 1.5f, 5f, 12f, 28f };
+    [Tooltip("Spring stiffness per branch order, N·m/rad. Must stay above the joint's gravity gradient (m·g·h) or it topples to its limit.")]
+    public float[] orderStiffness = { 1200f, 90f, 30f, 14f };
+    [Tooltip("Spring torque cap per branch order, N·m.")]
+    public float[] orderSpringMaxTorque = { 1200f, 220f, 120f, 60f };
+    [Tooltip("Order-stiffness scale on the joint's own gravity gradient. 0 = use orderStiffness as written.")]
+    public float orderStiffnessFactor = 0f;
+
     [Header("Wind")]
     [Tooltip("Oncoming air speed, m/s. Force ~ ½ρv²·area.")]
     public float windSpeed = 2.2f;
@@ -330,6 +342,11 @@ public class PlantTree : MonoBehaviour
     private BarkLook barkLook;
 
     private readonly List<Node> nodes = new List<Node>(16);
+    // Stump pose at grow time, for the base-slide metric (m). The stump is
+    // Static, so this reads 0 unless something actually moves it.
+    private float baseSpawnX;
+    // |jointAngle| the joint reports at bind, per order. Diagnostic only.
+    private readonly float[] orderBindDeg = new float[4];
     private static readonly List<PlantTree> Live = new List<PlantTree>(64);
     private readonly List<PerchPoint> perchAcc = new List<PerchPoint>(256);
     private Vector2[] perchSlots = System.Array.Empty<Vector2>();
@@ -650,6 +667,7 @@ public class PlantTree : MonoBehaviour
         PaintWoodTaper(stump, stumpWidth, stumpHeight, stumpBark, -1, 0f);
         PaintRootFlare(stump);
         nodes.Add(new Node { segment = stump, heading = 0f, depth = -1, dynamic = false, parentIndex = -1, spring = null });
+        baseSpawnX = stump.transform.position.x;
 
         Grow(stump, 0f, 0, trunkLength, trunkWidth, 0f, cap);
         if (extraRootStems >= 1)
@@ -840,6 +858,112 @@ public class PlantTree : MonoBehaviour
         return y;
     }
 
+    // Sway-never-topple metrics, same definitions as TreeBase so the oak
+    // reports the four numbers the Apple stream already writes
+    // (maxTrunkLeanDeg / hingePinnedFraction / baseSlideM / swayAmpM).
+    // Read-only, no forces, arithmetic only — sampled at 200 Hz.
+    public float GetTrunkLeanDeg()
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (n.depth != 0 || !n.dynamic || n.segment == null) continue;
+            if (n.segment.rb != null)
+                return Mathf.Abs(Mathf.DeltaAngle(0f, n.segment.rb.rotation));
+            return Mathf.Abs(Mathf.DeltaAngle(0f, n.segment.transform.eulerAngles.z));
+        }
+        return 0f;
+    }
+
+    // Fraction of dynamic hinges sitting AT their limit (pinned). 0 = none.
+    public float GetHingePinnedFraction()
+    {
+        int dynamic = 0, pinned = 0;
+        const float epsDeg = 0.2f;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (!n.dynamic || n.segment == null || n.segment.joint == null) continue;
+            dynamic++;
+            JointAngleLimits2D lim = n.segment.joint.limits;
+            float angle = n.segment.joint.jointAngle;
+            if (Mathf.Abs(angle - lim.min) <= epsDeg || Mathf.Abs(angle - lim.max) <= epsDeg)
+                pinned++;
+        }
+        return dynamic > 0 ? (float)pinned / dynamic : 0f;
+    }
+
+    // Base slide, m. The stump is static, so this is 0 by construction — but
+    // it is read from the actual stump transform, not hardcoded.
+    public float GetBaseSlideM()
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            if (nodes[i].depth == -1 && nodes[i].segment != null)
+                return Mathf.Abs(nodes[i].segment.transform.position.x - baseSpawnX);
+        }
+        return 0f;
+    }
+
+    // Highest crown tip in world space, along the segment's own heading, so
+    // the horizontal excursion is the sway rather than a fixed box corner.
+    public Vector2 GetCrownTip()
+    {
+        Vector2 best = transform.position;
+        float bestY = float.MinValue;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            HumanSegment seg = nodes[i].segment;
+            if (seg == null) continue;
+            Vector2 tip = (Vector2)seg.transform.position
+                + HeadingDir(seg.transform.eulerAngles.z) * (seg.size.y * 0.5f);
+            if (tip.y > bestY) { bestY = tip.y; best = tip; }
+        }
+        return best;
+    }
+
+    // Per-order diagnostics for the stiff-stem cycle: the largest
+    // |jointAngle − rest| seen so far, per branch order. Sampled at 200 Hz,
+    // arithmetic only.
+    public void SampleOrderMaxAngles(float[] maxAngleDeg)
+    {
+        if (maxAngleDeg == null) return;
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (!n.dynamic || n.segment == null || n.segment.joint == null) continue;
+            int o = Mathf.Clamp(n.depth, 0, maxAngleDeg.Length - 1);
+            TreeSpring spring = n.spring;
+            float rest = spring != null ? spring.restAngle : 0f;
+            float abs = Mathf.Abs(Mathf.DeltaAngle(rest, n.segment.joint.jointAngle));
+            if (abs > maxAngleDeg[o]) maxAngleDeg[o] = abs;
+        }
+    }
+
+    // One snapshot per branch order: the widest limit, the stiffest spring and
+    // the largest gravity gradient in that order. Read once at the end of the
+    // run, never per step.
+    public void GetOrderDesign(float[] limitDeg, float[] stiffness, float[] gradient, float[] bindDeg)
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (!n.dynamic || n.segment == null || n.segment.joint == null) continue;
+            int o = Mathf.Clamp(n.depth, 0, limitDeg.Length - 1);
+            // Half the stop width is the bend the joint really has around its
+            // held pose (the raw limits are absolute joint angles).
+            JointAngleLimits2D lim = n.segment.joint.limits;
+            float half = (lim.max - lim.min) * 0.5f;
+            if (half > limitDeg[o]) limitDeg[o] = half;
+            TreeSpring spring = n.spring;
+            if (spring == null) continue;
+            if (spring.stiffness > stiffness[o]) stiffness[o] = spring.stiffness;
+            if (spring.gravityGradient > gradient[o]) gradient[o] = spring.gravityGradient;
+        }
+        for (int o = 0; o < bindDeg.Length && o < orderBindDeg.Length; o++)
+            bindDeg[o] = orderBindDeg[o];
+    }
+
     public Vector2 GetFollowPoint()
     {
         float massSum = 0f;
@@ -862,6 +986,16 @@ public class PlantTree : MonoBehaviour
     // Presets overwrite public grow fields. Oak matches the hold canon.
     private void ApplyKind(TreeKind recipe)
     {
+        // The stiff stem is ported ONE KIND PER CYCLE — oak first; the other
+        // four kinds keep the old thickness rule until their own cycle.
+        // ROLLED BACK 18.09: the ordered stem (stiff bole + 5/12/28 deg stops by
+        // order) folds the oak crown 16-45 deg in STILL air on every value set
+        // tried — runs tree_oak_stem_hold, hold2, hold3, hold5 — so the canon
+        // hold (0.00103 deg) regressed and the flag goes back off. What
+        // survives from that attempt: the stop is measured in the PARENT's
+        // frame (a 26 deg limb reports 26 deg at bind, tree_oak_bind) and it is
+        // soft, letting a joint run 45 deg past its stop. Both feed attempt 2.
+        orderedStem = false;
         leaderForkShare = 0.28f;
         sideLengthScale = 1f;
         skipSideOnEvenDepth = false;
@@ -2452,13 +2586,27 @@ public class PlantTree : MonoBehaviour
         TreeSpring spring = null;
         if (isDynamic)
         {
+            // The HingeJoint2D stop is measured in the PARENT's frame, not from
+            // the grow pose: a limb grown at 26° to its parent reports 26° at
+            // bind (measured 18.09), so a symmetric ±5° stop sits 21° outside
+            // the pose and the solver folds the limb at the first step. Centre
+            // the ordered stop on the grow angle instead.
+            float limitLo = -BendLimit(depth, width);
+            float limitHi = BendLimit(depth, width);
+            if (orderedStem)
+            {
+                float bend = BendLimit(depth, width);
+                float rel = Mathf.DeltaAngle(parentHeading, heading);
+                limitLo = rel - bend;
+                limitHi = rel + bend;
+            }
             seg.ConnectTo(
                 parent,
                 new Vector2(0f, -length * 0.5f),
                 new Vector2(0f, parent.size.y * 0.5f),
-                -BendLimit(width),
-                BendLimit(width));
-            AddWoodActuators(seg, width, length, heading);
+                limitLo,
+                limitHi);
+            AddWoodActuators(seg, width, length, heading, depth);
             spring = seg.GetComponent<TreeSpring>();
             DynamicBodyCount++;
         }
@@ -3530,7 +3678,7 @@ public class PlantTree : MonoBehaviour
         return segment;
     }
 
-    private void AddWoodActuators(HumanSegment segment, float width, float length, float heading)
+    private void AddWoodActuators(HumanSegment segment, float width, float length, float heading, int depth)
     {
         if (segment.joint == null) return;
 
@@ -3540,7 +3688,21 @@ public class PlantTree : MonoBehaviour
         float lengthScale = trunkLength / Mathf.Max(0.05f, length);
 
         TreeSpring spring = segment.gameObject.AddComponent<TreeSpring>();
-        spring.stiffness = Mathf.Lerp(twigStiffness, trunkStiffness, thick) * lengthScale;
+        // Ordered stem: the bole is a very stiff spring and the order sets
+        // the flex (5 / 12 / 28°), so the crown sways while the stem holds.
+        // Every ordered value stays well above the joint's gravity gradient
+        // (m·g·h of its subtree) — below it a joint topples to its limit.
+        if (orderedStem)
+        {
+            int oi = Mathf.Clamp(depth, 0, orderStiffness.Length - 1);
+            spring.stiffness = orderStiffness[oi];
+            spring.maxTorque = orderSpringMaxTorque[oi];
+        }
+        else
+        {
+            spring.stiffness = Mathf.Lerp(twigStiffness, trunkStiffness, thick) * lengthScale;
+            spring.maxTorque = Mathf.Lerp(twigSpringMaxTorque, trunkSpringMaxTorque, thick);
+        }
         spring.restAngle = 0f;
         spring.restWorldAngle = heading;
         // World-pose is safe only on the stump (Static). Oak keeps the
@@ -3549,15 +3711,23 @@ public class PlantTree : MonoBehaviour
         spring.worldStiffness = worldHoldScale > 0.001f
             ? worldHoldScale * Mathf.Lerp(55f, 280f, thick) * lengthScale
             : 0f;
-        spring.maxTorque = Mathf.Lerp(twigSpringMaxTorque, trunkSpringMaxTorque, thick);
 
         JointFriction friction = segment.gameObject.AddComponent<JointFriction>();
         friction.damping = Mathf.Lerp(twigFriction, trunkFriction, t);
         friction.maxTorque = spring.maxTorque;
     }
 
-    private float BendLimit(float width)
+    private float BendLimit(int depth, float width)
     {
+        // Ordered stem (oak first): the bole is near rigid and the flex
+        // belongs to the branch orders — order 1 limbs ±5°, order 2 ±12°,
+        // order 3 twigs ±28°. A kind without the flag keeps the old
+        // thickness rule untouched.
+        if (orderedStem)
+        {
+            int i = Mathf.Clamp(depth, 0, orderBendLimitDeg.Length - 1);
+            return orderBendLimitDeg[i];
+        }
         return Mathf.Lerp(twigBendLimit, trunkBendLimit, ThicknessT(width));
     }
 
@@ -12415,9 +12585,21 @@ public class PlantTree : MonoBehaviour
 
             // worldCenterOfMass is not ready on the build frame; the box
             // center is the transform we just placed.
+            // What the joint reports AFTER SyncTransforms, right at bind: 0 means
+            // Unity anchored the stop on the grow pose, ~forkAngle means the
+            // stop is measured in the parent's frame instead. The whole
+            // ordered-stem limit block depends on which one it is.
+            int boi = Mathf.Clamp(n.depth, 0, orderBindDeg.Length - 1);
+            float babs = Mathf.Abs(n.segment.joint.jointAngle);
+            if (babs > orderBindDeg[boi]) orderBindDeg[boi] = babs;
+
             Vector2 jointWorld = n.segment.transform.TransformPoint(
                 new Vector2(0f, -n.segment.size.y * 0.5f));
             float moment = 0f;
+            // Gravity gradient of this joint, N·m/rad: how much the weight of
+            // the subtree below pushes it over per radian. A spring weaker
+            // than this topples to its limit — it is the floor for a stem.
+            float gradient = 0f;
             for (int j = 0; j < nodes.Count; j++)
             {
                 if (!IsDescendantOrSelf(j, i)) continue;
@@ -12425,7 +12607,18 @@ public class PlantTree : MonoBehaviour
                 if (seg == null || seg.rb == null) continue;
                 Vector2 com = seg.transform.position;
                 moment += (com.x - jointWorld.x) * seg.rb.mass * g.y;
+                gradient += (com.y - jointWorld.y) * seg.rb.mass * g.y;
             }
+
+            // The stop itself is centred in Grow, where the joint is created
+            // (the parent-frame convention); here only the diagnostics.
+
+            spring.gravityGradient = Mathf.Abs(gradient);
+            // Same code, one extra tuning law for the ordered stem: the spring
+            // as a multiple of the joint's own gravity gradient. 0 = the
+            // per-order numbers stand as written.
+            if (orderedStem && orderStiffnessFactor > 0f)
+                spring.stiffness = orderStiffnessFactor * Mathf.Max(0.05f, spring.gravityGradient);
 
             spring.holdTorque = -moment;
             spring.maxTorque = Mathf.Max(spring.maxTorque, Mathf.Abs(moment) * 0.5f + 16f);
