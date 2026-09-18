@@ -19,6 +19,10 @@ public class JointFriction : MonoBehaviour
     [System.NonSerialized]
     public bool drivenExternally;
 
+    // T1 instrumentation: the friction torque this step's Apply pushed.
+    [System.NonSerialized]
+    public float lastFrictionTorque;
+
     private HingeJoint2D joint;
     private Rigidbody2D rbSelf;
 
@@ -74,6 +78,7 @@ public class JointFriction : MonoBehaviour
         torque = Mathf.Clamp(torque, -stopTorque, stopTorque);
         torque = Mathf.Clamp(torque, -maxTorque, maxTorque);
 
+        lastFrictionTorque = torque;
         rbSelf.AddTorque(torque, ForceMode2D.Force);
         joint.connectedBody.AddTorque(-torque, ForceMode2D.Force);
     }

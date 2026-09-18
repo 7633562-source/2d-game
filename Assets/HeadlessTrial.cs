@@ -25,6 +25,8 @@ using UnityEngine.Rendering;
 //   -arena 1 — ARENA-1 parameter sweep: ground only, one human every 500 ms at one
 //     spawn point, genomes of the pose-drive walk parameters, distance at 15 s.
 //     -arenaSeed 1 (genome stream), -arenaSeconds 90 (sim length),
+//     -arenaInterval 0.5 (s between spawns; a large value is the solo control - the
+//     same genome with no neighbours at all),
 //     -arenaWallLimit 3000 (s of wall time before the run is cut short),
 //     -arenaNumber 0.34 (digit height on the head, m), -arenaCamera 5 (wide lens),
 //     -arenaPhoto 2.2 -arenaPhotoTime 12 (zoomed photo frames), -arenaGroundMeters 200
@@ -325,6 +327,7 @@ public class HeadlessTrial : MonoBehaviour
     private bool spawnArena;
     private ArenaRunner arena;
     private int arenaSeed = 1;
+    private float arenaInterval = 0.5f;
     private float arenaSeconds = 90f;
     private float arenaWallLimit = 3000f;
     private float arenaNumberHeight = 0.34f;
@@ -440,6 +443,7 @@ public class HeadlessTrial : MonoBehaviour
         }
         spawnArena = GetFloatArg("-arena", 0f) > 0.5f;
         arenaSeed = Mathf.RoundToInt(GetFloatArg("-arenaSeed", arenaSeed));
+        arenaInterval = GetFloatArg("-arenaInterval", arenaInterval);
         arenaSeconds = GetFloatArg("-arenaSeconds", arenaSeconds);
         arenaWallLimit = GetFloatArg("-arenaWallLimit", arenaWallLimit);
         arenaNumberHeight = GetFloatArg("-arenaNumber", arenaNumberHeight);
@@ -874,7 +878,7 @@ public class HeadlessTrial : MonoBehaviour
         arena.runId = label + "_s" + arenaSeed.ToString(CultureInfo.InvariantCulture);
         arena.sourceFingerprint = runInfo != null ? runInfo.SourceFingerprint : "";
         arena.buildGuid = runInfo != null ? runInfo.ManifestBuildGuid : "";
-        arena.spawnInterval = 0.5f;
+        arena.spawnInterval = arenaInterval;
         arena.measureSeconds = 15f;
         arena.cullSeconds = 30f;
         arena.aliveCap = 60;
@@ -3915,12 +3919,17 @@ public class HeadlessTrial : MonoBehaviour
                 File.WriteAllText(csvPath, birdRecorder.BuildCsv());
                 summary = birdRecorder.BuildSummaryJson(simulated, wallSeconds);
                 if (plantRecorder != null)
+                {
                     summary = MergePlantJson(summary, plantRecorder);
+                    WriteJointTrace(label);
+                }
             }
             else if (spawnTree)
             {
                 File.WriteAllText(csvPath, "t\n");
                 summary = plantRecorder.BuildSummaryJson(simulated, wallSeconds);
+                // T1: one row per FixedUpdate, nine columns per joint.
+                WriteJointTrace(label);
             }
             else if (spawnApple)
             {
@@ -3956,6 +3965,17 @@ public class HeadlessTrial : MonoBehaviour
         }
 
         Application.Quit(0);
+    }
+
+    // T1 (TREES plan): the per-step, per-joint trace of the tree run, written
+    // next to the summary JSON. Read-only instrumentation — the run's own .csv
+    // keeps its old content, so nothing that already parses it breaks.
+    private void WriteJointTrace(string label)
+    {
+        if (plantRecorder == null) return;
+        string jointsPath = Path.Combine(outputFolder, label + "_joints.csv");
+        File.WriteAllText(jointsPath, plantRecorder.BuildJointCsv());
+        Debug.Log("TRIAL_JOINTS_CSV " + jointsPath);
     }
 
     private static string MergePlantJson(string summary, PlantTrialRecorder plant)

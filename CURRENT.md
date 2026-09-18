@@ -25,17 +25,17 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 | physics | **VEST-2**: per-foot quiet ankle coded (`quietAnklePerFoot` 1). Next: `pf23v2` +23 N·s. | `.cursor/tasks/VEST-2-balance.md` |
 | physics | ONELEG-1 accepted (Yury): `oneleg_sym` / `oneleg_sym_l`, both 30 s, span 0.75° / 0.79°. | `.cursor/tasks/ONELEG-1-physics.md` |
 | physics | ONELEG-2 **wall**: 90° pose holds; CoM ankle loop is bistable. Do not reopen. | `.cursor/tasks/ONELEG-2-march.md` |
-| physics | WALK-2: recorder complete + the demanded-vs-applied question answered 18.09 (run `walk1_own1`): hips = (b) the demand is wrong (17-24 % of the muscle while the collapse is created, then an unreachable 35° target at 3.5-15x the ceiling); ankle = (a) the ceiling binds (22 vs 65 N·m). Next: the targets/reference, not the ceilings. | `Trials/Runs/walk1_own1-report.md`, this file, Walk front |
+| physics | WALK-2 closed 18.09 (`walk1_load4`, fp a53d483f): recorder complete — `check-owners.py` OK, 160 cols, no NaN, every joint owned; demanded-vs-applied answered: **hips = (b)** (applied ±100 in 190/274 frames at 69 % while the demand is ≤21 % of the ceiling and the angle target is pinned at +35.0°), **ankle = (b)** (extensor −65 pegged with a −10 N·m ask; the only real overshoot is the flexor demand 68.96 vs 22 N·m = 3.13x). One criterion for the project in `Assets/FallCriterion.cs` (human/dog/arena routed, local rules deleted) + a measured load meter (fzL/fzR/xCopMeas/lambda/dcm). Next: targets/reference, never the ceilings. Arena `fallen` still 61/61 — its baseline window sits inside the spawn settle. | `Trials/Runs/walk1_load4-report.md`, `Assets/FallCriterion.cs` |
 | physics | deep crouch WIP intentionally leaves code defaults 98/28 after `crouch_accept`; accepted journal remains 55/12 until the physics work closes | HumanPhysics continuation |
 | artist | code hand is `0.06×0.16`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/ART-HAND.md` |
 | docs | pointers and baselines; do not clean Runs | `DOCS.md` |
 | optimization | P1 + P2/P3 + PERF-5 closed. Yard 04.09: off-camera dogs/birds rest (`NpcRest`). PERF-1 is pre-grove and pre-yard. Do not cut 200 Hz | `OPT-3-distant-rest.md`; `opt_agent_proposals.md` |
 | level | Test1 yard: campfire at x=32.5 (24 tongues + ParticleSystem sparks/smoke/embers; no sprite smoke boxes); lab scene `Campfire`; gate Static trees + World flock 6 / hens 10 / dogs 3; `treeCount` 0 | no new card |
 | bird | BIRD-12: inter-bird contact is torso+head (`BirdCore`); limbs/perch `BirdLimb`. Walk = `walkThrust` on the body. Opt 02.09 flock 50 still the 200 Hz edge; no `GetContacts` | `BIRD-12-core-contact.md`; `opt_bird_code_02.md` |
-| plant | PLANT-2 accepted. PLANT-3: 12 garden flowers. Four extra tree kinds in scene Tree (Lilac Hazel Cedar Plum); yard cycle still Oak…Poplar | `PLANT-3-flowers.md`; `plant-physics.mdc` |
+| plant | TREES T1 DONE 18.09 (build f9d594f0, instrumentation only): `<label>_joints.csv` per-step per-joint trace, run block = measurements only vs `build:` = 94 constants + rig hash, `tree-const-assert.py` flags constants hiding in a run block; oak bit-identical to pre-T1 (17/17 keys). Next: T2 diagnosis. | `.cursor/tasks/TREES-plan.md`; `plant-physics.mdc` |
 | artist | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/ART-TREE.md` |
 | artist | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/ART-DOG.md` |
-| artist | ART-DOG **box look is live**: `DogArt.BoxLook` draws the dog the way `HumanSegment` draws the human — one flat translucent rectangle per bone (head, neck, chest, pelvis, 5 tail, 4 × upper/lower/paw), one dark joint marker, far side dimmed; `-dogCoatLook` rolls back to the plates, `-dogBoxAlpha <f>` tunes the fill (0.65). `Art/Dog/Palette.cs`. Frames: `Trials/Runs/dog_art1*.png` | `.cursor/agents/artist.md` |
+| artist | ART-DOG **box look is live**: `DogArt.BoxLook` draws the dog the way `HumanSegment` draws the human — one flat translucent rectangle per bone (head, neck, chest, pelvis, 5 tail, 4 × upper/lower/paw), one dark joint marker, far side dimmed; `-dogCoatLook` rolls back to the plates, `-dogBoxAlpha <f>` tunes the fill (0.5, the human's `Human.cs` alpha; was 0.65 in an earlier pass), `visualSideOffset` 0 like the human with `-dogSideOffset <f>` for the A/B (`HipBridge` / `ShoulderBridge` cover the two joints whose anchor sits off the box edge). `Art/Dog/Palette.cs`, `Dog.cs`. Frames: `Trials/Runs/dog_art1*.png` | `.cursor/agents/artist.md` |
 | artist | crow / chicken parts in `Art/Crow` and `Art/Chicken` | `.cursor/tasks/ART-BIRD.md` |
 | ai | Insect hunt concept: faction Insects, Forage→Pursue, eat with beak | `BIRD-13-insect-hunt.md` |
 | dog | DOG-3 leftover sit-trot **0.286 km/h** (`dog_w10`); 5 km/h open. DOG-4: `DogDrive` writes Walk; no play keys | `.cursor/tasks/DOG-3-walk.md`; `DOG-4-ai.md` |
@@ -422,3 +422,68 @@ from 33.6 s in `dog_gu14` and 20.6 s in `dog_gu13`, to the end of the run, so it
 run-level bar (fourFeet > 0.5, trunkDrop < 0.06) is NOT met. The walk is untouched:
 comSpeedX 0.123 m/s = 0.444 km/h against 1.389 (5 km/h). Next: right the body from a
 back-lying heap, then the loaded stance push (item 3). Video: `Trials/Runs/dog_gu14.gif`.
+
+## Dog get-up: inverted heap (on its back) - the tuck cannot right it, 18.09 (dog worker, builds 3c363645 / 94dd356b)
+
+Job order from the brief: item 1 (the flag) is in the tree and re-verified here (the
+flip is physical: `upSuccess` at 16.315 / 22.774 / 30.633 s with `trunkBar` 0.015 /
+0.036 / 0.027 m and 4 paws; 0 of 2670 down frames carry the flag from the floor), so
+this cycle's ONE change is item 2, the last defect left in it: the dog ends the run on
+its BACK. `dog_rd1` frame 190 (rendered) is a dog flat on its back, belly up, all four
+paws in the air; `dog_gu14`/`dog_rd1`/`dog_rd2` lay inverted 6.00 / 4.03 / 4.49 s with
+0 push frames before this change.
+
+Change (`DogStanceController.DriveGetUp`): an `inverted` heap (|pitch| >=
+`getUpInvertedAbsPitch` 100 deg, lines 176-185, 2049) bypasses the upright contact-age
+gate that threw away every 1-2 frame contact (2055), and gets a righting cycle instead
+of the tuck: fold ONE pair while the other reaches straight past its trunk end, swap
+every `getUpInvertedSwapSeconds` 0.35 s, and a contact turns the half into the push at
+once with the pair that HAS the floor extending (2084-2110, targets 2157-2180 and
+2211-2235). Two pairs folding together cancel their own reaction - that is the
+measured failure.
+
+Measured (40 s, `-dogWalk 1 -dogWalkTime 1`, fingerprint == manifest):
+
+| label | build | down s | attempts | fourFeet | trunkDrop | m/s | inv s | push inv | push+contact |
+|---|---|---|---|---|---|---|---|---|---|
+| dog_gu14 | a6092d68 | 8.39 | 9 | 0.089 | 0.418 | 0.123 | 6.00 | 0 | 0 |
+| dog_rd1 | 3c363645 | 13.10 | 17 | 0.097 | 0.410 | 0.073 | 4.03 | 0 | 0 |
+| dog_rd2 | 94dd356b | 13.35 | 17 | 0.090 | 0.417 | 0.068 | 4.49 | 566 | 77 |
+
+Still broken: the escape from flat-on-back. The push now lands on the floor (0 -> 566
+inverted push frames, 77 with a paw down, trunk rate -373 deg/s across those frames)
+and the trunk still does not leave the back (ends at pitch 166.8, `trunkBar` 0.402;
+net rotation inside the window 83.5 deg in 4.49 s, the same as before). From there the
+paws touch only 9 % of the frames, so the righting has to happen BEFORE |pitch| passes
+100 deg - catch the trunk in the side-lying band 55-100 deg, where the paws still reach
+the floor and the extension really levers it. Walk (item 3) untouched: 0.068 m/s =
+0.243 km/h against 1.389 m/s. Video: `Trials/Runs/dog_rd2.gif` / `.mp4`.
+
+## Expensive lanes: opus AND kimi (Yury 18.09)
+The gate above applies to BOTH `h_2dgame_opus` and `h_2dgame_kimi`: no cron, no ds-cycle stream,
+no script may start them. They run only after Yury approves a specific task, and approval for one
+task never carries to the next. Purpose: hard tasks, and help for the physics lanes.
+
+## Dog cycle 1 - instruments only, landed and type-checked, stands NOT run (dog worker, 18.09 ~18:35)
+
+Brief: the 18:20 status (cycle 1 = instrument columns only, no control change, the bit-identical
+`dog_art1` triple as the regression detector). Edit is in the tree of build `94dd356b`; no player
+was rebuilt and no trial was run - the status reserves the stands for the orchestrator, so the
+acceptance numbers are NOT measured yet and are not claimed.
+
+- `DogStanceController`: `SampleCycle1Instruments()` at the end of `Sense()` publishes
+  `pawNormalImpulse[4]` (N*s, `ContactPoint2D.normalImpulse` per paw, order FR/FL/RR/RL),
+  `pawWeightFraction` = sum(vertical Fn)/(m*g), and `walkStandDropBar` (the controller's own
+  `WalkStandDrop()`, m). Read-only: no counter, gate or command touched.
+- `DogTrialRecorder`: 8 append-only per-frame CSV columns after `push` (**31 -> 39**) -
+  `trunkLift` m, `capturePointMargin` m (+ inside support), `pawNormalImpulseFR/FL/RR/RL` N*s,
+  `sumFnOverWeight` (1.0 = the paws carry the weight), `controllerTrunkDrop` m (the controller's
+  own bar beside the recorder's independent `trunkDrop`) - plus JSON summary, `metresPerCycle` vs
+  `nominalStrideFront/Rear` from the Bind link geometry (`2*L*sin(sweep/2)`), and a
+  `cycle1NanCount` that must be 0.
+- Verified Unity-free: `bash F:/hermes-data/scripts/plant-csc-check.sh` -> `csc exit 0`, 0 errors.
+  Checker: `python C:/Users/Admin/AppData/Local/hermes/scripts/dog-cycle1-check.py <label> ...`
+  (already run on the pre-cycle CSVs: reports both as "columns absent", 31 columns).
+- Stand commands, details and the acceptance table: `Trials/Runs/dog_cycles.md`, section
+  "Cycle 1 - INSTRUMENTS ONLY". Acceptance still open: `dog_art1` bit-identical
+  (comTravelX 5.53443003, comSpeedX 0.230613619, 35 cycles), `dog_gu14` comTravelX 4.81013966.

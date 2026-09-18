@@ -146,6 +146,39 @@ are why. Run `tree_oak_bind` / `tree_oak_rollback_*`, oak, 8 s, fixedDelta 0.005
 `tree-probe-metrics.py` prints them, so the next attempt starts from a
 measurement instead of a guess.
 
+## T1 instrumentation — the trace and the split (18.09, build f9d594f0)
+
+TREES plan T1 is DONE, instrumentation only: no physics changed, and the oak
+reproduces its pre-T1 numbers bit for bit (hold and wind 0.12, 17 of 17
+measured keys identical to build 7ed1ff4d).
+
+- `TreeJointTrace` writes `<label>_joints.csv`: one row per FixedUpdate, ten
+  columns per joint (jointAngle, limitMin, limitMax, springTorque, holdTorque,
+  frictionTorque, rotation, inertia, mass, gravityMoment). It reads Unity
+  primitives only — rb.rotation/position/mass/inertia, joint.jointAngle/limits,
+  the hinge graph read once — never a PlantTree metric helper. PlantTree exposes
+  the raw handles through `GetWoodSensors`.
+- The JSON is split: the run block holds MEASUREMENTS, `build` holds every
+  constant (94 keys: counts, recipe, per-joint stiffness/limits/bind/hold and
+  the rig hash). `RigHash` = FNV-1a 64 over the sorted grow-pose segment
+  positions and sizes, computed at the END OF `BuildTree` — hashed later it
+  gave two different hashes for one rig (hold `aa7807e3` vs wind `0607ea1b`),
+  and the wind one had already moved.
+- `tree-const-assert.py <runA> <runB>` flags any run-block key bit-identical
+  across two winds. On the pre-T1 block it fired on 84 keys (incl.
+  `maxAbsHoldTorque` and `treeMaxAbsBranchHeading` — now in `build:`); on the T1
+  block it fires on one key only: `springSatFraction` = 0.
+- Measured: the oak is 16 bodies = static stump + 15 dynamic segments, so the
+  trace has FIFTEEN joint column groups, not the 14 the plan assumed (0.2
+  pinned = 3 of 15 hinges).
+- Oak wind 0.12 on the T1 block: `maxAbsAppliedTorqueNm` 50.41,
+  `springSatFraction` 0.00 (NO joint reaches its `maxTorque` — the plan's T2
+  stop rule is already triggered; re-brief the saturation mechanism before
+  sizing anything), `holdResidualNm` 49.12 (the net torsion left after the
+  feedforward hold cancels the pose's own gravity moment), `trunkJointAngleDeg`
+  16.03 against `trunkLimitDeg` 16.00 (the trunk sits ON its own stop),
+  `maxAbsSegmentWorldDevDeg` 67.56, `crownComDxM` 0.362.
+
 ## Garden flowers (not a tree)
 
 Small plants are `PlantFlower`, not `PlantTree`. Twelve subclasses

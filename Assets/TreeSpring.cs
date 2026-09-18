@@ -32,6 +32,16 @@ public class TreeSpring : MonoBehaviour
     [System.NonSerialized]
     public bool drivenExternally;
 
+    // T1 instrumentation (TREES plan, 18.09). The torque Apply() pushed this
+    // step, logged so a trace never has to recompute it. Nothing in the
+    // physics reads these back, so they cannot change a run.
+    [System.NonSerialized]
+    public float lastSpringTorqueRaw;
+    [System.NonSerialized]
+    public float lastSpringTorque;
+    [System.NonSerialized]
+    public float lastAppliedTorque;
+
     private HingeJoint2D joint;
     private Rigidbody2D rbSelf;
     private float cachedInvInertia;
@@ -83,9 +93,12 @@ public class TreeSpring : MonoBehaviour
         // One-step caps assume muscle-scale inertia. Wood boxes sit near
         // minSegmentInertia: springStop was then < 1 N·m and gravity
         // walked every fork to the hinge limit. Cap by maxTorque only.
+        lastSpringTorqueRaw = springTorque;
         springTorque = Mathf.Clamp(springTorque, -maxTorque, maxTorque);
 
         float torque = holdTorque + springTorque;
+        lastSpringTorque = springTorque;
+        lastAppliedTorque = torque;
         rbSelf.AddTorque(torque, ForceMode2D.Force);
         joint.connectedBody.AddTorque(-torque, ForceMode2D.Force);
     }

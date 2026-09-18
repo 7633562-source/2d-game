@@ -194,6 +194,13 @@ public class PlantTree : MonoBehaviour
     // Peak |heading| of wood at depth ≥ 1 after Grow. Stand JSON can
     // see a spreading crown without Play. Oak forkAngle 28 stays.
     public float MaxAbsBranchHeading { get; private set; }
+
+    // Rig identity: sorted segment positions and sizes of the grow pose,
+    // FNV-1a 64. Computed once at the end of BuildTree, so it is a build
+    // constant — a trace taken later in a run must not produce a different
+    // hash for the same rig (a wind run had already moved the wood when the
+    // first version hashed it at recorder construction).
+    public string RigHash { get; private set; } = "";
     public int LeafClusterCount => leafClusterCount;
     public int LeafSwayCount => leafSwayXforms.Length;
     // After ApplyLookRecipe. Autumn deciduous droops the tuft so the
@@ -696,11 +703,43 @@ public class PlantTree : MonoBehaviour
         BindLeafSway();
         RegisterLive();
 
+        // Hash the rig at the grow pose, before any step can move it.
+        RigHash = ComputeRigHash();
+
         if (rig == TreeRig.Sway || HasLookSway)
         {
             TreeDriver driver = gameObject.AddComponent<TreeDriver>();
             driver.RebuildCache(this);
         }
+    }
+
+    private string ComputeRigHash()
+    {
+        List<string> parts = new List<string>(nodes.Count);
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            HumanSegment seg = nodes[i].segment;
+            if (seg == null) continue;
+            Vector2 p = seg.transform.position;
+            parts.Add(p.x.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+                + "|" + p.y.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+                + "|" + seg.size.x.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+                + "|" + seg.size.y.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        parts.Sort(System.StringComparer.Ordinal);
+        ulong hash = 14695981039346656037UL;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            string s = parts[i];
+            for (int c = 0; c < s.Length; c++)
+            {
+                hash ^= s[c];
+                hash *= 1099511628211UL;
+            }
+            hash ^= 10UL;
+            hash *= 1099511628211UL;
+        }
+        return hash.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     void OnDestroy()
@@ -794,6 +833,45 @@ public class PlantTree : MonoBehaviour
         }
         meanAbsHold = n > 0 ? sum / n : 0f;
         maxAbsHold = max;
+    }
+
+    // T1 instrumentation port (TREES plan, 18.09). Raw Unity handles plus
+    // build-time identity ONLY — there is no metric logic here, so wiring a
+    // trace into a run can never be mistaken for a measurement, and nothing
+    // read through this port applies a force. The sensor math (crown Y, trunk
+    // lean, hinge pinning, base slide, crown tip) lives in the recorder and is
+    // computed from rb/joint primitives there, never from a helper a fix could
+    // rewrite (GetMaxAbsJointAngle / GetTrunkLeanDeg / GetHingePinnedFraction
+    // / GetHoldStats).
+    public struct WoodSensor
+    {
+        public HumanSegment segment;
+        public TreeSpring spring;
+        public JointFriction friction;
+        public int order;              // branch order 0..3; -1 = stump
+        public float bindDeg;          // grow-pose joint angle (spring.restAngle)
+        public float buildHeadingDeg;  // grow-pose world heading (spring.restWorldAngle)
+    }
+
+    public void GetWoodSensors(List<WoodSensor> into)
+    {
+        if (into == null) return;
+        into.Clear();
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            HumanSegment seg = nodes[i].segment;
+            if (seg == null) continue;
+            TreeSpring spring = nodes[i].spring;
+            into.Add(new WoodSensor
+            {
+                segment = seg,
+                spring = spring,
+                friction = seg.GetComponent<JointFriction>(),
+                order = nodes[i].depth,
+                bindDeg = spring != null ? spring.restAngle : 0f,
+                buildHeadingDeg = spring != null ? spring.restWorldAngle : 0f
+            });
+        }
     }
 
     public static void SeatBirds(Bird[] birds, PlantTree tree)
