@@ -153,6 +153,12 @@ public class DogStanceController : MonoBehaviour
     public float getUpKneeLeadSeconds = 0.20f;
     [Tooltip("Feet must stay down this long before the pike latches, s.")]
     public float getUpTuckMinSeconds = 0.15f;
+    [Tooltip("Trunk drop below the measured stand bar that counts as a heap the tuck must work from with NO paw on the floor, m. Without it the pike waited for a grounded paw, and a dog lying on its pelvis (0 paws grounded, pitch +49) held the quiet base pose from 21.4 s to the end of the run (dog_gu12, 18.6 s down, attempts 0).")]
+    public float getUpConnectDrop = 0.20f;
+    [Tooltip("Seconds the tuck (limbs folded under the trunk) is held before the push, s.")]
+    public float getUpTuckSeconds = 0.45f;
+    [Tooltip("Seconds the push (the same limbs extending against the floor) is held before the next tuck, s. A heap that does not rise re-tucks, so the dog keeps trying instead of freezing in one pose.")]
+    public float getUpPushSeconds = 0.35f;
     [Tooltip("|chestPitch| above this keeps the closed-chain pike, deg.")]
     public float getUpSquatAbsPitch = 35f;
     [Tooltip("Seconds to blend from pike to quiet sit once upright enough.")]
@@ -161,6 +167,10 @@ public class DogStanceController : MonoBehaviour
     public bool getUpSuccess;
     public float getUpSeconds = -1f;
     public float getUpFallTime = -1f;
+    // Witness for the recorder / CSV: true while the get-up commands the push
+    // half of the tuck-push cycle (limbs extending against the floor).
+    [System.NonSerialized]
+    public bool getUpPushingNow;
 
     [Header("Limb joint pose")]
     public float hipPGain = 2f;
@@ -1048,9 +1058,14 @@ public class DogStanceController : MonoBehaviour
     private float getUpBorn = -1f;
     private float getUpPlantBorn = -1f;
     private float getUpPikeBorn = -1f;
+    // Tuck ⇄ push cycle. getUpPhaseBorn = the frame the current half started,
+    // getUpHeapAge = seconds the trunk has been a heap in this get-up (the
+    // settle the tuck waits for when no paw is on the floor yet).
+    private float getUpPhaseBorn = -1f;
+    private float getUpHeapAge;
+    private bool getUpPushPhase;
     private float getUpRiseBlend;
     private float getUpContactAge;
-    private bool getUpPikeLatched;
     // Cached at Bind. GETUP peel must not Find JointFriction at 200 Hz.
     private JointFriction lumbarFrictionComp;
     private JointFriction rearLeftHipFriction, rearRightHipFriction;
@@ -1676,8 +1691,14 @@ public class DogStanceController : MonoBehaviour
         getUpPlantBorn = -1f;
         getUpRiseBlend = 0f;
         getUpContactAge = 0f;
-        getUpPikeLatched = false;
         getUpPikeBorn = -1f;
+        // The tuck-push cycle starts fresh: no heap age, no half held, so the
+        // first tuck latches getUpTuckMinSeconds after the entry even when no
+        // paw is grounded yet.
+        getUpPhaseBorn = -1f;
+        getUpHeapAge = 0f;
+        getUpPushPhase = false;
+        getUpPushingNow = false;
         // Pre-fall / mid-rake settle bar kept GetUpIsStanding and
         // WalkSinkCollapsed false-positives for 30+ s (human
         // ClearStandingComBarForGetUp). Clear world CoM; re-measure
@@ -1697,6 +1718,7 @@ public class DogStanceController : MonoBehaviour
                 ApplyGetUpFrictionPeel(false);
             currentState = StanceState.Fallen;
             getUpPlantBorn = -1f;
+            getUpPushingNow = false;
             return;
         }
         if (GetUpIsStanding())
@@ -1767,6 +1789,43 @@ public class DogStanceController : MonoBehaviour
         return true;
     }
 
+    // Trunk height below the measured standing pose, m — the bar the get-up
+    // tuck works from and the same pose GetUpIsStanding measures the rise
+    // against. Falls back to the settle CoM column before the first stand is
+    // captured, so a dog that never stood still gets a heap test.
+    public float GetUpTrunkDropBar()
+    {
+        if (getUpStandTrunkValid)
+            return Mathf.Max(getUpStandChestY - chestY, getUpStandPelvisY - pelvisY);
+        if (standComHeightValid && hasCom)
+            return Mathf.Max(0f, standComHeight - comPosition.y);
+        return 0f;
+    }
+
+    // Read-only witness for the recorder (no control use): 0 rearLeftHip,
+    // 1 rearRightHip, 2 rearLeftKnee, 3 rearRightKnee, 4 frontLeftShoulder,
+    // 5 frontRightShoulder, 6 frontLeftElbow, 7 frontRightElbow. Deg; NaN when
+    // the joint is unbound. The dog CSV had no limb angles, so a frozen get-up
+    // could not be told from a tuck that moved the joints and lost the trunk.
+    public float GetUpLimbAngle(int index)
+    {
+        HingeJoint2D j;
+        switch (index)
+        {
+            case 0: j = rearLeftHipJoint; break;
+            case 1: j = rearRightHipJoint; break;
+            case 2: j = rearLeftKneeJoint; break;
+            case 3: j = rearRightKneeJoint; break;
+            case 4: j = frontLeftShoulderJoint; break;
+            case 5: j = frontRightShoulderJoint; break;
+            case 6: j = frontLeftElbowJoint; break;
+            case 7: j = frontRightElbowJoint; break;
+            default: return float.NaN;
+        }
+        return j != null ? j.jointAngle : float.NaN;
+    }
+
+
     // Capture walk stays off until upright. Then phase 0 DualSupport.
     private void BeginWalkAfterGetUp()
     {
@@ -1774,6 +1833,7 @@ public class DogStanceController : MonoBehaviour
             getUpSeconds = Time.fixedTime - getUpBorn;
         getUpSuccess = true;
         getUpPlantBorn = -1f;
+        getUpPushingNow = false;
         // Re-measure settle stand in world space after the rise so the
         // pre-fall column does not arm WalkCollapsed on the first Dual.
         if (hasCom)
@@ -1935,42 +1995,77 @@ public class DogStanceController : MonoBehaviour
         float tuckMin = Mathf.Max(0.05f, getUpTuckMinSeconds);
         float hipsStandDeg = Mathf.Max(20f, getUpStandPitchDeg + 5f);
 
-        if (!anyPaw)
+        // HEAP, not "a paw is down": a trunk this far below the measured stand
+        // bar (the same bar GetUpIsStanding uses) is a dog on the floor
+        // whatever the paws report. dog_gu12 lay with the pelvis 0.33 m down
+        // and all four paws in the air: the old anyPaw gate kept the quiet base
+        // pose for the last 18.6 s (dogGetUpAttempts 0). The tuck is the
+        // movement that PUTS the paws on the floor, so it must be allowed to
+        // start without one.
+        float trunkBar = GetUpTrunkDropBar();
+        bool heap = trunkBar >= getUpConnectDrop || absPitch >= squatDeg;
+        if (heap)
+            getUpHeapAge += dt;
+        else
+            getUpHeapAge = 0f;
+
+        // A grounded paw settles the tuck on its contact age; a heap with
+        // nothing grounded settles on its own age — there is no contact to wait
+        // for, the tuck has to create it.
+        bool tuckDue = heap && (anyPaw ? getUpContactAge >= tuckMin : getUpHeapAge >= tuckMin);
+        if (!tuckDue)
         {
-            getUpPikeLatched = false;
             getUpPikeBorn = -1f;
+            getUpPhaseBorn = -1f;
+            getUpPushPhase = false;
         }
-        else if (getUpContactAge >= tuckMin && absPitch >= squatDeg)
+        else
         {
-            if (!getUpPikeLatched)
+            if (getUpPikeBorn < 0f)
+            {
                 getUpPikeBorn = Time.fixedTime;
-            getUpPikeLatched = true;
-        }
-        else if (absPitch < squatDeg)
-        {
-            getUpPikeLatched = false;
-            getUpPikeBorn = -1f;
+                getUpPhaseBorn = Time.fixedTime;
+                getUpPushPhase = false;
+            }
+            // A push needs a floor. The extension reacts on the trunk, and with
+            // nothing planted that reaction is the only thing it can move:
+            // dog_gu13 pushed 16 times after the second fall, every one with
+            // 0 paws, and the dog ended on its back rocking through pitch ±180
+            // from 20.6 s to the end of the run. With no contact the tuck alone
+            // folds the limbs under the body and waits for a paw; the push
+            // starts the moment one lands (and stops if the paw leaves again).
+            // Tuck ⇄ push clock. The old latch released only when |pitch| fell
+            // under the squat, which a pelvis-down heap never reaches, so the
+            // dog froze in one tuck. A bounded tuck, then a bounded push,
+            // repeating while the trunk is still a heap, is a dog that tries.
+            float phaseAge = Time.fixedTime - getUpPhaseBorn;
+            if (anyPaw && !getUpPushPhase && phaseAge >= Mathf.Max(0.10f, getUpTuckSeconds))
+            {
+                getUpPushPhase = true;
+                getUpPhaseBorn = Time.fixedTime;
+            }
+            else if (getUpPushPhase
+                     && (!anyPaw || phaseAge >= Mathf.Max(0.10f, getUpPushSeconds)))
+            {
+                getUpPushPhase = false;
+                getUpPhaseBorn = Time.fixedTime;
+            }
         }
 
-        // Keep the closed-chain pike until |pitch| is a squat. Leaving
-        // for quiet sit at 70° unfolded back into the −98° plank.
-        bool pike = anyPaw && getUpPikeLatched && absPitch >= squatDeg;
-        bool rising = anyPaw && !pike;
+        // Tuck = limbs folded under the trunk (the paws reach the floor under
+        // the body); push = those same limbs extending against it. The rise
+        // blend drives the extension, so the push is the old rise branch aimed
+        // at a body that is still on the ground.
+        bool pike = tuckDue && !getUpPushPhase;
+        bool rising = !pike;
+        getUpPushingNow = heap && getUpPushPhase;
 
         float hipTarget;
         float kneeTarget;
         float shoulderTarget;
         float elbowTarget;
         bool hipIn = false;
-        if (!anyPaw)
-        {
-            getUpRiseBlend = 0f;
-            hipTarget = hipBaseAngle;
-            kneeTarget = kneeBaseAngle;
-            shoulderTarget = shoulderBaseAngle;
-            elbowTarget = elbowBaseAngle;
-        }
-        else if (pike)
+        if (pike)
         {
             getUpRiseBlend = 0f;
             float tuckHip = Mathf.Max(8f, getUpHipFlex);

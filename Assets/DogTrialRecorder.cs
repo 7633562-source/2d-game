@@ -18,6 +18,10 @@ public class DogTrialRecorder
     // with at least three paws planted (the controller's own stand thresholds).
     private const float DOG_DOWN_DROP = 0.25f;
     private const float DOG_UP_DROP = 0.12f;
+    // The controller's own get-up heap bar (DogStanceController.getUpConnectDrop)
+    // and the number of limb columns the CSV tail carries.
+    private const float DOG_HEAP_BAR = 0.20f;
+    private const int GetUpLimbColumns = 8;
     private const float DOG_DOWN_SETTLE_SECONDS = 0.03f;
     private const float DOG_UP_HOLD_SECONDS = 0.20f;
     // A push is 12 cm of trunk travel off the lowest point of the heap: a
@@ -104,6 +108,11 @@ public class DogTrialRecorder
     private float automatonUpTime = -1f;
     private float automatonUpTrunkDrop;
     private int automatonUpPaws;
+    // Get-up witness: the heap bar and the push half of the tuck-push cycle.
+    private float maxTrunkBar;
+    private float lastTrunkBar;
+    private int samplesHeap;
+    private int samplesPush;
 
     public DogTrialRecorder(Dog dog, TrialRunInfo info)
     {
@@ -117,7 +126,7 @@ public class DogTrialRecorder
         DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
         preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess");
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess,hipL,hipR,kneeL,kneeR,shoL,shoR,elbL,elbR,trunkBar,push");
     }
 
     public void MarkPush(float time, float impulse)
@@ -136,6 +145,14 @@ public class DogTrialRecorder
         float pTilt = stance.pelvisTilt;
         float lumbar = stance.lumbarAngle;
         float comOff = stance.comOffsetX;
+
+        // Get-up witness, read-only: the controller's heap bar (trunk below the
+        // measured stand pose) and the push half of its tuck-push cycle.
+        float trunkBarNow = stance.GetUpTrunkDropBar();
+        lastTrunkBar = trunkBarNow;
+        if (trunkBarNow > maxTrunkBar) maxTrunkBar = trunkBarNow;
+        if (trunkBarNow >= DOG_HEAP_BAR) samplesHeap++;
+        if (stance.getUpPushingNow) samplesPush++;
 
         if (samples == 0)
         {
@@ -327,6 +344,20 @@ public class DogTrialRecorder
         // Appended LAST: every reader indexes columns by name (DictReader).
         rows.Append(',').Append(dogFallTime >= 0f ? '1' : '0');
         rows.Append(',').Append(stance.getUpSuccess ? '1' : '0');
+        // ─── GET-UP WITNESS (append-only, indices stable) ───
+        // The dog CSV carried no limb angles, so a get-up frozen at the base
+        // pose and a tuck that moved the joints could not be told apart.
+        // trunkBar = the controller's own heap bar (trunk below the measured
+        // stand pose, m); push = 1 while it commands the push half of the
+        // tuck-push cycle. Read-only, nothing here feeds the control math.
+        for (int i = 0; i < GetUpLimbColumns; i++)
+        {
+            rows.Append(',');
+            AppendCsvFloat(stance.GetUpLimbAngle(i));
+        }
+        rows.Append(',');
+        AppendCsvFloat(trunkBarNow);
+        rows.Append(',').Append(stance.getUpPushingNow ? '1' : '0');
         rows.AppendLine();
 
         samples++;
@@ -440,6 +471,12 @@ public class DogTrialRecorder
         json.Append(",\"getUpStandTrunkValid\":").Append(stance.getUpStandTrunkValid ? "true" : "false");
         AppendNum(json, "getUpStandChestY", stance.getUpStandChestY);
         AppendNum(json, "getUpStandPelvisY", stance.getUpStandPelvisY);
+        // Witness of the tuck-push cycle: frames with the trunk on the heap bar
+        // and frames with the push commanded (0 = the dog lay in one pose).
+        AppendNum(json, "getUpTrunkBarFinal", lastTrunkBar);
+        AppendNum(json, "getUpTrunkBarMax", maxTrunkBar);
+        json.Append(",\"getUpHeapSamples\":").Append(samplesHeap.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"getUpPushSamples\":").Append(samplesPush.ToString(CultureInfo.InvariantCulture));
         // Physical get-up measurement, beside the automaton's own counters:
         // the stance machine can call GettingUp while the dog lies flat.
         json.Append(",\"dogGetUpAttempts\":").Append(dogGetUpAttempts.ToString(CultureInfo.InvariantCulture));

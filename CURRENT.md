@@ -368,3 +368,57 @@ Yury checks the arena scene in Unity HIMSELF. When Assets/Scenes/WalkArena.unity
 While his editor is open the compile gate SKIPS (a live editor holds the project lock), so
 automatic rebuilds pause until he closes it - that is expected, not a failure. Do not open,
 close or kill his editor.
+
+
+## Profile gates (18.09.2026, by Yury)
+
+- `h_2dgame_opus` exists for expensive work but **starts ONLY on Yury's explicit approval**,
+  per task. It is deliberately NOT wired into any cron, stream, lane or script. Use it for
+  hard problems Flash failed twice and for physics help - not for routine edits.
+- Vegetation has ONE owner: `h_2dgame_plant` (tree + apple). `h_2dgame_apple` is retired.
+- Unity executor is `h_2dgame_unity` (renamed from `programmer`); `h_rev_*` stays Revit.
+## Dog get-up: he tries and rises - tuck/push cycle, 18.09 (dog worker, build a6092d68)
+
+Job order from the brief: (1) fix the success flag, (2) make him try. The flag fix
+(commit e909399d, build 0faedd47) is in the current build and re-verified here, so this
+cycle's ONE change is item 2.
+
+Root cause measured (label `dog_gu12`, build 33e423c3, fingerprint == manifest, 40 s
+`-dogWalk 1 -dogWalkTime 1`): from 21.4 s the dog lay with the pelvis 0.33 m down, pitch
++49, ALL FOUR PAWS OFF THE FLOOR, in `GettingUp` to the end of the run. `DriveGetUp`
+gated its pike on `anyPaw`: with nothing grounded it held the quiet base pose, so the
+body never moved (`dogGetUpAttempts` 0 in 3715 down frames). The tuck is the movement
+that PUTS the paws on the floor, so it must be allowed to start without one.
+
+Change (`DogStanceController.DriveGetUp`):
+- the tuck latches on a HEAP, not on contact: trunk at least `getUpConnectDrop` 0.20 m
+  below the measured stand bar (`GetUpTrunkDropBar`, the same pose `GetUpIsStanding`
+  measures against), or |pitch| >= `getUpSquatAbsPitch`;
+- the one-shot pike became a TUCK to PUSH cycle: `getUpTuckSeconds` 0.45 s folded under
+  the trunk, then `getUpPushSeconds` 0.35 s extending against the floor, repeating while
+  the trunk is still a heap. The old latch released only when |pitch| fell under the
+  squat, which a pelvis-down heap never reaches - it froze in one pose;
+- a push needs a floor: it is entered only with a paw planted and drops back to the tuck
+  without one (measured `dog_gu13`: 16 pushes with 0 paws each spun the trunk to pitch
+  +-180 and left the dog on its back for the last 19 s);
+- recorder witness (read-only): CSV tail `hipL,hipR,kneeL,kneeR,shoL,shoR,elbL,elbR,
+  trunkBar,push`, JSON `getUpTrunkBarFinal/Max`, `getUpHeapSamples`, `getUpPushSamples`.
+
+Measured (40 s, walk from 1 s; `dog_gu12` is the same protocol on the previous build):
+
+| label | build | down s | attempts | up success | getUp s | fourFeet | trunkDrop | m/s |
+|---|---|---|---|---|---|---|---|---|
+| dog_gu12 | 33e423c3 | 18.58 | 0 | false | - | 0.061 | 0.351 | 0.047 |
+| dog_gu13 | 0af0550f | 17.36 | 13 | true | 7.54 | 0.055 | 0.414 | 0.023 |
+| dog_gu14 | a6092d68 | 8.39 | 9 | true | 6.58 | 0.089 | 0.418 | 0.123 |
+
+Flag proof (item 1): 0 of 3473 (`dog_gu13`) and 0 of 1679 (`dog_gu14`) down frames carry
+`upSuccess` 1; the flip is physical - `dog_gu14` `getUpSuccessTime` 16.315 s,
+`getUpSuccessTrunkDrop` 0.0092 m, `getUpSuccessPaws` 4. Quiet regression `dog_gu15`
+(same build, no walk): fourFeet 1.0, trunkDrop 0.025, fell false, 40 s.
+
+Still broken: the dog reaches a heap it cannot leave - on its back (pitch +-180, 0 paws)
+from 33.6 s in `dog_gu14` and 20.6 s in `dog_gu13`, to the end of the run, so item 2's
+run-level bar (fourFeet > 0.5, trunkDrop < 0.06) is NOT met. The walk is untouched:
+comSpeedX 0.123 m/s = 0.444 km/h against 1.389 (5 km/h). Next: right the body from a
+back-lying heap, then the loaded stance push (item 3). Video: `Trials/Runs/dog_gu14.gif`.
