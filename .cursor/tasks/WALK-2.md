@@ -20,7 +20,7 @@ New fields: `fallComLeadTrigger`, `fallPelvisLean`, `catchKneeFlex`,
 
 ## Gait initiation (Yury's observation — hypothesis, not a decision)
 
-Proposal from visual review: a step should begin with knee lift (swing-knee
+Proposal from artist review: a step should begin with knee lift (swing-knee
 flexes, foot up) + stance drives forward + forward lean, NOT a backward leg
 swing and NOT a push-off. The model currently swings the swing leg backward
 first and topples. VALIDATE with the physics specialist before implementing.

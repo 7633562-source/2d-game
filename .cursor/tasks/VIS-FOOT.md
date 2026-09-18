@@ -1,7 +1,7 @@
 # VIS-FOOT — the foot is painted as a ski
 
 Date: 2026-09-01. Dispatcher: this chat (human balance).
-Owner: **2D visual**. Physics side is closed and must not move.
+Owner: **artist**. Physics side is closed and must not move.
 
 ## One sentence
 

@@ -26,4 +26,4 @@ Acceptance (04.09, fingerprint `db775813…3288b5b`):
 - No wood joints, no perch slots.
 
 Textures are not this card (`VIS-TREE` is bark/leaf). A painted petal
-set is a later visual card. A World flower bed is a later level card.
+set is a later artist card. A World flower bed is a later level card.

@@ -15,6 +15,6 @@ Layer: `PlantTree`, `TreeSpring`, `TreeDriver`, `PlantFlower`.
 Do not edit the human, the bird, the yard, or the hand. In the game
 `treeCount = 0` and `flowerCount = 0`. Play is scene `Tree`.
 Trees have no muscles: spring and damping. Flowers are picture only
-(no hinges, no perch). Textures are agent `visual`, card `VIS-TREE`.
+(no hinges, no perch). Textures are agent `artist`, card `VIS-TREE`.
 The human headless stand does not spawn trees or flowers unless
 `-tree` / `-flower`.

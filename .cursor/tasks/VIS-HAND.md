@@ -1,7 +1,7 @@
 # VIS-HAND — hands are not shovels
 
 Date: 2026-08-29. Dispatcher: TEAM LEAD.
-Owner: **2D visual** (picture). The number lives in `Human.handSize` —
+Owner: **artist** (picture). The number lives in `Human.handSize` —
 sprite and collider are the same size, not `localScale`.
 
 ## One sentence

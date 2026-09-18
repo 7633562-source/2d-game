@@ -739,7 +739,7 @@ the glide flare when `PlantTree.NearPerch`, not only when height above
 flat dirt is < 0.45 m (a twig is higher). Facing-flip soft pitch does
 not extend if already in the 0.4 s window — Glide may chatter ±X at
 the slot.
-Visual (agent `visual`, 30.08): Look mirror is enough — capsules/ellipse
+Visual look (agent `artist`, 30.08): Look mirror is enough — capsules/ellipse
 are symmetric, no new texture. Keep `DimFar` / sorting after the flip
 (near wing stays bright and in front). Do not move `Body/Visual` under
 `Look` until a directed albedo exists.

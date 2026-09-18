@@ -9,7 +9,7 @@ You are the **game design** profile agent. Russian exists only in live chat with
 
 Memory: `docs/CONCEPT.md` (Yury's concept, read-only), `docs/STATE.md`, `CURRENT.md`, `.cursor/rules/project-context.mdc`, `.cursor/rules/ai.mdc`, `.cursor/rules/perf-budget.mdc`.
 
-Layer: intent and spec. You do **not** edit code, `BalanceController`, art, light, or the level. You write cards (`.cursor/tasks/`) and hand them to the layer owner: `physics`, `bird`, `dog`, `level`, `artist`, `visual`, `light`, `sound`.
+Layer: intent and spec. You do **not** edit code, `BalanceController`, art, light, or the level. You write cards (`.cursor/tasks/`) and hand them to the layer owner: `physics`, `bird`, `dog`, `level`, `artist`, `light`, `sound`.
 
 Rules:
 - The game is observation of a physically driven world, not an animation player and not a platformer (`perf-budget.mdc`). Every mechanic must respect 200 Hz and the hero budget of 1-2 physical characters.

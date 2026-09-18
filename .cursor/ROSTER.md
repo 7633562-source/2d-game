@@ -8,9 +8,8 @@ Language policy: Russian exists only in live chat with Yury. Everything else is 
 | Agent | Layer | Rule | Play scene |
 |---|---|---|---|
 | `physics` | body / actuators / human control | `balance-actuators.mdc` | `SampleScene` |
-| `visual` | sprite, camera | `lighting-2d.mdc` | `World` / `SampleScene` / `Dog` (look) |
+| `artist` | look, palette, silhouette, sprite, camera | `painted-parts.mdc`, `lighting-2d.mdc` | `World` / `SampleScene` / `Dog` (look) |
 | `light` | Light2D, day/night | `lighting-2d.mdc` | `World` |
-| `artist` | look, palette, silhouette | `painted-parts.mdc` | `World` / `Dog` (look) |
 | `designer` | mechanics, UX, specs (no code) | `project-context.mdc`, `perf-budget.mdc` | no Play; no code |
 | `qa` | verification, trials, perf | `trial-protocol.mdc` | `SampleScene` / WebGL `World` |
 | `sound` | voice, sound bus, ambience | `perf-budget.mdc` | `World` / `Bird` |
