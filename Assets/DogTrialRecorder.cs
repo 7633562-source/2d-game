@@ -9,6 +9,37 @@ public class DogTrialRecorder
     private const float SATURATION_THRESHOLD = 0.999f;
     private const float SETTLED_COM_OFFSET = 0.01f;
 
+    // ─── GET UP AFTER A FALL ───
+    // Measured physically, not from the stance automaton: dog_ds10-13 sat in
+    // GettingUp for the whole run with four paws grounded 5 % of the time, and
+    // dog_rep2 walked with the trunk 0.35 m down and 0.08 paws grounded. The
+    // dog is down when its trunk is 0.25 m below the standing pose and at most
+    // two paws carry it; it is up again when the trunk is back within 0.12 m
+    // with at least three paws planted (the controller's own stand thresholds).
+    private const float DOG_DOWN_DROP = 0.25f;
+    private const float DOG_UP_DROP = 0.12f;
+    private const float DOG_DOWN_SETTLE_SECONDS = 0.03f;
+    private const float DOG_UP_HOLD_SECONDS = 0.20f;
+    // A push is 12 cm of trunk travel off the lowest point of the heap: a
+    // twitch under 2 cm is the body settling, not an attempt to stand.
+    private const float DOG_PUSH_LIFT = 0.12f;
+
+    private float dogFallTime = -1f;
+    private float dogGetUpSeconds = -1f;
+    private int dogGetUpAttempts;
+    private bool dogGetUpSuccess;
+    private int samplesDown;
+    private float downAge;
+    private float upAge;
+    // Deepest chest / pelvis position since the last counted push. Both, not
+    // the trunk max: dog_q1 held pelvisDrop pinned at 0.32 through the whole
+    // heap while the chest rose 0.13, and dog_gu4 sat on its haunches with the
+    // chest 0.07 off the floor and the pelvis 0.32 down — the push can come
+    // from either end, so each is measured against its own floor.
+    private float pushFloorChestDrop;
+    private float pushFloorPelvisDrop;
+    private bool dogDownNow;
+
     private readonly Dog dog;
     private readonly TrialRunInfo info;
     private readonly DogStanceController stance;
@@ -77,7 +108,7 @@ public class DogTrialRecorder
         DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
         preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle");
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down");
     }
 
     public void MarkPush(float time, float impulse)
@@ -131,6 +162,68 @@ public class DogTrialRecorder
         if (fallTime < 0f && (stance.currentState == DogStanceController.StanceState.Falling
             || stance.currentState == DogStanceController.StanceState.Fallen))
             fallTime = time;
+
+        // ─── PHYSICAL DOWN / GET UP ───
+        // trunkDrop + paws only, never the stance automaton. A dog on its
+        // belly can sit in Walk or GettingUp for a whole run.
+        float chestDropNow = startChestY - chestY;
+        float pelvisDropNow = startPelvisY - pelvisY;
+        float trunkDropNow = Mathf.Max(chestDropNow, pelvisDropNow);
+        int pawsGrounded = (stance.frontRightGrounded ? 1 : 0) + (stance.frontLeftGrounded ? 1 : 0)
+            + (stance.rearRightGrounded ? 1 : 0) + (stance.rearLeftGrounded ? 1 : 0);
+        dogDownNow = trunkDropNow >= DOG_DOWN_DROP && pawsGrounded <= 2;
+
+        if (dogDownNow)
+        {
+            downAge += Time.fixedDeltaTime;
+            samplesDown++;
+            if (downAge >= DOG_DOWN_SETTLE_SECONDS)
+            {
+                if (dogFallTime < 0f && !dogGetUpSuccess)
+                    dogFallTime = time - (downAge - Time.fixedDeltaTime);
+                if (chestDropNow > pushFloorChestDrop) pushFloorChestDrop = chestDropNow;
+                if (pelvisDropNow > pushFloorPelvisDrop) pushFloorPelvisDrop = pelvisDropNow;
+            }
+        }
+        else
+        {
+            downAge = 0f;
+        }
+
+        // A push up: an end of the dog lifts 12 cm off the lowest point the
+        // heap reached — the front legs driving the chest, or the hind legs
+        // bringing the pelvis up off its haunches. Tested on EVERY frame, not
+        // only once the dog is up (the push starts from the floor), and per
+        // end, because one end can stay pinned while the other travels:
+        // dog_q1 held pelvisDrop at 0.32 while the chest rose 0.13, dog_gu4
+        // held the chest at 0.07 with the pelvis 0.32 down. Re-armed only after
+        // 12 cm of new travel, so a squirm counts once, not on every frame.
+        if (dogFallTime >= 0f && !dogGetUpSuccess && pawsGrounded >= 1
+            && (pushFloorChestDrop - chestDropNow >= DOG_PUSH_LIFT
+                || pushFloorPelvisDrop - pelvisDropNow >= DOG_PUSH_LIFT))
+        {
+            dogGetUpAttempts++;
+            pushFloorChestDrop = chestDropNow;
+            pushFloorPelvisDrop = pelvisDropNow;
+        }
+
+        // Back on the paws: three or four planted with the trunk at the stance
+        // height, HELD — the walk cycle passes through that pose every stride.
+        if (trunkDropNow <= DOG_UP_DROP && pawsGrounded >= 3)
+        {
+            upAge += Time.fixedDeltaTime;
+            if (upAge >= DOG_UP_HOLD_SECONDS && dogFallTime >= 0f && !dogGetUpSuccess)
+            {
+                dogGetUpSuccess = true;
+                // Seconds from the frame the dog went down to the frame it
+                // held four paws again. -1 while it never does.
+                dogGetUpSeconds = time - dogFallTime;
+            }
+        }
+        else
+        {
+            upAge = 0f;
+        }
 
         if (absOff > SETTLED_COM_OFFSET)
             lastUnsettledTime = time;
@@ -200,6 +293,8 @@ public class DogTrialRecorder
         AppendCsvFloat(stance.leapCount);
         rows.Append(',');
         AppendCsvFloat(stance.jawAngle);
+        rows.Append(',').Append(pawsGrounded.ToString(CultureInfo.InvariantCulture));
+        rows.Append(',').Append(dogDownNow ? '1' : '0');
         rows.AppendLine();
 
         samples++;
@@ -294,6 +389,14 @@ public class DogTrialRecorder
         json.Append(",\"getUpSuccess\":").Append(stance.getUpSuccess ? "true" : "false");
         AppendNum(json, "getUpSeconds", stance.getUpSeconds);
         AppendNum(json, "getUpFallTime", stance.getUpFallTime);
+        // Physical get-up measurement, beside the automaton's own counters:
+        // the stance machine can call GettingUp while the dog lies flat.
+        json.Append(",\"dogGetUpAttempts\":").Append(dogGetUpAttempts.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"dogGetUpSuccess\":").Append(dogGetUpSuccess ? "true" : "false");
+        AppendNum(json, "dogGetUpSeconds", dogGetUpSeconds);
+        AppendNum(json, "dogDownSeconds", samplesDown * Time.fixedDeltaTime);
+        AppendNum(json, "dogDownFraction", samples > 0 ? samplesDown / (float)samples : 0f);
+        AppendNum(json, "dogFallTime", dogFallTime);
         json.Append(",\"jawStrikeHits\":").Append((jawStrike != null ? jawStrike.HitCount : 0).ToString(CultureInfo.InvariantCulture));
         json.Append(",\"preyHurtCount\":").Append((preyLife != null ? preyLife.HurtCount : 0).ToString(CultureInfo.InvariantCulture));
         json.Append(",\"preyPresent\":").Append(preyLife != null ? "true" : "false");
@@ -436,6 +539,7 @@ public class DogTrialRecorder
             AppendNum(json, "walkElbowFlex", c.walkElbowFlex);
             AppendNum(json, "walkPawPlant", c.walkPawPlant);
             AppendNum(json, "walkFrontPlantScale", c.walkFrontPlantScale);
+            AppendNum(json, "walkStanceSweepDeg", c.walkStanceSweepDeg);
             AppendNum(json, "walkChestTilt", c.walkChestTilt);
             AppendNum(json, "walkLumbarP", c.walkLumbarP);
             AppendNum(json, "walkHipP", c.walkHipP);

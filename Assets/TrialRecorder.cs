@@ -70,6 +70,25 @@ public class TrialRecorder
     // geometry: arms and head stick at the limit when K is too small.
     private const float LIMIT_MARGIN_DEGREES = 1f;
 
+    // ─── PHYSICAL FALL DETECTION ───
+    // The automaton is not ground truth. Trial p_sw1 (18.09, 07:55 build) lay on
+    // the dirt from 8 s to 39 s with torsoTilt -51 deg, headY -1.52 and
+    // supportMargin -0.84, while BalanceState stayed at Recovery and `fell`
+    // stayed false — the Falling state is never entered once the get-up
+    // automaton owns the body. The body is down when the torso is past 45 deg
+    // AND the pelvis has dropped 30 cm, or when the pelvis is more than half a
+    // metre low AND the head has fallen below the standing pelvis height.
+    // Measured over the 1095 fallen=false runs on disk: a quiet stance reaches
+    // neither, the deepest crouch stops at 0.46 m of pelvis drop with the head
+    // 0.10 m above the standing pelvis height, and both routes together catch
+    // 19 runs the automaton missed.
+    private const float DOWN_TILT_DEGREES = 45f;
+    private const float DOWN_PELVIS_DROP = 0.30f;
+    private const float DOWN_DEEP_DROP = 0.50f;
+    // The signal must hold a few frames: one noisy frame is not a fall. The
+    // reported time is the FIRST frame of the run, not the end of the settle.
+    private const float DOWN_SETTLE_SECONDS = 0.03f;
+
     private readonly Human human;
     private readonly string label;
     private readonly TrialRunInfo info;
@@ -91,6 +110,13 @@ public class TrialRecorder
     private double sumTorsoAngVelSquared;
     private float maxAbsTilt;
     private float fallTime = -1f;
+    // First frame the body was actually down (physical); -1 while he is up.
+    // `fell` and `survivedSeconds` read this one, not the automaton.
+    private float physicalFallTime = -1f;
+    private float downAge;
+    private int samplesDown;
+    // True on this frame whenever the body is on the ground (not latched).
+    private bool downNow;
     private int samplesBalancing;
     private int samplesRecovery;
     private int samplesFalling;
@@ -195,6 +221,15 @@ public class TrialRecorder
 
     private StepPhaseDriver stepDriver;
     private MotionIntent motionIntent;
+    private ArmDrive armDrive;
+    // Arm drive evidence, tracked here so the number lands in the JSON as well
+    // as in the per-side CSV columns: the counter phase is only measurable if
+    // the commanded phase and the delivered joint angle are both on record.
+    private int samplesArmSwingOn;
+    private int samplesDownArm;
+    private int samplesDownHandContactL;
+    private int samplesDownHandContactR;
+    private float maxArmHandY;
     private int maxWalkSwapCount;
     private int lastWalkPhase;
     private int lastFallCatchPhase = -1;
@@ -258,6 +293,7 @@ public class TrialRecorder
 
         stepDriver = human.GetComponent<StepPhaseDriver>();
         motionIntent = human.GetComponent<MotionIntent>();
+        armDrive = human.GetComponent<ArmDrive>();
 
         // Header into the same rows: Join+new[] would allocate an array and an intermediate string for nothing.
         rows.Append("time").Append(';')
@@ -298,7 +334,43 @@ public class TrialRecorder
             .Append("shoulderAngle").Append(';')
             .Append("elbowAngle").Append(';')
             .Append("walkCollapsed").Append(';')
-            .Append("walkPosed").AppendLine();
+            .Append("walkPosed").Append(';')
+            // Per side, so the arm phase is measurable. One averaged
+            // shoulderAngle already hid the counter swing: it logged the LEFT
+            // hinge only, and the left/right relation is the whole point.
+            .Append("shoulderAngleL").Append(';')
+            .Append("shoulderAngleR").Append(';')
+            .Append("elbowAngleL").Append(';')
+            .Append("elbowAngleR").Append(';')
+            .Append("actShoulderL").Append(';')
+            .Append("actShoulderR").Append(';')
+            .Append("actElbowL").Append(';')
+            .Append("actElbowR").Append(';')
+            .Append("handGroundedL").Append(';')
+            .Append("handGroundedR").Append(';')
+            // Arm drive evidence, per side. handGrounded* above is the estimator's
+            // slop test; handContactL/R below is a real Box2D contact with the
+            // ground layer, and handYL/R is where the palm actually is. armPhaseL/R
+            // is the drive's own phase, so a flat correlation can be told apart
+            // from a drive that never asked for a counter phase.
+            .Append("handContactL").Append(';')
+            .Append("handContactR").Append(';')
+            .Append("handYL").Append(';')
+            .Append("handYR").Append(';')
+            .Append("armSwingLevel").Append(';')
+            .Append("armPhaseL").Append(';')
+            .Append("armPhaseR").Append(';')
+            .Append("armTargetShoulderL").Append(';')
+            .Append("armTargetShoulderR").Append(';')
+            .Append("armTargetElbowL").Append(';')
+            .Append("armTargetElbowR").Append(';')
+            .Append("armPressPhaseL").Append(';')
+            .Append("armPressPhaseR").Append(';')
+            .Append("armPressRequest").Append(';')
+            // down = on the ground this frame, fell = latched at the first
+            // down frame, so the frame the flag turns true is in the CSV.
+            .Append("down").Append(';')
+            .Append("fell").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -398,6 +470,16 @@ public class TrialRecorder
         bool leftHandGrounded = state != null && state.leftHandGrounded;
         bool rightHandGrounded = state != null && state.rightHandGrounded;
 
+        // Arm drive: the commanded phase next to the delivered angle is what makes
+        // the counter phase measurable, and a real hand contact is what the press
+        // claims. Both are per side.
+        bool handContactL = armDrive != null && armDrive.HandContactL;
+        bool handContactR = armDrive != null && armDrive.HandContactR;
+        float handYL = leftHandCollider != null ? leftHandCollider.transform.position.y : 0f;
+        float handYR = rightHandCollider != null ? rightHandCollider.transform.position.y : 0f;
+        if (armDrive != null && armDrive.WalkSwingLevel > 0.5f) samplesArmSwingOn++;
+        if (handYL > maxArmHandY) maxArmHandY = handYL;
+
         float actHipL = MaxActivation(balance?.leftHipFlexor, balance?.leftHipExtensor);
         float actHipR = MaxActivation(balance?.rightHipFlexor, balance?.rightHipExtensor);
         float actKneeL = MaxActivation(balance?.leftKneeFlexor, balance?.leftKneeExtensor);
@@ -426,6 +508,34 @@ public class TrialRecorder
         maxStandLegLevel = Mathf.Max(maxStandLegLevel, standLegLevel);
         lastTilt = tilt;
         lastComOffset = comOffset;
+
+        // ─── PHYSICAL FALL ───
+        // Tilt / head / pelvis only, never the controller state: the automaton
+        // can park at Recovery while the body lies on the dirt (p_sw1).
+        float pelvisDropNow = startPelvisY - pelvisY;
+        float headRelToStandingPelvis = headY - startPelvisY;
+        downNow = (Mathf.Abs(tilt) >= DOWN_TILT_DEGREES && pelvisDropNow >= DOWN_PELVIS_DROP)
+            || (pelvisDropNow >= DOWN_DEEP_DROP && headRelToStandingPelvis <= 0f);
+        if (downNow)
+        {
+            downAge += Time.fixedDeltaTime;
+            samplesDown++;
+            // Real palm contact while the body is down: the press needs it, and
+            // "the palm is at the slab" was already being logged as grounded.
+            samplesDownArm++;
+            if (handContactL) samplesDownHandContactL++;
+            if (handContactR) samplesDownHandContactR++;
+            // The run's FIRST frame, not the end of the settle. A single-frame
+            // crossing mid-dive (p_arms4: 6.115, then |tilt| 45.2 -> 26.6 deg
+            // with the pelvis still dropping) is rejected by the settle on
+            // purpose and the latch lands on the first sustained run.
+            if (physicalFallTime < 0f && downAge >= DOWN_SETTLE_SECONDS)
+                physicalFallTime = time - (downAge - Time.fixedDeltaTime);
+        }
+        else
+        {
+            downAge = 0f;
+        }
 
         if (state != null)
         {
@@ -692,7 +802,38 @@ public class TrialRecorder
             .Append(F(WatchAngle(shoulderWatch))).Append(';')
             .Append(F(WatchAngle(elbowWatch))).Append(';')
             .Append(inCaptureWalkWindow && balance.CaptureWalkCollapsed ? "1" : "0").Append(';')
-            .Append(inCaptureWalkWindow && balance.CaptureWalkPosed ? "1" : "0").AppendLine();
+            .Append(inCaptureWalkWindow && balance.CaptureWalkPosed ? "1" : "0").Append(';')
+            .Append(F(WatchAngle(shoulderWatch, 0))).Append(';')
+            .Append(F(WatchAngle(shoulderWatch, 1))).Append(';')
+            .Append(F(WatchAngle(elbowWatch, 0))).Append(';')
+            .Append(F(WatchAngle(elbowWatch, 1))).Append(';')
+            .Append(F(MaxActivation(balance?.leftShoulderFlexor, balance?.leftShoulderExtensor))).Append(';')
+            .Append(F(MaxActivation(balance?.rightShoulderFlexor, balance?.rightShoulderExtensor))).Append(';')
+            .Append(F(MaxActivation(balance?.leftElbowFlexor, balance?.leftElbowExtensor))).Append(';')
+            .Append(F(MaxActivation(balance?.rightElbowFlexor, balance?.rightElbowExtensor))).Append(';')
+            .Append(leftHandGrounded ? "1" : "0").Append(';')
+            .Append(rightHandGrounded ? "1" : "0").Append(';')
+            .Append(handContactL ? "1" : "0").Append(';')
+            .Append(handContactR ? "1" : "0").Append(';')
+            .Append(F(handYL)).Append(';')
+            .Append(F(handYR)).Append(';')
+            .Append(F(armDrive != null ? armDrive.WalkSwingLevel : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.ArmPhaseL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.ArmPhaseR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.ArmTargetShoulderL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.ArmTargetShoulderR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.ArmTargetElbowL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.ArmTargetElbowR : 0f)).Append(';')
+            .Append((armDrive != null ? armDrive.PressPhaseL : 0).ToString(CultureInfo.InvariantCulture)).Append(';')
+            .Append((armDrive != null ? armDrive.PressPhaseR : 0).ToString(CultureInfo.InvariantCulture)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressRequest : 0f)).Append(';')
+            .Append(downNow ? "1" : "0").Append(';')
+            .Append(physicalFallTime >= 0f ? "1" : "0").AppendLine();
+    }
+
+    private static float WatchAngle(JointDampingWatch watch, int index)
+    {
+        return watch != null ? watch.AngleAt(index) : 0f;
     }
 
     private static float WatchAngle(JointDampingWatch watch)
@@ -710,12 +851,14 @@ public class TrialRecorder
         float rmsComOffset = samples > 0 ? Mathf.Sqrt((float)(sumComOffsetSquared / samples)) : 0f;
         float meanAbsComOffset = samples > 0 ? (float)(sumAbsComOffset / samples) : 0f;
         float rmsTorsoAngVel = samples > 0 ? Mathf.Sqrt((float)(sumTorsoAngVelSquared / samples)) : 0f;
-        float survived = fallTime >= 0f ? fallTime : simulatedSeconds;
+        // Physical fall latch, not the BalanceState automaton: the automaton
+        // never enters Falling once the get-up path owns the body (p_sw1).
+        float survived = physicalFallTime >= 0f ? physicalFallTime : simulatedSeconds;
         float headDrop = startHeadY - lastHeadY;
         float pelvisDrop = startPelvisY - minPelvisY;
         float pelvisRecoverError = startPelvisY - lastPelvisY;
         bool returnedToStand = crouchReleaseTime >= 0f
-            && fallTime < 0f
+            && physicalFallTime < 0f
             && pelvisRecoverError <= PELVIS_RECOVER_TOLERANCE;
         float crouchBothFeet = samplesCrouchWindow > 0
             ? samplesBothFeetCrouch / (float)samplesCrouchWindow
@@ -757,7 +900,13 @@ public class TrialRecorder
         AppendNum(json, "fixedDeltaTime", Time.fixedDeltaTime);
         AppendNum(json, "muscleActivationSpeed", balance != null ? balance.muscleActivationSpeed : 0f);
         AppendNum(json, "survivedSeconds", survived);
-        json.Append(",\"fell\":").Append(fallTime >= 0f ? "true" : "false");
+        json.Append(",\"fell\":").Append(physicalFallTime >= 0f ? "true" : "false");
+        // Where the flag came from. fallTime is the old automaton latch, kept
+        // for the cross-check: it disagreed with the body in 19 runs on disk.
+        AppendNum(json, "fallTime", physicalFallTime);
+        AppendNum(json, "fallAutomatonTime", fallTime);
+        AppendNum(json, "downSeconds", samplesDown * Time.fixedDeltaTime);
+        AppendNum(json, "downFraction", Fraction(samplesDown));
         AppendNum(json, "maxAbsTorsoTilt", maxAbsTilt);
         AppendNum(json, "maxAbsLumbarAngle", maxAbsLumbarAngle);
         AppendNum(json, "maxAbsPelvisTilt", maxAbsPelvisTilt);
@@ -923,6 +1072,25 @@ public class TrialRecorder
         AppendNum(json, "shoulderLimitFraction", LimitFraction(shoulderWatch));
         AppendNum(json, "elbowLimitFraction", LimitFraction(elbowWatch));
         AppendNum(json, "wristLimitFraction", LimitFraction(wristWatch));
+        // Arm drive, per side. armSwingFraction: how much of the run the walk
+        // counter swing was engaged. armHandContactFraction*: real palm-on-ground
+        // contacts while the body is down (handGrounded* is only the slop test).
+        // armPressStroke*: the last stroke of the fall press.
+        AppendNum(json, "armSwingFraction",
+            samples > 0 ? samplesArmSwingOn / (float)samples : 0f);
+        AppendNum(json, "armHandContactFractionL",
+            samplesDownArm > 0 ? samplesDownHandContactL / (float)samplesDownArm : 0f);
+        AppendNum(json, "armHandContactFractionR",
+            samplesDownArm > 0 ? samplesDownHandContactR / (float)samplesDownArm : 0f);
+        AppendNum(json, "armPressStrokesL", armDrive != null ? armDrive.PressStrokesL : 0f);
+        AppendNum(json, "armPressStrokesR", armDrive != null ? armDrive.PressStrokesR : 0f);
+        AppendNum(json, "armPressStrokeMaxDegL", armDrive != null ? armDrive.PressStrokeExtensionL : 0f);
+        AppendNum(json, "armPressStrokeMaxDegR", armDrive != null ? armDrive.PressStrokeExtensionR : 0f);
+        AppendNum(json, "armPressShoulderMaxDegL", armDrive != null ? armDrive.PressStrokeShoulderExtL : 0f);
+        AppendNum(json, "armPressShoulderMaxDegR", armDrive != null ? armDrive.PressStrokeShoulderExtR : 0f);
+        AppendNum(json, "armPressLiftMaxMeters", armDrive != null ? armDrive.PressLiftMax : 0f);
+        AppendNum(json, "armPressRequest", armDrive != null ? armDrive.PressRequest : 0f);
+        AppendNum(json, "armMaxHandY", maxArmHandY);
         AppendNum(json, "muscleMultiplier", human.muscleMultiplier);
         AppendNum(json, "frictionMultiplier", human.frictionMultiplier);
         AppendNum(json, "lumbarFrictionMaxTorque", human.lumbarFrictionMaxTorque);
@@ -1769,6 +1937,16 @@ public class TrialRecorder
         public float FirstAngle()
         {
             HingeJoint2D joint = FirstAlive();
+            return joint != null ? joint.jointAngle : 0f;
+        }
+
+        // The same hinge, addressed by side: Pair() stores left first and
+        // right second, so index 1 is the right arm. The per-side columns in
+        // the CSV need both, not the first one only.
+        public float AngleAt(int index)
+        {
+            if (Joints == null || index < 0 || index >= Joints.Length) return 0f;
+            HingeJoint2D joint = Joints[index];
             return joint != null ? joint.jointAngle : 0f;
         }
 
