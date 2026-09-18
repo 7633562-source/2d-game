@@ -1278,11 +1278,27 @@ public class HeadlessTrial : MonoBehaviour
         float trialWallStart = Time.realtimeSinceStartup;
         float simulated = 0f;
         float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
+        int lastShot = -1;
         while (simulated < duration)
         {
             yield return FixedStep;
             simulated += Time.fixedDeltaTime;
             plantRecorder.Sample(simulated);
+
+            // Same capture as the human, bird and dog trials. Without it every
+            // tree acceptance was a number only and no one ever looked at a
+            // tree. A plant change is accepted by a picture.
+            if (visual)
+            {
+                int shotIdx = (int)(simulated / 0.2f);
+                if (shotIdx != lastShot)
+                {
+                    lastShot = shotIdx;
+                    string shotPath = Path.Combine(outputFolder, "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
+                    yield return CaptureVisualFrame(shotPath);
+                }
+            }
+
             if (Time.realtimeSinceStartup > realDeadline)
             {
                 Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
@@ -3046,9 +3062,22 @@ public class HeadlessTrial : MonoBehaviour
         CameraFollow follow = cam.GetComponent<CameraFollow>();
         if (follow == null)
             follow = cam.gameObject.AddComponent<CameraFollow>();
-        follow.frameFullBody = true;
-        if (human != null)
-            follow.Bind(human);
+        if (human == null && plantTree != null)
+        {
+            // Tree trial: the same lens as Play scene `Tree` (GameProcess
+            // treeOnly: size 4.6, offset 1.1). frameFullBody off — the stand
+            // lens reads human head/feet sprites that are null here.
+            follow.frameFullBody = false;
+            follow.offset = new Vector3(0f, 1.1f, -10f);
+            cam.orthographicSize = 4.6f;
+            follow.Bind(plantTree);
+        }
+        else
+        {
+            follow.frameFullBody = true;
+            if (human != null)
+                follow.Bind(human);
+        }
         return cam;
     }
 
