@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
@@ -13,17 +14,20 @@ public class DogTrialRecorder
     // Measured physically, not from the stance automaton: dog_ds10-13 sat in
     // GettingUp for the whole run with four paws grounded 5 % of the time, and
     // dog_rep2 walked with the trunk 0.35 m down and 0.08 paws grounded. The
-    // dog is down when its trunk is 0.25 m below the standing pose and at most
-    // two paws carry it; it is up again when the trunk is back within 0.12 m
-    // with at least three paws planted (the controller's own stand thresholds).
-    private const float DOG_DOWN_DROP = 0.25f;
-    private const float DOG_UP_DROP = 0.12f;
+    // The dog's own down rule is gone (C1, 18.09): Assets/FallCriterion.cs
+    // decides, on the SETTLED stand height below. What stays here is the get-up
+    // side (DOG_UP_*) and the policy that a run ending on its feet is not a fall.
     // The controller's own get-up heap bar (DogStanceController.getUpConnectDrop)
     // and the number of limb columns the CSV tail carries.
     private const float DOG_HEAP_BAR = 0.20f;
     private const int GetUpLimbColumns = 8;
-    private const float DOG_DOWN_SETTLE_SECONDS = 0.03f;
+    // The get-up side keeps its own stand threshold: trunk back within 12 cm of
+    // the standing pose with at least three paws planted.
+    private const float DOG_UP_DROP = 0.12f;
     private const float DOG_UP_HOLD_SECONDS = 0.20f;
+    // The settled stand height is measured over this much of the run (frames
+    // with 3+ paws planted and the pitch under 45 deg), then frozen.
+    private const float DOG_BASELINE_WINDOW_END = 5.0f;
     // A push is 12 cm of trunk travel off the lowest point of the heap: a
     // twitch under 2 cm is the body settling, not an attempt to stand.
     private const float DOG_PUSH_LIFT = 0.12f;
@@ -33,7 +37,10 @@ public class DogTrialRecorder
     private int dogGetUpAttempts;
     private bool dogGetUpSuccess;
     private int samplesDown;
-    private float downAge;
+    // C1: the shared criterion's per-dog latch and its measured settled stand
+    // height (see Assets/FallCriterion.cs). Nothing here is a second rule.
+    private FallCriterion.Latch fallLatch;
+    private FallCriterion.Baseline standBaseline;
     private float upAge;
     // Deepest chest / pelvis position since the last counted push. Both, not
     // the trunk max: dog_q1 held pelvisDrop pinned at 0.32 through the whole
@@ -114,6 +121,33 @@ public class DogTrialRecorder
     private int samplesHeap;
     private int samplesPush;
 
+    // ─── CYCLE 1 INSTRUMENTS (per-frame signals only; no decision is taken on
+    // any of them in this cycle) ───
+    // Each value below is published as a CSV column on every frame and summed up
+    // in the JSON. Nothing here is read by a control law, so the physics of the
+    // run must stay bit-identical: that is this cycle's acceptance.
+    private bool trunkLiftBaseValid;
+    private float trunkLiftBase;
+    private float trunkLift;
+    private float trunkLiftMax;
+    private int trunkLiftMaxFrame = -1;
+    // Per-frame capture-point margin (supportMargin, m) kept for p05; the count
+    // of frames outside the support interval is a signal, not a flag.
+    private readonly List<float> captureMargins = new List<float>();
+    private float captureMarginMin = float.MaxValue;
+    private int captureMarginMinFrame = -1;
+    private double sumCaptureMargin;
+    private int captureMarginNegativeFrames;
+    private readonly double[] sumPawImpulse = new double[4];
+    private double sumFnOverWeight;
+    private float sumFnOverWeightMax;
+    private float controllerTrunkDropMax;
+    private float controllerTrunkDropFinal;
+    private float controllerVsRecorderMax;
+    private int controllerVsRecorderMaxFrame = -1;
+    // Every new column, every frame: a non-zero count is a failed acceptance.
+    private int cycle1NanCount;
+
     public DogTrialRecorder(Dog dog, TrialRunInfo info)
     {
         this.dog = dog;
@@ -126,7 +160,7 @@ public class DogTrialRecorder
         DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
         preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess,hipL,hipR,kneeL,kneeR,shoL,shoR,elbL,elbR,trunkBar,push");
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess,hipL,hipR,kneeL,kneeR,shoL,shoR,elbL,elbR,trunkBar,push,trunkLift,capturePointMargin,pawNormalImpulseFR,pawNormalImpulseFL,pawNormalImpulseRR,pawNormalImpulseRL,sumFnOverWeight,controllerTrunkDrop");
     }
 
     public void MarkPush(float time, float impulse)
@@ -189,15 +223,29 @@ public class DogTrialRecorder
             || stance.currentState == DogStanceController.StanceState.Fallen))
             fallTime = time;
 
-        // ─── PHYSICAL DOWN / GET UP ───
-        // trunkDrop + paws only, never the stance automaton. A dog on its
-        // belly can sit in Walk or GettingUp for a whole run.
+        // ─── PHYSICAL DOWN / GET UP (C1: the one project-wide criterion) ───
+        // The local `trunk 0.25 m down AND <= 2 paws` rule is gone. It was a
+        // second implementation of the same idea and it lied: 25 s of a dog
+        // lying on its side read `fell` false because the stance automaton
+        // stayed in Walk. Assets/FallCriterion.cs decides now - trunk 0.25 m
+        // below its own SETTLED stand height, or |pitch| > 60 deg, held 0.15 s.
         float chestDropNow = startChestY - chestY;
         float pelvisDropNow = startPelvisY - pelvisY;
         float trunkDropNow = Mathf.Max(chestDropNow, pelvisDropNow);
         int pawsGrounded = (stance.frontRightGrounded ? 1 : 0) + (stance.frontLeftGrounded ? 1 : 0)
             + (stance.rearRightGrounded ? 1 : 0) + (stance.rearLeftGrounded ? 1 : 0);
-        dogDownNow = trunkDropNow >= DOG_DOWN_DROP && pawsGrounded <= 2;
+        // The settled stand height is the trunk height of frames that are
+        // evidence of standing (3+ paws planted, pitch under 45 deg), measured
+        // over the first seconds of the run and then frozen. startChestY - the
+        // spawn pose - is only the documented fallback for a run that never
+        // stood; the spawn pose is exactly what made the arena's copy lie.
+        float dogTilt = Mathf.Max(Mathf.Abs(pitch), Mathf.Abs(pTilt));
+        if (time < DOG_BASELINE_WINDOW_END && pawsGrounded >= 3)
+            standBaseline.Feed(chestY, dogTilt);
+        else if (time >= DOG_BASELINE_WINDOW_END)
+            standBaseline.Freeze();
+        dogDownNow = FallCriterion.Step(ref fallLatch, standBaseline.Value(startChestY),
+            chestY, dogTilt, Time.fixedDeltaTime, time);
 
         // The automaton's own claim, witnessed: recorded at the frame it turns
         // true, from this recorder's stance, never from the automaton's bar.
@@ -211,20 +259,80 @@ public class DogTrialRecorder
 
         if (dogDownNow)
         {
-            downAge += Time.fixedDeltaTime;
             samplesDown++;
-            if (downAge >= DOG_DOWN_SETTLE_SECONDS)
-            {
-                if (dogFallTime < 0f && !dogGetUpSuccess)
-                    dogFallTime = time - (downAge - Time.fixedDeltaTime);
-                if (chestDropNow > pushFloorChestDrop) pushFloorChestDrop = chestDropNow;
-                if (pelvisDropNow > pushFloorPelvisDrop) pushFloorPelvisDrop = pelvisDropNow;
-            }
+            // This recorder's own POLICY, named as a policy and not as a second
+            // criterion: a run that ends standing is not reported as a fall. The
+            // down/up decision itself is the shared one.
+            if (dogFallTime < 0f && fallLatch.fired && !dogGetUpSuccess)
+                dogFallTime = fallLatch.fireTime;
+            if (chestDropNow > pushFloorChestDrop) pushFloorChestDrop = chestDropNow;
+            if (pelvisDropNow > pushFloorPelvisDrop) pushFloorPelvisDrop = pelvisDropNow;
         }
-        else
+
+        // ─── CYCLE 1 INSTRUMENTS (measure only; no decision below reads them) ───
+        // trunkLift: max(chestY, pelvisY) minus the same value in the frame the
+        // fall was DECLARED — the first frame the shared criterion reads down,
+        // i.e. the frame the CSV `fell` column turns 1. Zero before a fall: there
+        // is nothing to lift off yet, and a run that never falls has no lift.
+        if (dogDownNow && !trunkLiftBaseValid)
         {
-            downAge = 0f;
+            trunkLiftBaseValid = true;
+            trunkLiftBase = Mathf.Max(chestY, pelvisY);
         }
+        trunkLift = trunkLiftBaseValid ? Mathf.Max(chestY, pelvisY) - trunkLiftBase : 0f;
+        if (trunkLift > trunkLiftMax)
+        {
+            trunkLiftMax = trunkLift;
+            trunkLiftMaxFrame = samples;
+        }
+
+        // capturePointMargin: the support margin the controller computes every
+        // step and feeds to no control law (its only consumer is a log line).
+        // Sign as computed at DogStanceController.Sense: + inside the paw AABB,
+        // 0 on the edge, - outside. p05 and min are summarised in the JSON.
+        float marginNow = stance.supportMargin;
+        captureMargins.Add(marginNow);
+        sumCaptureMargin += marginNow;
+        if (marginNow < captureMarginMin)
+        {
+            captureMarginMin = marginNow;
+            captureMarginMinFrame = samples;
+        }
+        if (marginNow < 0f) captureMarginNegativeFrames++;
+
+        // Per-paw ground reaction: the step's normal impulse (N*s) per paw, and
+        // its weight fraction. The prediction a later cycle has to confirm or
+        // refute: a dog carried by its belly reads well under 1.0 here.
+        for (int paw = 0; paw < 4; paw++)
+            sumPawImpulse[paw] += stance.pawNormalImpulse[paw];
+        float fnOverWeightNow = stance.pawWeightFraction;
+        sumFnOverWeight += fnOverWeightNow;
+        if (fnOverWeightNow > sumFnOverWeightMax) sumFnOverWeightMax = fnOverWeightNow;
+
+        // controllerTrunkDrop: the controller's OWN bar for the walk heap
+        // (WalkStandDrop, m), logged beside this recorder's independent trunkDrop
+        // (trunkBar already carries GetUpTrunkDropBar). Where the two disagree by
+        // more than 0.05 m the automaton's own state cannot be trusted.
+        float controllerDropNow = stance.walkStandDropBar;
+        controllerTrunkDropFinal = controllerDropNow;
+        if (controllerDropNow > controllerTrunkDropMax) controllerTrunkDropMax = controllerDropNow;
+        float barGap = Mathf.Abs(controllerDropNow - trunkDropNow);
+        if (barGap > controllerVsRecorderMax)
+        {
+            controllerVsRecorderMax = barGap;
+            controllerVsRecorderMaxFrame = samples;
+        }
+
+        // NaN watch on every new column of every frame, so "no NaN" is a number a
+        // checker can read and not an eyeball.
+        if (!IsFinite(trunkLift)) cycle1NanCount++;
+        if (!IsFinite(marginNow)) cycle1NanCount++;
+        for (int paw = 0; paw < 4; paw++)
+        {
+            if (!IsFinite(stance.pawNormalImpulse[paw])) cycle1NanCount++;
+        }
+        if (!IsFinite(fnOverWeightNow)) cycle1NanCount++;
+        if (!IsFinite(controllerDropNow)) cycle1NanCount++;
 
         // A push up: an end of the dog lifts 12 cm off the lowest point the
         // heap reached — the front legs driving the chest, or the hind legs
@@ -358,6 +466,26 @@ public class DogTrialRecorder
         rows.Append(',');
         AppendCsvFloat(trunkBarNow);
         rows.Append(',').Append(stance.getUpPushingNow ? '1' : '0');
+        // ─── CYCLE 1 INSTRUMENTS (append-only, after `push`, indices stable) ───
+        // trunkLift m — trunk lift off the frame the fall was declared;
+        // capturePointMargin m — support margin, + inside the paw AABB;
+        // pawNormalImpulseFR/FL/RR/RL N*s — this step's normal impulse per paw;
+        // sumFnOverWeight dimensionless — sum(Fn)/(m*g), 1 = the paws carry the
+        // body weight; controllerTrunkDrop m — the controller's own
+        // WalkStandDrop, beside this recorder's independent trunkDrop.
+        rows.Append(',');
+        AppendCsvFloat(trunkLift);
+        rows.Append(',');
+        AppendCsvFloat(marginNow);
+        for (int col = 0; col < 4; col++)
+        {
+            rows.Append(',');
+            AppendCsvFloat(stance.pawNormalImpulse[col]);
+        }
+        rows.Append(',');
+        AppendCsvFloat(fnOverWeightNow);
+        rows.Append(',');
+        AppendCsvFloat(controllerDropNow);
         rows.AppendLine();
 
         samples++;
@@ -501,6 +629,49 @@ public class DogTrialRecorder
             AppendNum(json, "appliedPushTime", pushTime);
             AppendNum(json, "appliedPushImpulse", pushImpulse);
         }
+        // ─── CYCLE 1 INSTRUMENTS (read-only; no decision is taken on them) ───
+        // Units: trunkLift m; capturePointMargin m (+ inside the paw AABB);
+        // pawNormalImpulseMeanFR/FL/RR/RL N*s — the per-paw mean of the step's
+        // solver normal impulse, the reading the human lane publishes as fzL/fzR
+        // (force = impulse / dt); sumFnOverWeightMean/Max dimensionless, where
+        // 1.0 means the paws carry the whole body weight; controllerTrunkDrop m —
+        // the controller's OWN WalkStandDrop bar, logged beside this recorder's
+        // independent trunkDrop, with the frame of the largest disagreement;
+        // metresPerCycle and nominalStrideFront/Rear m — the measured travel per
+        // counted walk cycle against the stride the rig link geometry allows
+        // (2 * L * sin(sweep/2), L = upper + lower + half a paw, sweep =
+        // walkStanceSweepDeg); cycle1NanCount counts non-finite new-column values.
+        AppendNum(json, "trunkLiftMax", trunkLiftMax);
+        AppendNum(json, "trunkLiftFinal", trunkLift);
+        json.Append(",\"trunkLiftMaxFrame\":").Append(trunkLiftMaxFrame.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "capturePointMarginMin", captureMargins.Count > 0 ? captureMarginMin : 0f);
+        AppendNum(json, "capturePointMarginP05", CaptureMarginP05());
+        AppendNum(json, "capturePointMarginMean", samples > 0 ? (float)(sumCaptureMargin / samples) : 0f);
+        json.Append(",\"capturePointMarginMinFrame\":").Append(captureMarginMinFrame.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"capturePointMarginNegativeFrames\":").Append(captureMarginNegativeFrames.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "pawNormalImpulseMeanFR", MeanPawImpulse(0));
+        AppendNum(json, "pawNormalImpulseMeanFL", MeanPawImpulse(1));
+        AppendNum(json, "pawNormalImpulseMeanRR", MeanPawImpulse(2));
+        AppendNum(json, "pawNormalImpulseMeanRL", MeanPawImpulse(3));
+        AppendNum(json, "sumFnOverWeightMean", samples > 0 ? (float)(sumFnOverWeight / samples) : 0f);
+        AppendNum(json, "sumFnOverWeightMax", sumFnOverWeightMax);
+        float cycle1MetresPerCycle = lastWalkCycleCount > 0
+            ? travelX / lastWalkCycleCount
+            : 0f;
+        float nominalFront;
+        float nominalRear;
+        NominalStrides(out nominalFront, out nominalRear);
+        AppendNum(json, "metresPerCycle", cycle1MetresPerCycle);
+        AppendNum(json, "nominalStrideFront", nominalFront);
+        AppendNum(json, "nominalStrideRear", nominalRear);
+        float cycle1NominalWidest = Mathf.Max(nominalFront, nominalRear);
+        AppendNum(json, "metresPerCycleOverNominal",
+            cycle1NominalWidest > 0.01f ? cycle1MetresPerCycle / cycle1NominalWidest : 0f);
+        AppendNum(json, "controllerTrunkDropMax", controllerTrunkDropMax);
+        AppendNum(json, "controllerTrunkDropFinal", controllerTrunkDropFinal);
+        AppendNum(json, "controllerTrunkDropVsRecorderMax", controllerVsRecorderMax);
+        json.Append(",\"controllerTrunkDropVsRecorderFrame\":").Append(controllerVsRecorderMaxFrame.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"cycle1NanCount\":").Append(cycle1NanCount.ToString(CultureInfo.InvariantCulture));
         AppendApplied(json);
         json.Append("}");
         return json.ToString();
@@ -700,6 +871,45 @@ public class DogTrialRecorder
             log.Append(",r").Append(reason.ToString(CultureInfo.InvariantCulture));
         }
         return log.ToString();
+    }
+
+    // 5th percentile of the per-frame capture-point margin (m): a sorted copy of
+    // the frame list. An empty run has no percentile and returns 0.
+    private float CaptureMarginP05()
+    {
+        if (captureMargins.Count == 0) return 0f;
+        List<float> sorted = new List<float>(captureMargins);
+        sorted.Sort();
+        int idx = Mathf.Clamp(Mathf.FloorToInt(0.05f * sorted.Count), 0, sorted.Count - 1);
+        return sorted[idx];
+    }
+
+    // Mean per-paw normal impulse over the run, N*s. Paw order FR, FL, RR, RL.
+    private float MeanPawImpulse(int paw)
+    {
+        if (samples <= 0 || paw < 0 || paw >= sumPawImpulse.Length) return 0f;
+        return (float)(sumPawImpulse[paw] / samples);
+    }
+
+    // Nominal stride from the rig's own link geometry — the same sizes
+    // DogStanceController caches at Bind — as the chord a stance paw sweeps when
+    // its limb rotates by walkStanceSweepDeg about its root joint:
+    //   2 * L * sin(sweep / 2),   L = upper + lower + half a paw.
+    // A geometric bar, never a bar the controller captured about itself.
+    private void NominalStrides(out float front, out float rear)
+    {
+        front = 0f;
+        rear = 0f;
+        if (dog == null || stance == null) return;
+        float halfSweep = 0.5f * stance.walkStanceSweepDeg * Mathf.Deg2Rad;
+        float pawHalf = 0.5f * dog.pawSize.y;
+        front = 2f * (dog.frontUpperSize.y + dog.frontLowerSize.y + pawHalf) * Mathf.Sin(halfSweep);
+        rear = 2f * (dog.rearThighSize.y + dog.rearShinSize.y + pawHalf) * Mathf.Sin(halfSweep);
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
     private void AppendCsvFloat(float value)

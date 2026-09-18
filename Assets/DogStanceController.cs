@@ -900,6 +900,25 @@ public class DogStanceController : MonoBehaviour
     public int probeSaturatedCount;
     public int probeHitSum;
 
+    // ─── CYCLE 1 INSTRUMENTS (read-only; nothing here feeds a control law) ───
+    // Per-paw ground reaction — the quantity that reaches the gate and the CSV
+    // today but never the demand, so it can be measured without changing the
+    // run. pawNormalImpulse[i] is the solver impulse along that paw's contact
+    // normals in THIS physics step, N*s — the same reading the human lane
+    // publishes as fzL/fzR (ContactPoint2D.normalImpulse / dt is the force).
+    // Paw order FR, FL, RR, RL — the order of the CSV grounded flags.
+    public readonly float[] pawNormalImpulse = new float[4];
+    private readonly ContactPoint2D[] loadContacts = new ContactPoint2D[16];
+    // sum(vertical Fn)/(m*g) for the frame, dimensionless: 1 = the paws carry
+    // the whole weight, ~0 = the body is on its belly.
+    public float pawWeightFraction;
+    // The controller's OWN heap bar in the Walk branch, m: WalkStandDrop
+    // (standComHeight - comY), the value the walk fall test in Sense reads.
+    // Published read-only so the recorder can log it beside its independent
+    // trunkDrop; a gap over 0.05 m means the automaton is measuring a different
+    // body than the recorder.
+    public float walkStandDropBar;
+
     public Muscle lumbarFlexor, lumbarExtensor;
     public Muscle neckFlexor, neckExtensor;
     public Muscle headFlexor, headExtensor;
@@ -1634,6 +1653,10 @@ public class DogStanceController : MonoBehaviour
 
         UpdateWalkWorldFlags();
         StepWalkOnsetLog();
+        // CYCLE 1: read-only instrument pass, after every sensor of this frame is
+        // settled. It writes the public values declared with the read-only
+        // sensors and returns; nothing in this method reads them back.
+        SampleCycle1Instruments();
     }
 
     // Heap on the dirt: big trunk drop or prone pitch. Not CoM offset
@@ -9805,6 +9828,60 @@ public class DogStanceController : MonoBehaviour
             return true;
         }
         return false;
+    }
+
+    // CYCLE 1 INSTRUMENT (read-only, measure only): the per-paw ground reaction
+    // the demand never sees, in the form the human lane already records as
+    // fzL/fzR: Fn = ContactPoint2D.normalImpulse / dt along the contact normal,
+    // here kept as the step's impulse per paw. It re-queries the manifolds
+    // ProbePaw queried, into its own buffer, and touches no counter, no gate and
+    // no command — the point of the cycle is that the physics numbers do not move.
+    private void SampleCycle1Instruments()
+    {
+        walkStandDropBar = WalkStandDrop();
+        if (!groundContactFilterReady)
+        {
+            groundContactFilter = new ContactFilter2D();
+            groundContactFilter.SetLayerMask(GroundLayers.Mask);
+            groundContactFilter.useTriggers = false;
+            groundContactFilterReady = true;
+        }
+
+        float verticalImpulse = 0f;
+        for (int pk = 0; pk < 4; pk++)
+        {
+            Collider2D pawCol = PawCollider(pk);
+            float pawImpulse = 0f;
+            if (pawCol != null)
+            {
+                int hits = pawCol.GetContacts(groundContactFilter, loadContacts);
+                int used = Mathf.Min(hits, loadContacts.Length);
+                for (int ci = 0; ci < used; ci++)
+                {
+                    pawImpulse += loadContacts[ci].normalImpulse;
+                    verticalImpulse += loadContacts[ci].normalImpulse * loadContacts[ci].normal.y;
+                }
+            }
+            pawNormalImpulse[pk] = pawImpulse;
+        }
+
+        float bodyWeight = body != null ? body.totalMass * Physics2D.gravity.magnitude : 0f;
+        pawWeightFraction = bodyWeight > 0.01f
+            ? verticalImpulse / Time.fixedDeltaTime / bodyWeight
+            : 0f;
+    }
+
+    // Paw order FR, FL, RR, RL — the order of the CSV grounded flags.
+    private Collider2D PawCollider(int index)
+    {
+        switch (index)
+        {
+            case 0: return frontRightPawCol;
+            case 1: return frontLeftPawCol;
+            case 2: return rearRightPawCol;
+            case 3: return rearLeftPawCol;
+            default: return null;
+        }
     }
 
     // World heel/toe of the paw box vs the cached slab. GetContacts
