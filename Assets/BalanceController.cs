@@ -52,7 +52,7 @@ public partial class BalanceController : MonoBehaviour
     public float getUpTuckMinSeconds = 0.15f;
     [Tooltip("|torso tilt| (deg) at or below which the sit-up is done and the knee tuck may start.")]
     public float getUpSquatAbsTilt = 35f;
-    [Tooltip("Unused on the sequenced path (kept for Inspector / summaries).")]
+    [Tooltip("Seconds the knee curl may run before the rise starts (the tuck budget). The rise also waits for the knee to fold onto a sole that is back down.")]
     public float getUpTuckMaxSeconds = 4f;
     [Tooltip("Seconds to blend a planted recovery toward quiet stance after the tuck.")]
     public float getUpRiseSeconds = 2.5f;
@@ -3778,6 +3778,11 @@ public partial class BalanceController : MonoBehaviour
     // Seconds the current GETUP attempt has had at least one sole on the
     // slab. Cleared on lift-off so an airborne tuck cannot re-arm.
     private float getUpContactAge;
+    // Ages of the two sequenced poses (GETUP-1). The sit is held before the
+    // curl starts, the curl is held for the tuck budget: both poses have to be
+    // visible in the 5 fps capture, not one tick of a gate.
+    private float getUpSitAge;
+    private float getUpTuckAge;
     // Sequenced latches (GETUP-1). Sit before tuck — knee-first pike was wrong.
     private bool getUpSitLatched;
     private bool getUpTuckLatched;
@@ -3788,6 +3793,10 @@ public partial class BalanceController : MonoBehaviour
     // Knee stay near stance during sit-up (deg, plus). Tuck needs ≥70.
     private const float GetUpSitKneeFlex = 20f;
     private const float GetUpTuckKneeMin = 70f;
+    // The sit is a pose of the sequence, not the tick the latch fires on:
+    // 0.6 s is three frames of the 5 fps trial capture, so "sitting" is
+    // visible in the video before the knees fold.
+    private const float GetUpSitHoldSeconds = 0.6f;
 
     private VestibularSystem vestibularSystem;
     private CenterOfMassCalculator comCalculator;
@@ -13975,6 +13984,8 @@ public partial class BalanceController : MonoBehaviour
                 getUpSitLatched = false;
                 getUpTuckLatched = false;
                 getUpPikeLatched = false;
+                getUpSitAge = 0f;
+                getUpTuckAge = 0f;
                 getUpPose = 1; // lying / fallen again
                 return;
             }
@@ -14024,6 +14035,8 @@ public partial class BalanceController : MonoBehaviour
         getUpSitLatched = false;
         getUpTuckLatched = false;
         getUpPikeLatched = false;
+        getUpSitAge = 0f;
+        getUpTuckAge = 0f;
         if (walkKey)
             locomotionState = LocomotionState.Walking;
         else if (currentState == BalanceState.Falling)
@@ -14042,6 +14055,8 @@ public partial class BalanceController : MonoBehaviour
         getUpSitLatched = false;
         getUpTuckLatched = false;
         getUpPikeLatched = false;
+        getUpSitAge = 0f;
+        getUpTuckAge = 0f;
         getUpPose = 1; // lying
         if (getUpPoseMax < 1)
             getUpPoseMax = 1;
@@ -14176,7 +14191,11 @@ public partial class BalanceController : MonoBehaviour
         float proneDeg = GetUpProneDeg();
         float sitDoneDeg = GetUpSitDoneDeg();
         float hipsStandDeg = GetUpHipsStandDeg();
-        float tuckKneeTarget = Mathf.Max(GetUpTuckKneeMin, getUpKneeFlex);
+        // Tuck target. The stable PD holds the knee about 1° under the target
+        // (p_ds plateau 89.2 at target 90) and the requirement's bar is a real
+        // 90° fold, so the target sits above it. The hinge stop is 120.
+        float tuckKneeTarget = Mathf.Min(120f,
+            Mathf.Max(GetUpTuckKneeMin, getUpKneeFlex) + 6f);
 
         float kneeL = leftKneeJoint != null ? leftKneeJoint.jointAngle : 0f;
         float kneeR = rightKneeJoint != null ? rightKneeJoint.jointAngle : 0f;
@@ -14193,30 +14212,54 @@ public partial class BalanceController : MonoBehaviour
         if (getUpSitLatched && getUpPose < 2)
             getUpPose = 2; // sitting
 
-        bool mayTuck = getUpSitLatched
-            && anyFoot
-            && getUpContactAge >= Mathf.Max(0.05f, getUpTuckMinSeconds);
+        if (getUpSitLatched)
+            getUpSitAge += dt;
+
+        // The sit is a pose of the sequence and must be visible (5 fps), so
+        // the curl waits GetUpSitHoldSeconds before it may latch.
+        bool sitHeld = getUpSitLatched && getUpSitAge >= GetUpSitHoldSeconds;
+
+        // Tuck latch. The corrected mechanics (18.09) bring the knees to the
+        // TORSO from the ground, so the curl has to start with the feet still
+        // in the air. The old latch demanded a planted sole AND kneeMin >= 70
+        // before the tuck target that raises the knee was ever commanded —
+        // p_sw1: anyFoot 12 % of the fall window with the feet up, knee frozen
+        // at the 20° sit target. A gate that can never pass, and the pose sat
+        // at "sitting" for the last 34 s of the run. The sole contact age is
+        // kept for the planted path.
+        bool mayTuck = sitHeld
+            && (!anyFoot || getUpContactAge >= Mathf.Max(0.05f, getUpTuckMinSeconds));
         if (mayTuck && !getUpTuckLatched)
         {
-            // Heels under CoM: offset over the feet, not a metre ahead.
-            bool feetUnder = Mathf.Abs(comOffset) <= fallCoMOffset;
-            if (kneeMin >= GetUpTuckKneeMin && feetUnder)
-            {
-                getUpTuckLatched = true;
-                getUpPikeLatched = true;
-            }
+            getUpTuckLatched = true;
+            getUpPikeLatched = true;
         }
-        if (getUpTuckLatched && getUpPose < 3)
+
+        if (getUpTuckLatched)
+            getUpTuckAge += dt;
+
+        // Pose 3 is the fold, not the command: report "knees tucked" only once
+        // the knee has actually reached the tuck bar, so the trial number and
+        // the frames tell the same story.
+        bool tuckFolded = getUpTuckLatched && kneeMin >= GetUpTuckKneeMin;
+        if (tuckFolded && getUpPose < 3)
             getUpPose = 3; // knees tucked
         if (getUpPoseMax < getUpPose)
             getUpPoseMax = getUpPose;
 
+        // Hold the curl until the knee has folded onto a sole that is back
+        // down, with getUpTuckMaxSeconds as the budget (the field was written
+        // for the Inspector and never read on this path). Only then have the
+        // heels come under the centre of mass and the rise start.
+        bool tuckDone = getUpTuckLatched
+            && ((tuckFolded && anyFoot)
+                || getUpTuckAge >= Mathf.Max(0.2f, getUpTuckMaxSeconds));
+
         bool sittingUp = !getUpSitLatched;
-        // Tuck only with a sole down — airborne deep hip tuck was the −105° cannonball.
-        bool tucking = getUpSitLatched && !getUpTuckLatched && anyFoot;
-        bool rising = getUpTuckLatched;
-        // Sit done but feet lost: hold the sit pose until a sole returns.
-        bool holdSit = getUpSitLatched && !getUpTuckLatched && !anyFoot;
+        bool tucking = getUpTuckLatched && !tuckDone;
+        bool rising = tuckDone;
+        // Sit reached but the curl has not latched yet: hold the sit pose.
+        bool holdSit = getUpSitLatched && !getUpTuckLatched;
 
         float hipTarget;
         float kneeTarget;
