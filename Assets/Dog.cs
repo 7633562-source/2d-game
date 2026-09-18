@@ -9,7 +9,41 @@ public class Dog : MonoBehaviour
     public bool normalizeMass = true;
 
     [Header("Picture")]
-    public float visualSideOffset = 0.04f;
+    // Picture-only sideways shift of a limb box, a depth hint the human
+    // never uses (Human.visualSideOffset = 0, Human.cs). At 0.04 m on this
+    // 0.36 m chest it slides the limb picture off the torso box and the sky
+    // reads through the shoulder and the hip. Picture seam, not physics:
+    // the hinge anchors sit at the segment ends, HumanSegment moves only the
+    // child Visual (Rigidbody2D and collider stay put), the seam is absent
+    // at limb-to-paw where both bones shift the same way, and it does not
+    // grow with the load. Depth reads from the dimmed far side instead.
+    // -dogSideOffset <f> restores the old value on the same build for an A/B.
+    public float visualSideOffset = 0f;
+
+    // Art A/B knob only. Negative means "use the serialized field above".
+    public static float SideOffsetOverride = -1f;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void ReadSideOffsetSwitch()
+    {
+        string[] args = System.Environment.GetCommandLineArgs();
+        for (int i = 0; i + 1 < args.Length; i++)
+        {
+            if (args[i] != "-dogSideOffset")
+                continue;
+            float parsed;
+            if (float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out parsed)
+                && parsed >= 0f && parsed <= 0.5f)
+                SideOffsetOverride = parsed;
+        }
+    }
+
+    private float SideVisualOffset
+    {
+        get { return SideOffsetOverride >= 0f ? SideOffsetOverride : visualSideOffset; }
+    }
+
     public float jointMarkerDiameter = 0.025f;
 
     // The pre-build default (StandingRootY) and the fields must never
@@ -439,7 +473,7 @@ public class Dog : MonoBehaviour
         Color lowerColor,
         Color pawColor)
     {
-        float visualShift = sideSign * visualSideOffset;
+        float visualShift = sideSign * SideVisualOffset;
         LimbWorldAngles(out _, out _, out float upperW, out float lowerW);
         Vector2 shoulder = FrontShoulderLocal();
         Vector2 elbow = shoulder + RotateZ(upperW, new Vector2(0f, -frontUpperSize.y));
@@ -470,6 +504,7 @@ public class Dog : MonoBehaviour
         AddMuscles(lower, elbowMuscleTorque);
 
         PlacePaw(sideName + "Paw", ankle, lower, pawOrder, pawColor, visualShift, 0.012f);
+        AddShoulderBridge(chest, shoulderLocalX, -chestSize.y * 0.5f, frontUpperSize.x);
     }
 
     private void CreateRearLeg(
@@ -483,7 +518,7 @@ public class Dog : MonoBehaviour
         Color shinColor,
         Color pawColor)
     {
-        float visualShift = sideSign * visualSideOffset;
+        float visualShift = sideSign * SideVisualOffset;
         LimbWorldAngles(out float thighW, out float shinW, out float upperW, out float lowerW);
         float dropF = BoneDrop(frontUpperSize.y, upperW) + BoneDrop(frontLowerSize.y, lowerW) + pawSize.y;
         float dropR = BoneDrop(rearThighSize.y, thighW) + BoneDrop(rearShinSize.y, shinW) + pawSize.y;
@@ -520,6 +555,77 @@ public class Dog : MonoBehaviour
         AddMuscles(shin, kneeMuscleTorque);
 
         PlacePaw(sideName + "Paw", ankle, shin, pawOrder, pawColor, visualShift, 0.012f);
+        AddHipBridge(pelvis, hipLocalX, hipInPelvisY, rearThighSize.x);
+    }
+
+    // Picture only, no collider, no Rigidbody2D. The hip anchor sits
+    // (|hipInPelvisY| - pelvisSize.y * 0.5) ~= 0.043 m BELOW the pelvis box:
+    // the rear leg is placed so the paw reaches the ground with the standing
+    // pose, and for this body that point is under the box. The human attaches
+    // every limb ON the torso box edge (Human.CreateLeg: hipY =
+    // -pelvisSize.y * 0.5) and has no seam. So the box look needs a bridge or
+    // the sky reads through the hip in a still frame at 1x (18.09, held
+    // against the frames of dog_art1).
+    //
+    // One flat rectangle in the pelvis colour, on the pelvis Visual: it
+    // reaches the pelvis box above (= no seam at limb-to-torso) and covers
+    // the thigh's top edge at any hip angle below (the edge's corner sweeps a
+    // circle of radius width/2 around the anchor). The joint disc
+    // (jointMarkerDiameter) still sits on the anchor, drawn above this.
+    // Box look only: the plated coat drew its own rump plates and a bare flat
+    // boss among them is a different language.
+    private void AddHipBridge(HumanSegment pelvis, float hipX, float hipY, float thighWidth)
+    {
+        if (pelvis == null || pelvis.visual == null || !DogArt.BoxLook)
+            return;
+        if (pelvis.visual.Find("HipBridge") != null)
+            return;
+
+        float dropPastBox = Mathf.Abs(hipY) - pelvis.size.y * 0.5f;
+        float height = dropPastBox + thighWidth * 0.5f + 0.006f;
+        GameObject go = new GameObject("HipBridge");
+        go.transform.SetParent(pelvis.visual, false);
+        go.transform.localPosition = new Vector3(hipX, hipY, 0f);
+        SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = LevelArt.White();
+        sr.color = DogArt.BoxTint("Pelvis");
+        sr.drawMode = SpriteDrawMode.Sliced;
+        sr.size = new Vector2(thighWidth * 1.25f, height);
+        // Under the near thigh (its order is positive) and over the far one.
+        sr.sortingOrder = pelvis.sortingOrder;
+        SpriteLighting.ApplyLit(sr);
+    }
+
+    // Picture only, no collider, no Rigidbody2D. Mirror of AddHipBridge for the
+    // front shoulder. The front upper hangs off the chest bottom edge, but the
+    // chest is preloaded at spawnChestPitch (-8 deg) while the upper sits at
+    // spawnChestPitch - spawnShoulderAngle (+12 deg), so the two box edges
+    // cross at ~20 deg and an exact-size rectangle leaves a thin sky wedge at
+    // the shoulder (18.09, held against the frames of dog_art1). The sideways
+    // visualSideOffset is already 0, so this is an angular seam, not a shifted
+    // picture. One flat rectangle in the chest colour, on the chest Visual,
+    // reaches the chest box above and covers the upper's top edge below; the
+    // joint disc (jointMarkerDiameter) still sits on the anchor, drawn above
+    // this. Box look only: the plated coat drew its own withers plates.
+    private void AddShoulderBridge(HumanSegment chest, float shoulderX, float shoulderY, float upperWidth)
+    {
+        if (chest == null || chest.visual == null || !DogArt.BoxLook)
+            return;
+        if (chest.visual.Find("ShoulderBridge") != null)
+            return;
+
+        float height = upperWidth * 0.5f + 0.006f;
+        GameObject go = new GameObject("ShoulderBridge");
+        go.transform.SetParent(chest.visual, false);
+        go.transform.localPosition = new Vector3(shoulderX, shoulderY, 0f);
+        SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+        sr.sprite = LevelArt.White();
+        sr.color = DogArt.BoxTint("Chest");
+        sr.drawMode = SpriteDrawMode.Sliced;
+        sr.size = new Vector2(upperWidth * 1.25f, height);
+        // Under the near upper (its order is positive) and over the far one.
+        sr.sortingOrder = chest.sortingOrder;
+        SpriteLighting.ApplyLit(sr);
     }
 
     // Five vertebrae, not one rod. Distal boxes taper. The first joint

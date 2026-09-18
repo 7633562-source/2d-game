@@ -108,7 +108,7 @@ public class DogTrialRecorder
         DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
         preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down");
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell");
     }
 
     public void MarkPush(float time, float impulse)
@@ -198,7 +198,15 @@ public class DogTrialRecorder
         // dog_q1 held pelvisDrop at 0.32 while the chest rose 0.13, dog_gu4
         // held the chest at 0.07 with the pelvis 0.32 down. Re-armed only after
         // 12 cm of new travel, so a squirm counts once, not on every frame.
-        if (dogFallTime >= 0f && !dogGetUpSuccess && pawsGrounded >= 1
+        // The paw gate is deliberately NOT part of the attempt test. Measured
+        // on dog_gu9 (18.09, 13:05 build): the chest rose 0.202 m off its own
+        // lowest point in 14.91-16.25 s, yet `pawsGrounded >= 1` made the
+        // attempt count 0, because the paws leave the floor exactly when the
+        // trunk rises (front paws grounded 0.001 of the 25 s down window,
+        // rear 0.10-0.11). A planted paw is the DOWN rule's business
+        // (paws <= 2); a 12 cm trunk lift off the deepest point of the heap is
+        // the attempt, whoever is pushing.
+        if (dogFallTime >= 0f && !dogGetUpSuccess
             && (pushFloorChestDrop - chestDropNow >= DOG_PUSH_LIFT
                 || pushFloorPelvisDrop - pelvisDropNow >= DOG_PUSH_LIFT))
         {
@@ -295,6 +303,10 @@ public class DogTrialRecorder
         AppendCsvFloat(stance.jawAngle);
         rows.Append(',').Append(pawsGrounded.ToString(CultureInfo.InvariantCulture));
         rows.Append(',').Append(dogDownNow ? '1' : '0');
+        // down = on the ground this frame, fell = latched at the first down
+        // frame (dogFallTime), so the frame the flag turns true is in the CSV.
+        // Appended LAST: every reader indexes columns by name (DictReader).
+        rows.Append(',').Append(dogFallTime >= 0f ? '1' : '0');
         rows.AppendLine();
 
         samples++;
@@ -309,7 +321,13 @@ public class DogTrialRecorder
     {
         float trunkDrop = Mathf.Max(startChestY - minChestY, startPelvisY - minPelvisY);
         float rmsCom = samples > 0 ? Mathf.Sqrt((float)(sumComOffsetSquared / samples)) : 0f;
-        float survived = fallTime >= 0f ? fallTime : simulatedSeconds;
+        // Physical down latch, not the DogStanceController automaton: the dog
+        // rolls onto its side at 14.8 s in 21 of the 30 dog runs on disk while
+        // the stance machine stays in Walk (state 4) and never enters
+        // Falling/Fallen, so `fell` read false on a body that lay 25 s of 40.
+        // Same defect and same fix as the human (TrialRecorder.physicalFallTime);
+        // the automaton's own latch is still published as fallAutomatonTime.
+        float survived = dogFallTime >= 0f ? dogFallTime : simulatedSeconds;
         float recovery = 0f;
         if (pushTime >= 0f && lastUnsettledTime >= pushTime)
             recovery = lastUnsettledTime - pushTime;
@@ -328,7 +346,8 @@ public class DogTrialRecorder
         json.Append(",\"samples\":").Append(samples.ToString(CultureInfo.InvariantCulture));
         AppendNum(json, "fixedDeltaTime", Time.fixedDeltaTime);
         AppendNum(json, "survivedSeconds", survived);
-        json.Append(",\"fell\":").Append(fallTime >= 0f ? "true" : "false");
+        json.Append(",\"fell\":").Append(dogFallTime >= 0f ? "true" : "false");
+        AppendNum(json, "fallAutomatonTime", fallTime);
         AppendNum(json, "maxAbsChestPitch", maxAbsChestPitch);
         AppendNum(json, "maxAbsPelvisTilt", maxAbsPelvisTilt);
         AppendNum(json, "maxAbsLumbarAngle", maxAbsLumbarAngle);

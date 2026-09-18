@@ -42,8 +42,14 @@ public class DogStanceController : MonoBehaviour
     // then bang-bangs every paw (same command, all four), which rocks
     // the soles, jumps the support AABB, and looks like stepping.
     // Soft deadzone: 0 = old bang-bang. Walk uses the same helper.
-    public float pawComDeadzone = 0.02f;
-    public float pawComVelDeadzone = 0.08f;
+    // dog_ds2 (programmer) measured 0.02 / 0.08 as far too small: the
+    // quiet stand fell after 7.07 s (fell true, trunkDrop 0.342, fourFeet
+    // 0.637) because the saturated servo rocked the paws, and the walk
+    // reared into a 41° rear sit. At 0.10 / 0.50 the same build stands
+    // 10 s (fell false, trunkDrop 0.025, fourFeet 1.000) and walks
+    // comSpeedX +0.073 with 65 cycles and +1.762 m of travel.
+    public float pawComDeadzone = 0.10f;
+    public float pawComVelDeadzone = 0.50f;
     // GetContacts can drop a CCD sole for a step while IsTouching is
     // true. A short hold only in quiet stance so stacked L/R paws do
     // not unload/reload. 0 = no hold. Walk / leap stay raw so a swing
@@ -714,6 +720,16 @@ public class DogStanceController : MonoBehaviour
     public float walkGroundedSwingPlant = 1f;
     [Range(0f, 1f)]
     public float walkComMix = 0.20f;
+    // dog_ds3 (programmer). The stance limb sweeps caudally through the
+    // half: that sweep IS the stride (speed ≈ cadence × reach). It was
+    // 4–10° before (walkComMix nudge), measured at 2.7 cm of travel per
+    // cycle, because the planted limb held the leftover-sit pose and the
+    // CoM dragged the paws instead of riding them. 48° on this limb is
+    // ~23 cm, so ~45° per half at the 2.8 Hz half rate is the 1.389 m/s
+    // gate. Applied only to the stance-role columns, signed along facing
+    // (hip plus = caudal, shoulder plus = the front mirror), and tamed by
+    // walkTamePitch, so a fold cuts it. -dogWalkSweep tunes it.
+    public float walkStanceSweepDeg = 45f;
     // Match chestTargetTilt / spawnChestPitch. −4 yanked the nose up
     // at the first Walk step and pitched the pelvis (third law).
     public float walkChestTilt = -8f;
@@ -1105,6 +1121,18 @@ public class DogStanceController : MonoBehaviour
     // Opening on gone waited for a stride the folded chord cannot
     // make; opening at airU 0 planted at sit X (dog_w10 hop).
     private const float WalkAirOpenStart = 0.55f;
+    // dog_ds2 (programmer). The air pose held the 48° cranial reach for the
+    // whole run: the swing paw hung 0.20–0.26 m over the slab, the trail
+    // never replanted, walkCycleCount stayed 0 for 24 s (dog_ds1). After the
+    // reach the hip must come back toward the plant angle — that descent is
+    // what puts the pad on the dirt. The angle sits this many degrees
+    // cranial of the stance pose so the pad lands on new dirt, not the
+    // take-off print.
+    private const float WalkAirPlantLeadDeg = 6f;
+    // dog_ds2 (programmer). The walk stance paw CoM grip is off — see
+    // WalkStancePlantCommand: every non-zero level measured (1.0, 0.35,
+    // −1.0) ended in the same 41° rear sit, only the removed seek walks
+    // forward (+1.08 m, 46 cycles).
     // Cranial heel travel that counts as a stride, not a hop.
     // 2 cm is leftover sit wiggle; 0.15·half (~34 ms) at gone≈0
     // was the 0.286 km/h sit-trot.
@@ -1168,6 +1196,11 @@ public class DogStanceController : MonoBehaviour
     // dog_w73: full open by 2 cm so the girdle fights earlier.
     // dog_w74: 1.5 cm — rump still sagged past 2 cm on the slow half.
     private const float WalkHoldDropMax = 0.015f;
+    // DOGDIAG (programmer slot, dog_ds1 blocker). One line every 0.25 s
+    // while DriveWalk runs, so a frozen swing shows which gate is false.
+    // Read only: no walk field is written here, the gait is unchanged.
+    private float walkDiagNext;
+    private int walkDiagWrites;
     private float walkComHoldX;
     private bool hasWalkComHold;
     private float sitTurnBorn;
@@ -8293,6 +8326,19 @@ public class DogStanceController : MonoBehaviour
         return (TrailCaudalX() - walkSwingCaudalX) * FacingSign();
     }
 
+    // dog_ds2 (programmer). Descent clock of the swing: 0 at the reach peak
+    // (WalkAirReachSeconds after the leave), 1 when the plant angle must be
+    // reached. Reach + descent fill one half of WalkPeriodSeconds, so the
+    // pad comes down inside the cadence the clock already asks for.
+    private float WalkAirPlantU()
+    {
+        if (walkAirBorn < 0f)
+            return 0f;
+        float age = Time.fixedTime - walkAirBorn;
+        float span = Mathf.Max(WalkAirReachSeconds, 0.5f * WalkPeriodSeconds());
+        return Mathf.Clamp01((age - WalkAirReachSeconds) / span);
+    }
+
     // Catch place: capture-point sits on the swing plate, or the
     // swing heel has reached CoM (fronts planting ahead). A 2 cm
     // sit wiggle is not a step. Full 0.224 m of paw travel is the
@@ -8339,7 +8385,17 @@ public class DogStanceController : MonoBehaviour
         float dir = FacingSign();
         float heel = dir > 0f ? minX : maxX;
         float gone = (heel - walkSwingCaudalX) * dir;
-        return gone >= WalkStrideNeed();
+        if (gone >= WalkStrideNeed())
+            return true;
+        // dog_ds2 (programmer). The stride branch above was the only exit,
+        // so the first swing of a dog that is still slow could never finish:
+        // dog_ds1 sat armed for 23 s with walkCycleCount 0 while the pad hung
+        // 0.26 m over the slab. A swing that has finished its descent and has
+        // come down at (or within a paw deadzone of) its take-off is a step:
+        // complete the half and let the new stance pair push the CoM. The
+        // stride branch still owns the fast case, and the pad must be down
+        // (walkSwungAir && trailPlanted gate the caller).
+        return WalkAirPlantU() >= 1f && gone > -pawComDeadzone;
     }
 
     private float PairCaudalX(bool rear)
@@ -8496,7 +8552,12 @@ public class DogStanceController : MonoBehaviour
                 // a chair on leftover sit (hip–paw ~14 cm).
                 float fromHip = hasWalkLatch ? walkLatchHip
                     : (proximalJoint != null ? proximalJoint.jointAngle : quietProx);
-                proximal = Mathf.Lerp(fromHip, flexHip, Mathf.Max(airU, 0.35f));
+                float reachHip = Mathf.Lerp(fromHip, flexHip, Mathf.Max(airU, 0.35f));
+                // dog_ds2: the reach alone froze the half (the pad hung
+                // 0.26 m up and never replanted). Come back down to the
+                // plant angle after the reach peak.
+                float plantHip = quietProx - WalkAirPlantLeadDeg * dir;
+                proximal = Mathf.Lerp(reachHip, plantHip, WalkAirPlantU());
                 distal = WalkSwingDistal(true, pawGrounded, reach);
             }
             proximal += columnDeg;
@@ -8532,7 +8593,11 @@ public class DogStanceController : MonoBehaviour
             {
                 float fromSh = hasWalkLatch ? walkLatchShoulder
                     : (proximalJoint != null ? proximalJoint.jointAngle : quietProx);
-                proximal = Mathf.Lerp(fromSh, reachSh, Mathf.Max(airU, 0.35f));
+                float reachShNow = Mathf.Lerp(fromSh, reachSh, Mathf.Max(airU, 0.35f));
+                // Same descent as the rear: hold the reach is a frozen
+                // half, the pad must come back down onto the dirt.
+                float plantShNow = quietProx - WalkAirPlantLeadDeg * dir;
+                proximal = Mathf.Lerp(reachShNow, plantShNow, WalkAirPlantU());
                 distal = WalkSwingDistal(false, pawGrounded, reach);
             }
             proximal += columnDeg;
@@ -8771,6 +8836,117 @@ public class DogStanceController : MonoBehaviour
                 vestibular.GetHeadTilt(), vestibular.GetHeadAngularVelocity(),
                 headJoint, headFlexor, headExtensor, ref headEffectiveInertia, neckGoal);
         }
+
+        LogWalkDiag(frSh, frEl, flSh, flEl, rlHip, rlKn, rrHip, rrKn, tame);
+    }
+
+    // DOGDIAG (programmer slot). Writes one line every 0.25 s to
+    // %LOCALAPPDATA%/Temp/grok-burn/dog_diag.txt and to the player log.
+    // Everything is read-only: the walk state machine is not touched.
+    // Columns: t arm sw nsw half dual ph airdt gone need reach peel open airU
+    //          comX vX pitch tame | grounded fr fl rr rl
+    //          | paw bottom vs slab (fr fl rr rl)
+    //          | joint actual/target (FRsh FRel FLsh FLel RLhip RLkn RRhip RRkn)
+    //          | latches and gate flags.
+    private void LogWalkDiag(
+        float frSh, float frEl, float flSh, float flEl,
+        float rlHip, float rlKn, float rrHip, float rrKn, float tame)
+    {
+        // Trials only: Play must not pay for this probe.
+        if (!HeadlessTrial.Active)
+            return;
+        const int maxLines = 140;
+        if (walkDiagWrites >= maxLines)
+            return;
+        float t = Time.fixedTime;
+        if (walkDiagNext <= 0f)
+            walkDiagNext = t;
+        if (t < walkDiagNext)
+            return;
+        walkDiagNext = t + 0.25f;
+        walkDiagWrites++;
+
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        string F(float v) { return v.ToString("F3", ic); }
+        string JA(HingeJoint2D j) { return j == null ? "n" : F(j.jointAngle); }
+        string PB(Collider2D c)
+        {
+            return c == null ? "n" : F(c.bounds.min.y - walkGroundTopY);
+        }
+        float reach = WalkCaptureSwingU();
+        var sb = new System.Text.StringBuilder(400);
+        sb.Append("DOGDIAG t=").Append(F(t));
+        sb.Append(" arm=").Append(walkCaptureArmed ? 1 : 0);
+        sb.Append(" sw=").Append(walkSwungAir ? 1 : 0);
+        sb.Append(" nsw=").Append(walkNearSwungAir ? 1 : 0);
+        sb.Append(" half=").Append(walkHalf);
+        sb.Append(" dual=").Append(F(walkHalfBorn >= 0f ? t - walkHalfBorn : -1f));
+        sb.Append(" ph=").Append(F(walkPhase));
+        sb.Append(" airdt=").Append(F(walkAirBorn >= 0f ? t - walkAirBorn : -1f));
+        sb.Append(" gone=").Append(F(WalkSwingGoneM()));
+        sb.Append(" need=").Append(F(WalkStrideNeed()));
+        sb.Append(" reach=").Append(F(reach));
+        sb.Append(" peel=").Append(F(SwingPeelU()));
+        sb.Append(" open=").Append(F(WalkSwingOpenU(reach)));
+        sb.Append(" plant=").Append(F(WalkAirPlantU()));
+        sb.Append(" airU=").Append(F(WalkAirBlend()));
+        sb.Append(" comX=").Append(F(comPosition.x));
+        sb.Append(" vX=").Append(F(comVelocity.x));
+        sb.Append(" pitch=").Append(F(chestPitch));
+        sb.Append(" tame=").Append(F(tame));
+        sb.Append(" | g=").Append(frontRightGrounded ? 1 : 0)
+            .Append(frontLeftGrounded ? 1 : 0)
+            .Append(rearRightGrounded ? 1 : 0)
+            .Append(rearLeftGrounded ? 1 : 0);
+        sb.Append(" slab=").Append(F(walkGroundTopY));
+        sb.Append(" pawY=").Append(PB(frontRightPawCol)).Append(",")
+            .Append(PB(frontLeftPawCol)).Append(",")
+            .Append(PB(rearRightPawCol)).Append(",")
+            .Append(PB(rearLeftPawCol));
+        sb.Append(" | FRsh=").Append(JA(frontRightShoulderJoint)).Append("/").Append(F(frSh));
+        sb.Append(" FRel=").Append(JA(frontRightElbowJoint)).Append("/").Append(F(frEl));
+        sb.Append(" FLsh=").Append(JA(frontLeftShoulderJoint)).Append("/").Append(F(flSh));
+        sb.Append(" FLel=").Append(JA(frontLeftElbowJoint)).Append("/").Append(F(flEl));
+        sb.Append(" RLhip=").Append(JA(rearLeftHipJoint)).Append("/").Append(F(rlHip));
+        sb.Append(" RLkn=").Append(JA(rearLeftKneeJoint)).Append("/").Append(F(rlKn));
+        sb.Append(" RRhip=").Append(JA(rearRightHipJoint)).Append("/").Append(F(rrHip));
+        sb.Append(" RRkn=").Append(JA(rearRightKneeJoint)).Append("/").Append(F(rrKn));
+        sb.Append(" | latchHip=").Append(F(walkLatchHip));
+        sb.Append(" latchKn=").Append(F(walkLatchKnee));
+        sb.Append(" latchSh=").Append(F(walkLatchShoulder));
+        sb.Append(" latchEl=").Append(F(walkLatchElbow));
+        sb.Append(" entryHip=").Append(F(walkEntryHip));
+        sb.Append(" entryKn=").Append(F(walkEntryKnee));
+        sb.Append(" quietProxR=").Append(F(WalkQuietProximal(true)));
+        sb.Append(" quietDistR=").Append(F(WalkQuietDistal(true)));
+        sb.Append(" rockerKn=").Append(F(walkRockerKnee));
+        sb.Append(" foldKn=").Append(F(walkFoldKnee));
+        sb.Append(" rockerEl=").Append(F(walkRockerElbow));
+        sb.Append(" foldEl=").Append(F(walkFoldElbow));
+        sb.Append(" rockerU=").Append(F(SwingRockerU(true)));
+        sb.Append(" heel=").Append(SwingHeelRose(true) ? 1 : 0);
+        sb.Append(" readyRocker=").Append(SwingReadyToRocker(true) ? 1 : 0);
+        sb.Append(" dualReady=").Append(DualReadyToPeel() ? 1 : 0);
+        sb.Append(" trailAir=").Append(TrailPawAir() ? 1 : 0);
+        sb.Append(" trailPl=").Append(TrailPawPlanted() ? 1 : 0);
+        sb.Append(" catchSlide=").Append(TrailCatchSlide() ? 1 : 0);
+        sb.Append(" plantedAhead=").Append(SwingPlantedAhead() ? 1 : 0);
+        sb.Append(" readyComplete=").Append(SwingReadyToComplete() ? 1 : 0);
+        sb.Append(" abort=").Append(WalkCaptureShouldAbort() ? 1 : 0);
+        string line = sb.ToString();
+        try
+        {
+            string dir = System.IO.Path.Combine(
+                System.Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? ".",
+                "Temp/grok-burn");
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "dog_diag.txt"),
+                line + System.Environment.NewLine);
+        }
+        catch (System.Exception)
+        {
+            // Diagnostics must never stop the trial.
+        }
     }
 
     // Forage Walk() restores idleWag; that flag nods with the trot clock.
@@ -8947,8 +9123,35 @@ public class DogStanceController : MonoBehaviour
     // CoM lags the target, quiet at speed.
     private float WalkStancePlantCommand(float tame)
     {
-        float seek = WalkSeekPd(comPosition.x - WalkOnsetCopTargetX(), comVelocity.x);
-        return Mathf.Clamp(seek * tame, -1f, 1f);
+        // dog_ds2 (programmer). The stance paw CoM seek is OFF.
+        // Measured on the same build, only this term changed:
+        //   seek as stock (saturates, ±1)  → 3 cycles, travel −0.80 m,
+        //                                    41° rear sit (dog_ds5)
+        //   seek capped at 0.35            → 6 cycles, travel −0.69 m,
+        //                                    41° rear sit (dog_ds8)
+        //   seek sign flipped (±1)         → 3 cycles, travel −1.55 m (dog_ds7)
+        //   seek removed                   → 46 cycles, travel +1.08 m,
+        //                                    comSpeedX +0.045 (dog_ds6/ds9)
+        // The seek is a pose servo on the paw joint by the back door (the
+        // card forbids paw PD) and at 0.83 cm of error it saturates on every
+        // step, so it rocks the soles and pitches the trunk into the sit
+        // instead of pulling the CoM. The card's stance plant is the
+        // leap-style extensor along facing — WalkPlantCommand below.
+        // dog_ds3 (programmer): wiring it is a REGRESSION. Measured on
+        // one build, only this term changed (25 s, same label extras):
+        //   plant  0.70 (walkPawPlant default) -> comSpeedX -0.056,
+        //           travel -1.335 m, cycles 7
+        //   plant -0.70                        -> comSpeedX -0.043,
+        //           travel -1.038 m, cycles 5
+        //   plant -0.30                        -> comSpeedX -0.039,
+        //           travel -0.937 m, cycles 3
+        // against the dog_ds2 baseline comSpeedX +0.073, travel
+        // +1.762 m, cycles 65. Either sign stalls the gait clock and
+        // rolls the trunk caudally, so the paw plant is NOT the missing
+        // push. Left off: the stride has to come from the stance sweep
+        // in ApplyWalkPropulsion (dog_ds3), not from the paw.
+        _ = tame;
+        return 0f;
     }
 
     // Leap-style paw extensor along facing. Fronts are weaker
@@ -8979,12 +9182,20 @@ public class DogStanceController : MonoBehaviour
     {
         float dir = FacingSign();
         float extra = 0f;
-        if (walkComMix > 0f && runSpeed > 0.05f)
+        if (walkComMix > 0f && walkStanceSweepDeg > 0.01f && runSpeed > 0.05f)
         {
-            float along = AlongFacingSpeed();
-            // dog_w74: 10° ceiling when lagging 1.4 m/s — 8° left
-            // travel under the 5 km/h gate on a sit onset.
-            extra = Mathf.Clamp(walkComMix * (runSpeed - along) * 10f, -4f, 10f) * tame;
+            // dog_ds3 (programmer): the stance sweep, not a speed nudge.
+            // u runs 0 → 1 across the half, so the planted limb extends
+            // caudally while the paw holds the ground and the trunk rides
+            // the paw instead of dragging it. The 4–10° walkComMix nudge
+            // (dog_w74) was the whole stride and produced 2.7 cm of travel
+            // per cycle at 2.8 Hz — the sit pose was held while the paw
+            // skated. Signed along facing, tamed by walkTamePitch.
+            float u = walkHalfBorn >= 0f
+                ? Mathf.Clamp01((Time.fixedTime - walkHalfBorn)
+                                / Mathf.Max(0.04f, WalkPeriodSeconds()))
+                : 0f;
+            extra = Mathf.Lerp(-2f, walkStanceSweepDeg, u) * tame;
         }
 
         if (!walkCaptureArmed)
