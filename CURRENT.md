@@ -35,6 +35,7 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 | plant | PLANT-2 accepted. PLANT-3: 12 garden flowers. Four extra tree kinds in scene Tree (Lilac Hazel Cedar Plum); yard cycle still Oak…Poplar | `PLANT-3-flowers.md`; `plant-physics.mdc` |
 | visual | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/VIS-TREE.md` |
 | visual | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/VIS-DOG-textures.md` |
+| artist | VIS-DOG **box look is live**: `DogArt.BoxLook` draws the dog the way `HumanSegment` draws the human — one flat translucent rectangle per bone (head, neck, chest, pelvis, 5 tail, 4 × upper/lower/paw), one dark joint marker, far side dimmed; `-dogCoatLook` rolls back to the plates, `-dogBoxAlpha <f>` tunes the fill (0.65). `Art/Dog/Palette.cs`. Frames: `Trials/Runs/dog_art1*.png` | `.cursor/agents/artist.md` |
 | visual | crow / chicken parts in `Art/Crow` and `Art/Chicken` | `.cursor/tasks/VIS-BIRD-textures.md` |
 | ai | Insect hunt concept: faction Insects, Forage→Pursue, eat with beak | `BIRD-13-insect-hunt.md` |
 | dog | DOG-3 leftover sit-trot **0.286 km/h** (`dog_w10`); 5 km/h open. DOG-4: `DogDrive` writes Walk; no play keys | `.cursor/tasks/DOG-3-walk.md`; `DOG-4-ai.md` |
@@ -170,3 +171,18 @@ From a drawing of a walker: in the swing the leg folds under the body, the knee
 bends 60 to 80 deg while the foot is off the ground, clearance 30 mm or more, the
 foot passes under the pelvis instead of trailing behind, and the knee extends to
 under 20 deg before landing. The stance leg stays extended and carries the weight.
+
+## Dog has two modes - Yury 18.09
+
+Walk first: 5 km/h = 1.389 m/s, trot with diagonal pairs and no suspension phase.
+Then run as a SEPARATE gait: 15 km/h = 4.167 m/s, gallop or bound with a
+suspension phase, stride 2.5 to 3.5 Hz, front and hind limbs moving as two units.
+A separate mode switch, never a throttle: the two gaits stay intact side by side.
+
+## Dog walk checkpoint (programmer slot, 18.09 ~09:55)
+
+Checkpoint before dog_ds3. Change: the stance paw plant is wired
+(`WalkStancePlantCommand` → `WalkPlantCommand`, dead code since DOG-3).
+Baseline measured on this build, `dog_ds3_base`: `comSpeedX` 0.073 m/s
+(0.264 km/h), `comTravelX` 1.762 m, `walkCycleCount` 65, `trunkDrop` 0.351,
+`fourFeet` 0.084, `fell` false, 25 s.
