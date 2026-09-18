@@ -163,6 +163,26 @@ public class DogStanceController : MonoBehaviour
     public float getUpSquatAbsPitch = 35f;
     [Tooltip("Seconds to blend from pike to quiet sit once upright enough.")]
     public float getUpRiseSeconds = 2.0f;
+    // INVERTED heap (brief item 2, measured on dog_gu14). The tuck folds the
+    // limbs onto the BELLY, and a dog lying on its back has that belly pointing
+    // at the sky: all four limbs folding together lift the paws off the floor
+    // and their reactions cancel, so the dog rocked through ±25° around pitch
+    // 180° from 33.6 s to the end of the run with 0 paws down and nothing
+    // changed. Righting needs a NET trunk rotation — what a cat gets by folding
+    // one half of the body while the other half reaches, so the two half-body
+    // reactions do not cancel — and a ground contact is the strongest lever
+    // there is: while inverted the paws DO touch (10 % of the inverted frames),
+    // but a contact lasts 1-2 frames, so a push that waits getUpTuckSeconds for
+    // the tuck is never reached.
+    [Tooltip("|chestPitch| above this is a dog on its BACK, not a side or belly heap, deg.")]
+    public float getUpInvertedAbsPitch = 100f;
+    [Tooltip("Seconds each half of the inverted-heap righting cycle holds before the driving pair swaps, s. Fold one pair while the other reaches straight past its trunk end (cat reflex), then swap.")]
+    public float getUpInvertedSwapSeconds = 0.35f;
+    // Witnesses (read-only for the recorder / the report).
+    [System.NonSerialized]
+    public bool getUpInvertedNow;
+    [System.NonSerialized]
+    public bool getUpInvertedFrontHalf;
     public int getUpAttempts;
     public bool getUpSuccess;
     public float getUpSeconds = -1f;
@@ -1064,6 +1084,12 @@ public class DogStanceController : MonoBehaviour
     private float getUpPhaseBorn = -1f;
     private float getUpHeapAge;
     private bool getUpPushPhase;
+    // Inverted-heap righting cycle: getUpRightBorn = the frame the current half
+    // started, getUpRightFront = the pair driving that half (it folds on the
+    // tuck half and extends on the push half; measured from the trunk, never
+    // from a state name).
+    private float getUpRightBorn = -1f;
+    private bool getUpRightFront = true;
     private float getUpRiseBlend;
     private float getUpContactAge;
     // Cached at Bind. GETUP peel must not Find JointFriction at 200 Hz.
@@ -1698,6 +1724,10 @@ public class DogStanceController : MonoBehaviour
         getUpPhaseBorn = -1f;
         getUpHeapAge = 0f;
         getUpPushPhase = false;
+        // The righting cycle (inverted heap) also starts fresh: no half held and
+        // the front pair drives first.
+        getUpRightBorn = -1f;
+        getUpRightFront = true;
         getUpPushingNow = false;
         // Pre-fall / mid-rake settle bar kept GetUpIsStanding and
         // WalkSinkCollapsed false-positives for 30+ s (human
@@ -2012,12 +2042,25 @@ public class DogStanceController : MonoBehaviour
         // A grounded paw settles the tuck on its contact age; a heap with
         // nothing grounded settles on its own age — there is no contact to wait
         // for, the tuck has to create it.
-        bool tuckDue = heap && (anyPaw ? getUpContactAge >= tuckMin : getUpHeapAge >= tuckMin);
+        // A dog this far past upright is on its BACK (measured, not a state
+        // name: shoulders and hips above the spine, belly up, every paw in the
+        // air — dog_rd1 frame 190), and the tuck it is about to get was written
+        // for a heap with a floor under its belly.
+        bool inverted = heap && absPitch >= getUpInvertedAbsPitch;
+        getUpInvertedNow = inverted;
+        // Inverted heaps are due the moment they exist: while the trunk is
+        // belly-up the only floor the limbs can reach is the one they touch for
+        // 1-2 frames at a time, and the upright contact/age gate threw every one
+        // of those contacts away (dog_rd1: 58 contact frames while inverted, 0
+        // push frames, because getUpContactAge never reached getUpTuckMinSeconds).
+        bool tuckDue = inverted || (heap
+            && (anyPaw ? getUpContactAge >= tuckMin : getUpHeapAge >= tuckMin));
         if (!tuckDue)
         {
             getUpPikeBorn = -1f;
             getUpPhaseBorn = -1f;
             getUpPushPhase = false;
+            getUpRightBorn = -1f;
         }
         else
         {
@@ -2027,28 +2070,71 @@ public class DogStanceController : MonoBehaviour
                 getUpPhaseBorn = Time.fixedTime;
                 getUpPushPhase = false;
             }
-            // A push needs a floor. The extension reacts on the trunk, and with
-            // nothing planted that reaction is the only thing it can move:
-            // dog_gu13 pushed 16 times after the second fall, every one with
-            // 0 paws, and the dog ended on its back rocking through pitch ±180
-            // from 20.6 s to the end of the run. With no contact the tuck alone
-            // folds the limbs under the body and waits for a paw; the push
-            // starts the moment one lands (and stops if the paw leaves again).
-            // Tuck ⇄ push clock. The old latch released only when |pitch| fell
-            // under the squat, which a pelvis-down heap never reaches, so the
-            // dog froze in one tuck. A bounded tuck, then a bounded push,
-            // repeating while the trunk is still a heap, is a dog that tries.
-            float phaseAge = Time.fixedTime - getUpPhaseBorn;
-            if (anyPaw && !getUpPushPhase && phaseAge >= Mathf.Max(0.10f, getUpTuckSeconds))
+            if (inverted)
             {
-                getUpPushPhase = true;
-                getUpPhaseBorn = Time.fixedTime;
+                // RIGHTING clock (cat reflex) instead of the tuck⇄push clock.
+                // One pair folds while the other reaches straight, then they
+                // swap: two pairs folding together cancel their own reaction,
+                // which is dog_gu14 — 5.8 s of the trunk jittering ±25° around
+                // 180° and not one degree of NET rotation. A paw that lands
+                // turns the current half into the push AT ONCE: the contact is
+                // the lever, and while inverted a contact lasts 1-2 frames, so
+                // waiting getUpTuckSeconds for it (the upright rule) never let
+                // a single one of them reach the floor.
+                if (getUpRightBorn < 0f)
+                {
+                    getUpRightBorn = Time.fixedTime;
+                    getUpRightFront = true;
+                    getUpPushPhase = false;
+                }
+                float halfAge = Time.fixedTime - getUpRightBorn;
+                float half = Mathf.Max(0.10f, getUpInvertedSwapSeconds);
+                bool frontPaw = frontRightGrounded || frontLeftGrounded;
+                bool rearPaw = rearRightGrounded || rearLeftGrounded;
+                if (anyPaw && !getUpPushPhase)
+                {
+                    // The pair that HAS the floor is the pair that extends, so
+                    // the ground reaction lands on the limbs that can use it —
+                    // the other pair folds out of the way instead of scrabbling
+                    // with them. Both pairs grounded at once: the rear takes it.
+                    getUpRightFront = frontPaw && !rearPaw;
+                    getUpPushPhase = true;
+                    getUpRightBorn = Time.fixedTime;
+                }
+                else if (halfAge >= half)
+                {
+                    getUpPushPhase = false;
+                    getUpRightFront = !getUpRightFront;
+                    getUpRightBorn = Time.fixedTime;
+                }
+                getUpInvertedFrontHalf = getUpRightFront;
             }
-            else if (getUpPushPhase
-                     && (!anyPaw || phaseAge >= Mathf.Max(0.10f, getUpPushSeconds)))
+            else
             {
-                getUpPushPhase = false;
-                getUpPhaseBorn = Time.fixedTime;
+                getUpRightBorn = -1f;
+                // A push needs a floor. The extension reacts on the trunk, and with
+                // nothing planted that reaction is the only thing it can move:
+                // dog_gu13 pushed 16 times after the second fall, every one with
+                // 0 paws, and the dog ended on its back rocking through pitch ±180
+                // from 20.6 s to the end of the run. With no contact the tuck alone
+                // folds the limbs under the body and waits for a paw; the push
+                // starts the moment one lands (and stops if the paw leaves again).
+                // Tuck ⇄ push clock. The old latch released only when |pitch| fell
+                // under the squat, which a pelvis-down heap never reaches, so the
+                // dog froze in one tuck. A bounded tuck, then a bounded push,
+                // repeating while the trunk is still a heap, is a dog that tries.
+                float phaseAge = Time.fixedTime - getUpPhaseBorn;
+                if (anyPaw && !getUpPushPhase && phaseAge >= Mathf.Max(0.10f, getUpTuckSeconds))
+                {
+                    getUpPushPhase = true;
+                    getUpPhaseBorn = Time.fixedTime;
+                }
+                else if (getUpPushPhase
+                         && (!anyPaw || phaseAge >= Mathf.Max(0.10f, getUpPushSeconds)))
+                {
+                    getUpPushPhase = false;
+                    getUpPhaseBorn = Time.fixedTime;
+                }
             }
         }
 
@@ -2073,30 +2159,84 @@ public class DogStanceController : MonoBehaviour
             float lead = Mathf.Max(0.05f, getUpKneeLeadSeconds);
             float pikeAge = getUpPikeBorn >= 0f ? Time.fixedTime - getUpPikeBorn : 0f;
             hipIn = pikeAge >= lead;
-            // Rear: more-minus hip + plus knee. Front: more-plus
-            // shoulder (caudal) + plus elbow — paws under the trunk.
-            // Knee/elbow always full tuck on pike; hip waits the lead.
-            kneeTarget = tuckKnee;
-            elbowTarget = tuckKnee;
-            if (hipIn)
+            if (inverted)
             {
-                hipTarget = hipBaseAngle - tuckHip;
-                shoulderTarget = shoulderBaseAngle + tuckHip;
+                // Righting half: the driving pair folds under the trunk, the
+                // other pair reaches STRAIGHT past its trunk end (knee / elbow
+                // to 0) so the two halves of the body turn the trunk the same
+                // way. No knee lead here — a swing is not a rise, and the shape
+                // has to change fast enough for the reaction to add up.
+                hipIn = true;
+                if (getUpRightFront)
+                {
+                    shoulderTarget = shoulderBaseAngle + tuckHip;
+                    elbowTarget = tuckKnee;
+                    hipTarget = hipBaseAngle + tuckHip;
+                    kneeTarget = 0f;
+                }
+                else
+                {
+                    hipTarget = hipBaseAngle - tuckHip;
+                    kneeTarget = tuckKnee;
+                    shoulderTarget = shoulderBaseAngle - tuckHip;
+                    elbowTarget = 0f;
+                }
             }
             else
             {
-                hipTarget = hipBaseAngle;
-                shoulderTarget = shoulderBaseAngle;
+                // Rear: more-minus hip + plus knee. Front: more-plus
+                // shoulder (caudal) + plus elbow — paws under the trunk.
+                // Knee/elbow always full tuck on pike; hip waits the lead.
+                kneeTarget = tuckKnee;
+                elbowTarget = tuckKnee;
+                if (hipIn)
+                {
+                    hipTarget = hipBaseAngle - tuckHip;
+                    shoulderTarget = shoulderBaseAngle + tuckHip;
+                }
+                else
+                {
+                    hipTarget = hipBaseAngle;
+                    shoulderTarget = shoulderBaseAngle;
+                }
             }
         }
         else
         {
             float riseT = Mathf.Max(0.2f, getUpRiseSeconds);
             getUpRiseBlend = Mathf.Clamp01(getUpRiseBlend + dt / riseT);
-            hipTarget = hipBaseAngle;
-            kneeTarget = kneeBaseAngle;
-            shoulderTarget = shoulderBaseAngle;
-            elbowTarget = elbowBaseAngle;
+            if (inverted)
+            {
+                // Push half of the righting cycle: the driving pair EXTENDS
+                // against whatever it has on the floor while the other pair
+                // folds, so the ground reaction turns the trunk instead of
+                // sliding it (the same extension took the trunk 50° → 162° in
+                // 0.7 s on dog_gu14). Not the quiet base pose: that would set
+                // all four limbs swinging together again.
+                float pushHip = Mathf.Max(8f, getUpHipFlex);
+                float pushKnee = Mathf.Clamp(Mathf.Max(40f, getUpKneeFlex), 0f, 120f);
+                if (getUpRightFront)
+                {
+                    shoulderTarget = shoulderBaseAngle - pushHip;
+                    elbowTarget = 0f;
+                    hipTarget = hipBaseAngle - pushHip;
+                    kneeTarget = pushKnee;
+                }
+                else
+                {
+                    hipTarget = hipBaseAngle + pushHip;
+                    kneeTarget = 0f;
+                    shoulderTarget = shoulderBaseAngle + pushHip;
+                    elbowTarget = pushKnee;
+                }
+            }
+            else
+            {
+                hipTarget = hipBaseAngle;
+                kneeTarget = kneeBaseAngle;
+                shoulderTarget = shoulderBaseAngle;
+                elbowTarget = elbowBaseAngle;
+            }
         }
 
         float hipP = hipPGain;
