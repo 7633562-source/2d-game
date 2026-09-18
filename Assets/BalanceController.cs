@@ -13988,9 +13988,14 @@ public partial class BalanceController : MonoBehaviour
             // Deep heap → GettingUp. Mild ~45° DualSupport squat with
             // walkRecoverAnyPose still uses StandingRestore (not 34 s of
             // false GETUP). Sprawl+15 (~60°) covers the −70° plank that
-            // left locomotion Walking / attempts 0.
+            // left locomotion Walking / attempts 0. A pelvis that has
+            // already sunk past the collapse drop at ~−55° (tilt below
+            // sprawl+15) also froze under StandingRestore for the rest of
+            // the run with getUpAttempts 0 — it must enter GettingUp too.
+            bool collapsed = stepPhaseDriver != null && stepPhaseDriver.BodyCollapsed;
             bool deepHeap = IsProneFallen()
-                || absTilt >= GetUpSprawlDeg() + 15f;
+                || absTilt >= GetUpSprawlDeg() + 15f
+                || collapsed;
             if (deepHeap || !WalkRecoverAnyPoseOn())
             {
                 if (locomotionState != LocomotionState.GettingUp)

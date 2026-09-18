@@ -3173,6 +3173,7 @@ public class HeadlessTrial : MonoBehaviour
         bool pushed = false;
         bool leaped = false;
         bool walked = false;
+        int lastShot = -1;
 
         while (simulated < duration)
         {
@@ -3200,6 +3201,19 @@ public class HeadlessTrial : MonoBehaviour
             }
 
             dogRecorder.Sample(simulated);
+
+            // Same frame capture as the human and bird trials: the dog had none, so
+            // there were no dog videos to look at. Yury asked for dog video reports.
+            if (visual)
+            {
+                int shotIdx = (int)(simulated / 0.2f);
+                if (shotIdx != lastShot)
+                {
+                    lastShot = shotIdx;
+                    string shotPath = Path.Combine(outputFolder, "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
+                    yield return CaptureVisualFrame(shotPath);
+                }
+            }
 
             if (Time.realtimeSinceStartup > realDeadline)
             {
