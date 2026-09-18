@@ -16,6 +16,30 @@ using UnityEngine;
 //
 // It applies no force and touches no solver state, so a run it observes keeps
 // the physics of a run without it, bit for bit.
+//
+// T1 covers both hingenous trees: PlantTree (the five kinds) and TreeBase
+// (AppleTree). One trace, one CSV layout, so the oak and the apple are read by
+// the same scripts.
+public struct WoodSensor
+{
+    public HumanSegment segment;
+    public TreeSpring spring;
+    public JointFriction friction;
+    public int order;              // branch order 0..3; -1 = stump
+    public float bindDeg;          // grow-pose joint angle (spring.restAngle)
+    public float buildHeadingDeg;  // grow-pose world heading (spring.restWorldAngle)
+}
+
+// Sensor port of a tree: raw Unity handles plus build-time identity ONLY.
+// There is no metric logic behind it, so wiring a trace into a run can never be
+// mistaken for a measurement, and nothing read through the port applies a
+// force.
+public interface IWoodSensorSource
+{
+    string RigHash { get; }
+    void GetWoodSensors(List<WoodSensor> into);
+}
+
 public class TreeJointTrace
 {
     private const string NumFormat = "0.######";
@@ -37,9 +61,9 @@ public class TreeJointTrace
         public float stiffnessLimitBound;
     }
 
-    private readonly PlantTree tree;
+    private readonly IWoodSensorSource tree;
     private readonly float fixedDelta;
-    private readonly List<PlantTree.WoodSensor> wood = new List<PlantTree.WoodSensor>(40);
+    private readonly List<WoodSensor> wood = new List<WoodSensor>(40);
     private readonly List<Joint> joints = new List<Joint>(32);
     private readonly List<Rigidbody2D> bodies = new List<Rigidbody2D>(32);
     private readonly List<HumanSegment> bodySegments = new List<HumanSegment>(32);
@@ -79,7 +103,7 @@ public class TreeJointTrace
     public float SpringSatFraction =>
         jointSamples > 0 ? (float)saturatedJointSamples / jointSamples : 0f;
 
-    public TreeJointTrace(PlantTree tree, float fixedDelta)
+    public TreeJointTrace(IWoodSensorSource tree, float fixedDelta)
     {
         this.tree = tree;
         this.fixedDelta = fixedDelta > 0f ? fixedDelta : Time.fixedDeltaTime;
@@ -100,7 +124,7 @@ public class TreeJointTrace
         for (int i = 0; i < wood.Count; i++)
         {
             bodyWoodIndex[i] = -1;
-            PlantTree.WoodSensor w = wood[i];
+            WoodSensor w = wood[i];
             HumanSegment seg = w.segment;
             if (seg == null) continue;
             if (w.order < 0)
@@ -124,7 +148,7 @@ public class TreeJointTrace
         {
             int body = bodyWoodIndex[i];
             if (body < 0) continue;
-            PlantTree.WoodSensor w = wood[i];
+            WoodSensor w = wood[i];
             HumanSegment seg = w.segment;
             if (seg.joint.connectedBody != null
                 && bodyOfRb.TryGetValue(seg.joint.connectedBody, out int parent))

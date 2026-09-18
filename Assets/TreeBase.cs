@@ -7,7 +7,7 @@ using UnityEngine;
 // knows nothing about fruit or leaves — a subclass decorates the wood with
 // picture-only ornaments (see AppleTree). The stump is static: the tree
 // sways, it does not fall like a human ragdoll.
-public abstract class TreeBase : PlantBase
+public abstract class TreeBase : PlantBase, IWoodSensorSource
 {
     [Header("Build")]
     [Tooltip("Total mass of live wood after normalize, kg. Stump not included.")]
@@ -72,6 +72,10 @@ public abstract class TreeBase : PlantBase
     public virtual int LeafCount => 0;
     public virtual string KindName => "Tree";
     public float HeightMeters => GetCrownY() - transform.position.y;
+    // Build-time identity of the rig (sorted grow-pose positions and sizes,
+    // fnv1a64). Read by the T1 trace: two runs on two builds cannot be compared
+    // unless the rig hash matches. A constant of the build, never a metric.
+    public string RigHash { get; private set; } = "";
 
     protected struct Node
     {
@@ -150,6 +154,8 @@ public abstract class TreeBase : PlantBase
         Physics2D.SyncTransforms();
         BindGravityHold();
         CollectActuators();
+        // Hash the rig at the grow pose, before any step can move it.
+        RigHash = ComputeRigHash();
     }
 
     // One deterministic step: spring hold → joint damping → wind. The
@@ -484,6 +490,65 @@ public abstract class TreeBase : PlantBase
         }
         meanAbsHold = n > 0 ? sum / n : 0f;
         maxAbsHold = max;
+    }
+
+    // T1 instrumentation port (TREES plan, 18.09): the same sensor the oak
+    // hands out, so one TreeJointTrace reads both trees. Raw Unity handles plus
+    // build-time identity only — no metric logic, no forces. The recorder does
+    // its arithmetic from rb/joint primitives, never from a helper a fix could
+    // rewrite (GetMaxAbsJointAngle / GetTrunkLeanDeg / GetHingePinnedFraction
+    // / GetHoldStats).
+    public void GetWoodSensors(List<WoodSensor> into)
+    {
+        if (into == null) return;
+        into.Clear();
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            HumanSegment seg = nodes[i].segment;
+            if (seg == null) continue;
+            TreeSpring spring = nodes[i].spring;
+            into.Add(new WoodSensor
+            {
+                segment = seg,
+                spring = spring,
+                friction = seg.GetComponent<JointFriction>(),
+                order = nodes[i].depth,
+                bindDeg = spring != null ? spring.restAngle : 0f,
+                buildHeadingDeg = spring != null ? spring.restWorldAngle : 0f
+            });
+        }
+    }
+
+    // Rig identity: sorted segment positions and sizes, hashed (fnv1a64).
+    // Same construction as PlantTree.ComputeRigHash, so one build hash kind
+    // covers the whole plant family.
+    private string ComputeRigHash()
+    {
+        List<string> parts = new List<string>(nodes.Count);
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            HumanSegment seg = nodes[i].segment;
+            if (seg == null) continue;
+            Vector2 p = seg.transform.position;
+            parts.Add(p.x.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+                + "|" + p.y.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+                + "|" + seg.size.x.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+                + "|" + seg.size.y.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        parts.Sort(System.StringComparer.Ordinal);
+        ulong hash = 14695981039346656037UL;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            string s = parts[i];
+            for (int c = 0; c < s.Length; c++)
+            {
+                hash ^= s[c];
+                hash *= 1099511628211UL;
+            }
+            hash ^= 10UL;
+            hash *= 1099511628211UL;
+        }
+        return hash.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public float GetCrownY()

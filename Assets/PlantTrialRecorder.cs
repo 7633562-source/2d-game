@@ -20,7 +20,7 @@ public class PlantTrialRecorder
 {
     private struct Sensor
     {
-        public PlantTree.WoodSensor wood;
+        public WoodSensor wood;
         public HingeJoint2D joint;
         public Rigidbody2D rb;
     }
@@ -28,7 +28,7 @@ public class PlantTrialRecorder
     private readonly PlantTree tree;
     private readonly TrialRunInfo info;
     private readonly TreeJointTrace trace;
-    private readonly List<PlantTree.WoodSensor> wood = new List<PlantTree.WoodSensor>(40);
+    private readonly List<WoodSensor> wood = new List<WoodSensor>(40);
     private readonly List<Sensor> sensors = new List<Sensor>(32);
 
     private int samples;

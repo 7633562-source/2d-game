@@ -53,7 +53,7 @@ enum BarkLook
 // Class is not Tree: Unity has UnityEngine.Tree (Terrain).
 // A segment is HumanSegment: box + Visual, no human anatomy.
 // No muscles: wood is TreeSpring + JointFriction. Wind is a force on the segment.
-public class PlantTree : MonoBehaviour
+public class PlantTree : MonoBehaviour, IWoodSensorSource
 {
     [Header("Build")]
     public TreeRig rig = TreeRig.Sway;
@@ -842,17 +842,8 @@ public class PlantTree : MonoBehaviour
     // lean, hinge pinning, base slide, crown tip) lives in the recorder and is
     // computed from rb/joint primitives there, never from a helper a fix could
     // rewrite (GetMaxAbsJointAngle / GetTrunkLeanDeg / GetHingePinnedFraction
-    // / GetHoldStats).
-    public struct WoodSensor
-    {
-        public HumanSegment segment;
-        public TreeSpring spring;
-        public JointFriction friction;
-        public int order;              // branch order 0..3; -1 = stump
-        public float bindDeg;          // grow-pose joint angle (spring.restAngle)
-        public float buildHeadingDeg;  // grow-pose world heading (spring.restWorldAngle)
-    }
-
+    // / GetHoldStats). The struct itself is declared once in TreeJointTrace so
+    // TreeBase (AppleTree) can hand out the same sensor.
     public void GetWoodSensors(List<WoodSensor> into)
     {
         if (into == null) return;

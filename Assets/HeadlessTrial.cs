@@ -3921,20 +3921,22 @@ public class HeadlessTrial : MonoBehaviour
                 if (plantRecorder != null)
                 {
                     summary = MergePlantJson(summary, plantRecorder);
-                    WriteJointTrace(label);
+                    WriteJointTrace(label, plantRecorder.BuildJointCsv());
                 }
             }
             else if (spawnTree)
             {
                 File.WriteAllText(csvPath, "t\n");
                 summary = plantRecorder.BuildSummaryJson(simulated, wallSeconds);
-                // T1: one row per FixedUpdate, nine columns per joint.
-                WriteJointTrace(label);
+                // T1: one row per FixedUpdate, ten columns per joint.
+                WriteJointTrace(label, plantRecorder.BuildJointCsv());
             }
             else if (spawnApple)
             {
                 File.WriteAllText(csvPath, "t\n");
                 summary = appleRecorder.BuildSummaryJson(simulated, wallSeconds);
+                // T1: one row per FixedUpdate, ten columns per joint.
+                WriteJointTrace(label, appleRecorder != null ? appleRecorder.BuildJointCsv() : null);
             }
             else if (spawnFlower)
             {
@@ -3969,12 +3971,13 @@ public class HeadlessTrial : MonoBehaviour
 
     // T1 (TREES plan): the per-step, per-joint trace of the tree run, written
     // next to the summary JSON. Read-only instrumentation — the run's own .csv
-    // keeps its old content, so nothing that already parses it breaks.
-    private void WriteJointTrace(string label)
+    // keeps its old content, so nothing that already parses it breaks. Both
+    // hingenous trees (oak and apple) hand out the same CSV layout.
+    private void WriteJointTrace(string label, string csv)
     {
-        if (plantRecorder == null) return;
+        if (string.IsNullOrEmpty(csv)) return;
         string jointsPath = Path.Combine(outputFolder, label + "_joints.csv");
-        File.WriteAllText(jointsPath, plantRecorder.BuildJointCsv());
+        File.WriteAllText(jointsPath, csv);
         Debug.Log("TRIAL_JOINTS_CSV " + jointsPath);
     }
 
