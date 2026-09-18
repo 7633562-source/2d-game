@@ -27,16 +27,16 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 | physics | ONELEG-2 **wall**: 90° pose holds; CoM ankle loop is bistable. Do not reopen. | `.cursor/tasks/ONELEG-2-march.md` |
 | physics | WALK-2: the walk never steps (single support 0 %, walkSwap 0, folds 1.3 s after the walk start). Vestibular first; switch surface frozen. | this file, Walk front |
 | physics | deep crouch WIP intentionally leaves code defaults 98/28 after `crouch_accept`; accepted journal remains 55/12 until the physics work closes | HumanPhysics continuation |
-| visual | code hand is `0.06×0.16`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/VIS-HAND.md` |
+| artist | code hand is `0.06×0.16`; card still wants `0.19`; walk fold at 0.19 is recorded | `.cursor/tasks/ART-HAND.md` |
 | docs | pointers and baselines; do not clean Runs | `DOCS.md` |
 | optimization | P1 + P2/P3 + PERF-5 closed. Yard 04.09: off-camera dogs/birds rest (`NpcRest`). PERF-1 is pre-grove and pre-yard. Do not cut 200 Hz | `OPT-3-distant-rest.md`; `opt_agent_proposals.md` |
 | level | Test1 yard: campfire at x=32.5 (24 tongues + ParticleSystem sparks/smoke/embers; no sprite smoke boxes); lab scene `Campfire`; gate Static trees + World flock 6 / hens 10 / dogs 3; `treeCount` 0 | no new card |
 | bird | BIRD-12: inter-bird contact is torso+head (`BirdCore`); limbs/perch `BirdLimb`. Walk = `walkThrust` on the body. Opt 02.09 flock 50 still the 200 Hz edge; no `GetContacts` | `BIRD-12-core-contact.md`; `opt_bird_code_02.md` |
 | plant | PLANT-2 accepted. PLANT-3: 12 garden flowers. Four extra tree kinds in scene Tree (Lilac Hazel Cedar Plum); yard cycle still Oak…Poplar | `PLANT-3-flowers.md`; `plant-physics.mdc` |
-| visual | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/VIS-TREE.md` |
-| visual | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/VIS-DOG-textures.md` |
-| artist | VIS-DOG **box look is live**: `DogArt.BoxLook` draws the dog the way `HumanSegment` draws the human — one flat translucent rectangle per bone (head, neck, chest, pelvis, 5 tail, 4 × upper/lower/paw), one dark joint marker, far side dimmed; `-dogCoatLook` rolls back to the plates, `-dogBoxAlpha <f>` tunes the fill (0.65). `Art/Dog/Palette.cs`. Frames: `Trials/Runs/dog_art1*.png` | `.cursor/agents/artist.md` |
-| visual | crow / chicken parts in `Art/Crow` and `Art/Chicken` | `.cursor/tasks/VIS-BIRD-textures.md` |
+| artist | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/ART-TREE.md` |
+| artist | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/ART-DOG.md` |
+| artist | ART-DOG **box look is live**: `DogArt.BoxLook` draws the dog the way `HumanSegment` draws the human — one flat translucent rectangle per bone (head, neck, chest, pelvis, 5 tail, 4 × upper/lower/paw), one dark joint marker, far side dimmed; `-dogCoatLook` rolls back to the plates, `-dogBoxAlpha <f>` tunes the fill (0.65). `Art/Dog/Palette.cs`. Frames: `Trials/Runs/dog_art1*.png` | `.cursor/agents/artist.md` |
+| artist | crow / chicken parts in `Art/Crow` and `Art/Chicken` | `.cursor/tasks/ART-BIRD.md` |
 | ai | Insect hunt concept: faction Insects, Forage→Pursue, eat with beak | `BIRD-13-insect-hunt.md` |
 | dog | DOG-3 leftover sit-trot **0.286 km/h** (`dog_w10`); 5 km/h open. DOG-4: `DogDrive` writes Walk; no play keys | `.cursor/tasks/DOG-3-walk.md`; `DOG-4-ai.md` |
 
@@ -186,3 +186,18 @@ Checkpoint before dog_ds3. Change: the stance paw plant is wired
 Baseline measured on this build, `dog_ds3_base`: `comSpeedX` 0.073 m/s
 (0.264 km/h), `comTravelX` 1.762 m, `walkCycleCount` 65, `trunkDrop` 0.351,
 `fourFeet` 0.084, `fell` false, 25 s.
+
+## Dog lies 63 pct of the run and never tries to stand - measured 18.09
+
+dog_gu5: dogDownSeconds 25.14 of 40 s, dogGetUpAttempts 0, getUpSuccess false while
+the dog state machine claims true at 4.58 s. The quiet run dog_gu6 is clean (0 s down,
+no false positives), so the recorder is trustworthy now.
+
+## Rule: every collider gets an explicit friction material - Yury 18.09
+
+No object with a collider may rely on the engine default (0.4). Box2D pairs friction as
+sqrt(mu1*mu2), so an unset material silently loses grip. Ground 0.4, human sole 1.2,
+dog NOTHING (its AddFriction is joint friction, not contact). Rule file:
+.cursor/rules/collider-materials.mdc. Measured trap: on the dog, more grip made it
+slower (ice 0.339 m/s, stock 0.129, sticky -0.015), so set materials explicit first,
+raise mu only after the gait has a loaded push.
