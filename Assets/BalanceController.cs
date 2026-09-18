@@ -3782,7 +3782,8 @@ public partial class BalanceController : MonoBehaviour
     private bool getUpSitLatched;
     private bool getUpTuckLatched;
     private bool getUpPikeLatched; // alias of tuck latch for older call sites
-    // Mild hip flex during sit-up only (deg, minus). Deep tuck uses getUpHipFlex.
+    // Hip extension during sit-up only (deg, plus). Deep tuck uses getUpHipFlex
+    // in the other (flexion) direction.
     private const float GetUpSitHipFlex = 35f;
     // Knee stay near stance during sit-up (deg, plus). Tuck needs ≥70.
     private const float GetUpSitKneeFlex = 20f;
@@ -14216,10 +14217,15 @@ public partial class BalanceController : MonoBehaviour
         float kneeTarget;
         if (sittingUp || holdSit)
         {
-            // Sit the trunk first. Mild hip flex + lumbar upright; knees
-            // stay near stance so the sit is visible before the tuck.
+            // Sit the trunk first. Hip EXTENSION pushes the pelvis up off a
+            // prone fold (pelvis −111° / torso −91°): the ±20° lumbar alone
+            // cannot lift the torso, and mild flexion only folded the legs
+            // and dropped the pelvis further (GETUP-1 freeze at pose 1).
+            // Extension raises the pelvis, the torso follows, then the tuck
+            // reverses into deep flexion. Knees stay near stance so the sit
+            // is visible before the tuck.
             getUpRiseBlend = 0f;
-            hipTarget = -Mathf.Max(10f, GetUpSitHipFlex);
+            hipTarget = Mathf.Max(10f, GetUpSitHipFlex);
             kneeTarget = Mathf.Max(kneeBaseAngle, GetUpSitKneeFlex);
         }
         else if (tucking)
@@ -14313,8 +14319,15 @@ public partial class BalanceController : MonoBehaviour
         float wrist = crouchHandSupportWrist;
         if (sittingUp || tucking || absTilt >= sitDoneDeg)
         {
-            // Hands under the chest, elbows bent for a press / sit brace.
-            elbow = Mathf.Clamp(-elFlex, -135f, -5f);
+            // Push off the slab: the elbow extends through the sit / tuck
+            // so the hand presses the ground and the shoulder reaction lifts
+            // the torso. A bent elbow only braces and leaves the torso on a
+            // −90° fold (GETUP-1). Blend over getUpAge so the press ramps in
+            // instead of slamming the hand down.
+            float straight = crouchHandSupportElbow;
+            float press = Mathf.Clamp01(getUpAge / Mathf.Max(0.25f, getUpRiseSeconds * 0.5f));
+            elbow = Mathf.Lerp(-elFlex, straight, press);
+            elbow = Mathf.Clamp(elbow, -135f, -5f);
         }
         else if (rising)
         {

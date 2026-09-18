@@ -146,3 +146,20 @@ the fall the arms are dead, shoulder 4.8 deg and elbow 0.03 deg over 33 s.
 Acceptance: walking shoulder correlation below -0.5 with the opposite leg;
 while Getting up the elbow range above 20 deg and a non zero arm command;
 both must be visible in the video, not only in the numbers.
+
+## Level 2 authorised - Yury 18.09
+
+Yury allows more substantial changes to the human physics and a move to another
+level of correction. Assistant decision: level 1 first, the pelvis support for
+the walk. If level 1 stays blocked, move to pose driven control: a pose library
+and PD joint torques, the balance layer only placing the feet by the capture
+point and holding the hip height. Behind a new switch, old path kept for rollback.
+
+## Get up mechanics corrected - Yury 18.09
+
+The knees press to the torso (knee flexion at least 90 deg, thigh to the chest),
+then the arms push off the ground: the hands press, the elbows extend and the
+arms lift the body. Then the feet come under the centre of mass and the legs
+stand him up. Without the knee tuck and the arm push it does not count, even if
+he ends up standing. The hand colliders exist, so the push is physically
+possible, it is simply never driven.
