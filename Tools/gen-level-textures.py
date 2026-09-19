@@ -71,9 +71,13 @@ SKY_WARM = (255, 240, 222)
 POLE = (61, 38, 20)            # LevelTest1.FencePostTint 0.24 0.15 0.08
 POLE_LIGHT = (78, 51, 25)
 POLE_DARK = (42, 26, 13)
-FLAG = (209, 56, 46)           # LevelArt.SignTint 0.82 0.22 0.18
-FLAG_DARK = (163, 38, 32)
-FLAG_LIGHT = (242, 233, 218)
+# Finish cloth (second sign pass, 19.09). The first pass painted a red/cream chequer; two
+# eye checks at gameplay scale called it a roadworks barrier / slalom marker and named the
+# classic black/white chequer as the finish read. LevelArt.SignTint keeps its flat red on
+# purpose: it is the colour mark for the missing-PNG path, not this picture.
+FLAG = (34, 32, 38)            # chequer cell A: graphite black
+FLAG_DARK = (19, 18, 23)       # rim + the mast's shadow on the cloth
+FLAG_LIGHT = (240, 237, 228)   # chequer cell B: warm white
 CAP = (166, 166, 172)          # mast cap: a bare post top reads as a cut stick
 CAP_DARK = (104, 104, 112)
 
@@ -537,10 +541,15 @@ def paint_sky(w=512, h=128):
 #
 # Redesign 19.09 after the eye check. The old canvas had a 16 px mast (nearly half the 0.18 m box)
 # and a 28 px pennant that tapered to a 1 px point: at gameplay scale it read as a rigid slalom
-# pole, not as a finish. Now the mast is 11 px, the banner 46 px (0.13 m) of a bold red/cream
-# chequer - the one finish motif that survives being 3 x 7 screen pixels - with a squared tag end.
+# pole, not as a finish. Now the mast is 11 px, the banner 46 px (0.13 m) of a bold chequer - the
+# one finish motif that survives being 3 x 7 screen pixels - with a squared tag end.
 # The chequer is clipped by the banner silhouette, and every diagonal is an integer step, so the
 # edge cannot wobble.
+#
+# Second pass 19.09 (same canvas, same PPU, same .meta): the chequer's dark cell is graphite black
+# instead of coral red. Judged at 16x81 / 8x40 / 5x25 px the red/cream cloth read as a roadworks
+# barrier; the black/white chequer is the classic finish and carries the higher contrast the small
+# sizes need against a light horizon. Geometry, silhouette, rings and mast byte-for-byte unchanged.
 def paint_sign_finish(w=64, h=320):
     img = new_image(w, h)
     px = img.load()
