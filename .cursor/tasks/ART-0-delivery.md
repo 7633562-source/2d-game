@@ -356,4 +356,65 @@ it cannot judge the cap itself - recorded in the report, with the fill's wide-sl
 the next ground item), and the earlier passes' items - per-part binding of the creatures (ART-2/ART-3),
 the flame core's spindle read.
 
+## Sixth pass 19.09 (artist) - reachability re-verified on today's bytes, and the finish-sign item is closed
+
+Two fresh Unity batch runs on the tree as it stands (16:50, editor closed): `art0-import-gate.sh` ->
+`unity exit=0`, `failures=0`, four `Level/*` via `Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100,
+512x128 ppu=32, 64x320 ppu=100), seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap ...
+colourDiffAtOneTile=0,0083 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`;
+`art1-gate.sh` -> `ART-1A-CHECK end failures=0`, `55 part keys checked=0 missing`. Offline, PIL: 318
+`.meta` files, 318 distinct guids, 0 duplicates; the originals are 1024x1024 and the shipped tiles
+512x512 (3.85-6.42x smaller, 13.9 MB -> 3.73 MB in total). Nothing had to be added to the ART-0 file set.
+
+The open look item from the fifth pass is done: the finish sign's cloth is graphite black + warm white
+instead of red + cream. `python Tools/gen-level-textures.py sign_finish` (one key, guid reused) changed
+exactly one file - the md5 of the four level PNGs, the seven material PNGs and all eleven `.meta` files
+differs before/after on one line only, and the alpha channel is pixel-identical (11172 opaque px,
+bbox 4,0,64,320 on both), so only RGB moved. Two eye checks at 64x320 / 36x180 / 16x81 / 8x40 / 5x25 px
+and one on a real build frame read the new cloth as a finish and the old one as a checkpoint/hazard
+marking; the flag still dies below 8x40, where the whole sprite is 3-4 px wide. From a real build
+(`art-gallery-capture.sh art0sign`, `scenes=12 errors=0`, 8 stills, 16.5 s pan, `real=29 missing=11`):
+`art0sign_level.png` against `art0cap_level.png` differs in 3298 of 2 073 600 pixels, all inside one
+column run x 1054-1083 rows 468-590 - the banner cloth, nothing else. Commit `da788536`, two files.
+Full numbers: `Trials/Runs/art-0-sign-report.md`.
+
+Still open, unchanged: `flower` (procedural) and `UI icons` as labelled MISSING tiles, the per-part
+binding of the creatures (ART-2/ART-3), the flame core's spindle read, the cap/soil style mismatch and
+the wide-slab fill stretch (`LevelArt.UseTiledFill()` + `ArtLibrary.Tiled` is the declared path and the
+fill is ready for it).
+
+## Seventh pass 19.09 (artist) - the five brief items re-verified, and the finish sign is a finish now
+
+Two fresh Unity batch runs on today's bytes (editor closed): `art0-import-gate.sh` -> `unity exit=0`,
+`failures=0`, the four `Level/*` through `Load<Sprite>` (1024x256 ppu=128 RGB24, 128x14 ppu=100 RGBA32,
+512x128 ppu=32 RGB24, 64x320 ppu=100 RGBA32), the seven `Art/<key>` `512x512 readable=True`,
+`TILE ground_cap ... 0,0083 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`;
+`art1-gate.sh` -> `part keys checked=55 missing=0`, `failures=0`. Offline on the same bytes: 318 `.meta`
+files, 318 distinct guids, 0 duplicates; the seven material tiles are 1024x1024 (2003.7-3096.3 KB) ->
+512x512 (334.6-664.6 KB), 17.41 MB -> 3.64 MB, and a fresh LANCZOS 512 of each source reproduces the
+shipped file with maxdiff 0.0 for five of the seven (skin/fabric differ only by their tile-levelling).
+Nothing had to be added or moved: the ART-0 file set is complete as it stands.
+
+The one picture that did not survive a fresh eye read was the finish sign. Repainted within the same
+canvas, PPU and `.meta` (guid unchanged, file 953 -> 959 B): 3 columns x 5 rows of 15 x 38 px on a metal
+mast instead of 2 x 3 giant cells on brown wood. The grid was picked by a blind four-way read at native /
+16x81 / 8x40 px - the previous picture came LAST ("a wooden post breaks the finish association, and 2x3
+blocks read as a roadworks barrier"), 11 px cells came third ("grey mush at 8x40"), the winner is the
+middle. `alpha byte-identical: True`, opaque 11172 -> 11172, bbox 4,0,64,320 unchanged: an RGB repaint,
+no silhouette pixel moved. Real frame from a real build (`art-gallery-capture.sh art0sign3`,
+`scenes=12 errors=0`, 8 stills, 16.5 s pan, `real=29 missing=11`, buildGuid `ea149f04cc5341da94f3bc39fd121cfe`)
+against the previous pass's frame: 3836 of 2 073 600 px differ, all inside one region x 1045-1083
+y 463-668 - the sign, nothing else. Video `Trials/Runs/art0sign3.mp4` (1920x1080, 165 frames, 16.5 s).
+Full numbers and the residuals the same eye check found (sign cell aspect, the cap's visible period, the
+fill's stamped stones and Y seam, the flame core's spindle read): `Trials/Runs/art-0-sign3-report.md`.
+
+Physics: no simulation file touched this cycle - one PNG plus `Tools/gen-level-textures.py` (outside
+`Assets/`, not compiled). The sign's box comes from the level data and `StaticPlatform` sets `sr.sprite`
+only, so no collider, size or number can move.
+
+Still open, unchanged: `flower` and `UI icons` (labelled MISSING), the per-part binding of the creatures
+(ART-2/ART-3), the flame core's spindle read, the cap/soil style mismatch, the wide-slab fill stretch, and
+now the two look items this pass recorded (the sign's elongated cells need a shorter banner to become
+square; `filterMode` Point for the pixel art).
+
  

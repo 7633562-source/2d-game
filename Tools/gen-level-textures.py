@@ -550,7 +550,33 @@ def paint_sky(w=512, h=128):
 # instead of coral red. Judged at 16x81 / 8x40 / 5x25 px the red/cream cloth read as a roadworks
 # barrier; the black/white chequer is the classic finish and carries the higher contrast the small
 # sizes need against a light horizon. Geometry, silhouette, rings and mast byte-for-byte unchanged.
-def paint_sign_finish(w=64, h=320):
+#
+# Third pass 19.09: a fresh eye check at 3x still named the defect - "a coarse 2x3 grid in a racing
+# context marks an obstacle or an apex cone, and a brown post reads as a wooden stake". Both are
+# addressable without moving a single opaque pixel:
+#   * `cell_w` / `cell_h` / `rows` make the chequer grid a parameter, so 4 columns x 6 rows
+#     (11 x 31 px, exact integer steps, no partial cell) is a finish chequer, not a hazard block;
+#   * `post` takes the mast palette, so the wood palette swaps for the neutral metal of the cap that
+#     already sits on top of the same mast.
+# Folds in the cloth are deliberately NOT added: the flat-shading rule bans gradients inside a
+# silhouette, and at ~11 x 47 screen px the banner is too small to carry one.
+#
+# The grid was chosen by a blind four-way read of the same sheet at native / 16x81 / 8x40 px
+# (`Trials/Runs/art-0-sign-2026-09-19/`, panels shuffled, mapping in `map.txt`): the shipped brown
+# 2x3 came LAST ("a wooden post breaks the finish association, and 2x3 giant cells read as a
+# roadworks barrier"), 4 columns of 11 px came THIRD ("the fine grid dissolves into grey mush at
+# 8x40"), 2x3 on metal came SECOND, and the winner is 3 x 5 cells of 15 x 38 px on the metal mast -
+# dense enough to be a chequer, coarse enough to survive the 11 x 47 px the banner really occupies.
+SIGN_POST_WOOD = (POLE_DARK, POLE_LIGHT, POLE)                      # (dark, light, mid)
+SIGN_POST_METAL = ((84, 88, 96), (172, 176, 182), (126, 130, 138))
+
+
+def paint_sign_finish(w=64, h=320, cell_w=15, cell_h=38, rows=5, post=SIGN_POST_METAL):
+    """Finish banner on a post. Defaults = the shipped look (third pass).
+
+    cell_w=23, cell_h=62, rows=3, post=SIGN_POST_WOOD reproduces the second pass byte for byte.
+    """
+    post_dark, post_light, post_mid = post
     img = new_image(w, h)
     px = img.load()
     post_l, post_r = 7, 17
@@ -559,7 +585,6 @@ def paint_sign_finish(w=64, h=320):
     ban_full_r, ban_fly_r = 46, 61
     half_full = (ban_bottom - ban_top) // 2          # 93 px: the banner is 0.52 m of the 0.90 m post
     half_fly = 40                                    # squared tag end, not a needle tip
-    cell_w, cell_h = 23, 62
     cap_bottom = 2
     foot_top = h - 14
     mid_y = (ban_top + ban_bottom) // 2
@@ -576,15 +601,15 @@ def paint_sign_finish(w=64, h=320):
             # mast: lit left edge, dark right edge
             if post_l <= x <= post_r:
                 if x == post_l or x >= post_r:
-                    c = POLE_DARK
+                    c = post_dark
                 elif x <= post_l + 2:
-                    c = POLE_LIGHT
+                    c = post_light
                 else:
-                    c = POLE
+                    c = post_mid
             # foot: wider than the mast and centred on it (the old foot sat to the right of the mast,
             # which is what made the base read as a pasted-on block)
             if y >= foot_top and post_l - 3 <= x <= post_r + 6:
-                c = POLE_DARK if (x <= post_l - 2 or x >= post_r + 5 or y >= h - 2) else POLE
+                c = post_dark if (x <= post_l - 2 or x >= post_r + 5 or y >= h - 2) else post_mid
             # cap: a bare post top reads as a cut stick
             if y <= cap_bottom and post_l - 1 <= x <= post_r + 1:
                 c = CAP if y < cap_bottom else CAP_DARK
@@ -593,13 +618,13 @@ def paint_sign_finish(w=64, h=320):
                 d = abs(y - mid_y)
                 half = half_at(x)
                 if d <= half:
-                    row = min(2, (y - ban_top) // cell_h)
+                    row = min(rows - 1, (y - ban_top) // cell_h)
                     col = (x - ban_left) // cell_w
                     c = FLAG if (row + col) % 2 == 0 else FLAG_LIGHT
                     if d >= half - 1 or x >= ban_fly_r:
                         c = FLAG_DARK                     # rim: the silhouette holds at small scale
                     if x == ban_left:
-                        c = mix(FLAG, POLE_DARK, 0.55)    # cloth presses against the mast
+                        c = mix(FLAG, post_dark, 0.55)    # cloth presses against the mast
                     elif x == ban_left + 1:
                         c = FLAG_DARK                     # the mast casts onto its own cloth
                     # two metal rings at the hoist: without an attachment cue the cloth reads as a
