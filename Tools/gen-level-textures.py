@@ -46,6 +46,7 @@ STRATA_LIGHT = (124, 93, 52)
 STRATA_DARK = (85, 62, 32)
 PEBBLE_LIGHT = (140, 108, 68)
 PEBBLE_DARK = (60, 43, 23)
+ROOT_FIBRE = (74, 54, 30)      # roots read warm brown, not near-black: PEBBLE_DARK/DIRT_DEEP mix
 
 GRASS_BODY = (76, 148, 71)     # LevelArt.CapTint fallback 0.30 0.58 0.28
 GRASS_ROOT = (53, 107, 49)
@@ -64,6 +65,8 @@ POLE_DARK = (42, 26, 13)
 FLAG = (209, 56, 46)           # LevelArt.SignTint 0.82 0.22 0.18
 FLAG_DARK = (163, 38, 32)
 FLAG_LIGHT = (242, 233, 218)
+CAP = (166, 166, 172)          # mast cap: a bare post top reads as a cut stick
+CAP_DARK = (104, 104, 112)
 
 
 def mix(a, b, t):
@@ -157,15 +160,30 @@ def paint_ground_fill(w=1024, h=256):
                         max(0, min(255, c[2] + j)), 255)
 
     rng = random.Random(104)
-    for _ in range(6):                                         # root fibres under the cap line
-        fx, flen = rng.uniform(0.0, w), rng.uniform(52.0, 130.0)
-        fy = rng.uniform(h * 0.07, h * 0.20)
-        for y in range(int(fy) - 2, int(fy) + 3):
-            for i in range(int(flen)):
-                x = int((fx + i) % w)
-                c = mix(px[x, y][:3], PEBBLE_DARK, 0.34)
-                px[x, y] = (c[0], c[1], c[2], 255)
-    for _ in range(8):                                         # cracks: 1 px jagged lines
+    # Roots: TAPER and MEANDER. A constant-thickness straight run with blunt ends reads as a
+    # rectangular smudge in the soil, not as a root - measured 19.09: 6 such bars sat in rows
+    # 21-30 / 37-49 as 20-84 px dark runs of constant thickness.
+    for _ in range(7):
+        flen = int(rng.uniform(70.0, 170.0))
+        fx = rng.uniform(0.0, w)
+        fy = rng.uniform(h * 0.08, h * 0.22)
+        px_x, px_y = fx, fy
+        thick = 2 if rng.random() < 0.5 else 1
+        for i in range(flen):
+            t = i / float(flen)
+            k = 0.30 * (1.0 - t) ** 1.4 + 0.04          # fades into the soil at the tip
+            if rng.random() < 0.22:                     # drifts, never runs straight
+                px_y += rng.choice((-1.0, 0.0, 1.0))
+            if i > int(flen * 0.45):
+                thick = 1                               # thins out with distance
+            for dy in range(thick):
+                yy = int(px_y) + dy
+                if 0 <= yy < h:
+                    xx = int(px_x) % w
+                    c = mix(px[xx, yy][:3], ROOT_FIBRE, k)
+                    px[xx, yy] = (c[0], c[1], c[2], 255)
+            px_x += 1.0
+    for _ in range(8):                                  # cracks: 1 px, fading ends, forked
         cx, cy = rng.uniform(0.0, w), rng.uniform(h * 0.15, h * 0.95)
         length = int(rng.uniform(60, 200))
         for i in range(length):
@@ -173,14 +191,40 @@ def paint_ground_fill(w=1024, h=256):
                 cy += rng.choice((-1.0, 1.0))
             y = int(cy)
             if 0 <= y < h:
+                t = i / float(length)
+                # A constant 0.70 mix reads as a pen stroke: the line has to fade in and out.
+                k = 0.26 + 0.34 * math.sin(math.pi * t)
                 x = int((cx + i) % w)
-                c = mix(px[x, y][:3], PEBBLE_DARK, 0.70)
+                c = mix(px[x, y][:3], PEBBLE_DARK, k)
                 px[x, y] = (c[0], c[1], c[2], 255)
-    for _ in range(48):                                        # stones, drawn in their own box
+                if rng.random() < 0.05:                 # a crack forks
+                    by, blen, bdir = y, int(rng.uniform(8, 24)), rng.choice((-1, 1))
+                    for j in range(blen):
+                        if rng.random() < 0.3:
+                            by += bdir
+                        if 0 <= by < h:
+                            bx = int(cx + i + j) % w
+                            cb = mix(px[bx, by][:3], PEBBLE_DARK, 0.26 * (1.0 - j / float(blen)))
+                            px[bx, by] = (cb[0], cb[1], cb[2], 255)
+    for _ in range(48):                                 # stones, drawn in their own box
         cx, cy = rng.uniform(0.0, w), rng.uniform(h * 0.10, h * 0.97)
         ry = rng.uniform(1.5, 4.5)
-        rx = ry * rng.uniform(1.2, 2.2)                        # wider than tall, never a circle
+        rx = ry * rng.uniform(1.2, 2.2)                 # wider than tall, never a circle
         light = rng.random() < 0.4
+        subtle = rng.random() < 0.22                    # a few stones barely leave the soil tone
+        if not subtle:
+            # Contact shadow first, offset one pixel down-right and slightly larger than the
+            # stone: what survives is a 1-2 px crescent, i.e. the stone sits IN the soil.
+            for dy in range(-int(ry) - 1, int(ry) + 2):
+                y = int(cy) + dy + 1
+                if y < 0 or y >= h:
+                    continue
+                for dx in range(-int(rx) - 1, int(rx) + 2):
+                    nx, ny = dx / (rx * 1.06), (dy - 0.6) / (ry * 1.06)
+                    if nx * nx + ny * ny >= 1.0:
+                        continue
+                    x = int(cx + dx + 1) % w
+                    px[x, y] = mix(px[x, y][:3], PEBBLE_DARK, 0.34) + (255,)
         for dy in range(-int(ry) - 1, int(ry) + 2):
             y = int(cy) + dy
             if y < 0 or y >= h:
@@ -192,8 +236,11 @@ def paint_ground_fill(w=1024, h=256):
                     continue
                 x = int(cx + dx) % w
                 k = min(0.85, (1.0 - d) * 1.45)
+                k *= 0.90 + rng.random() * 0.18         # jitters the rim: no analytic ellipse edge
+                if subtle:
+                    k *= 0.45
                 if light and dy < -ry * 0.35:
-                    k = min(0.95, k + 0.25)                    # lit top edge: reads as a stone
+                    k = min(0.95, k + 0.25)             # lit top edge: reads as a stone
                 c = mix(px[x, y][:3], PEBBLE_LIGHT if light else PEBBLE_DARK, k)
                 px[x, y] = (c[0], c[1], c[2], 255)
     return img
@@ -260,51 +307,72 @@ def paint_sky(w=512, h=128):
     return img
 
 
-# ─── sign_finish: finish pennant on a post, 64x320 @ 100 PPU ───
+# ─── sign_finish: finish banner on a post, 64x320 @ 100 PPU ───
 # The piece box is 0.18 x 0.90 m (LevelTest1 "FinishSign"), aspect 1:5, and StaticPlatform draws it
 # Sliced, so the canvas is painted 1:5 and comes out undistorted.
+#
+# Redesign 19.09 after the eye check. The old canvas had a 16 px mast (nearly half the 0.18 m box)
+# and a 28 px pennant that tapered to a 1 px point: at gameplay scale it read as a rigid slalom
+# pole, not as a finish. Now the mast is 11 px, the banner 46 px (0.13 m) of a bold red/cream
+# chequer - the one finish motif that survives being 3 x 7 screen pixels - with a squared tag end.
+# The chequer is clipped by the banner silhouette, and every diagonal is an integer step, so the
+# edge cannot wobble.
 def paint_sign_finish(w=64, h=320):
     img = new_image(w, h)
     px = img.load()
-    pole_l, pole_r = 20, 35
-    flag_top, flag_bottom = 8, 160       # ~48% of the post: the pennant has to read at ~16 screen px
-    stripe_top, stripe_bottom = 132, 150
-    rect_right, tip = 43, 63
-    foot_top = h - 10
-    outline = 2
-    half = (flag_bottom - flag_top) * 0.5
-    tip_y = (flag_top + flag_bottom) * 0.5
+    post_l, post_r = 7, 17
+    ban_left = post_r + 1
+    ban_top, ban_bottom = 10, 196
+    ban_full_r, ban_fly_r = 46, 61
+    half_full = (ban_bottom - ban_top) // 2          # 93 px: the banner is 0.52 m of the 0.90 m post
+    half_fly = 40                                    # squared tag end, not a needle tip
+    cell_w, cell_h = 23, 62
+    cap_bottom = 2
+    foot_top = h - 14
+    mid_y = (ban_top + ban_bottom) // 2
+
+    def half_at(x):
+        if x <= ban_full_r:
+            return half_full
+        t = (x - ban_full_r) / float(ban_fly_r - ban_full_r)
+        return half_full - int(round(t * (half_full - half_fly)))
+
     for y in range(h):
         for x in range(w):
             c = None
-            # post, with a wider foot so it does not look pasted onto the grass line
-            if pole_l <= x <= pole_r:
-                if x == pole_l:
+            # mast: lit left edge, dark right edge
+            if post_l <= x <= post_r:
+                if x == post_l or x >= post_r:
                     c = POLE_DARK
-                elif x <= pole_l + 2:
+                elif x <= post_l + 2:
                     c = POLE_LIGHT
-                elif x >= pole_r - 1:
-                    c = POLE_DARK
                 else:
                     c = POLE
-            if y >= foot_top and 20 <= x <= 43:
-                c = POLE_DARK if (x <= 21 or x >= 42 or y >= h - 2) else POLE
-            # pennant: rectangle at the mast, then a taper to a point
-            if flag_top <= y <= flag_bottom and x > pole_r:
-                if x <= rect_right:
-                    inside = True
-                    on_edge = (y - flag_top) < outline or (flag_bottom - y) < outline
-                else:
-                    t = (x - rect_right) / float(tip - rect_right)
-                    span = 1.0 - t
-                    d = abs(y - tip_y)
-                    inside = d <= half * span
-                    on_edge = inside and (abs(d - half * span) < outline or x > tip - outline)
-                if inside:
-                    if stripe_top <= y <= stripe_bottom:
-                        c = FLAG_LIGHT
-                    else:
-                        c = FLAG_DARK if on_edge else FLAG
+            # foot: wider than the mast and centred on it (the old foot sat to the right of the mast,
+            # which is what made the base read as a pasted-on block)
+            if y >= foot_top and post_l - 3 <= x <= post_r + 6:
+                c = POLE_DARK if (x <= post_l - 2 or x >= post_r + 5 or y >= h - 2) else POLE
+            # cap: a bare post top reads as a cut stick
+            if y <= cap_bottom and post_l - 1 <= x <= post_r + 1:
+                c = CAP if y < cap_bottom else CAP_DARK
+            # banner: chequer clipped by the tapering silhouette
+            if x >= ban_left and ban_top <= y <= ban_bottom:
+                d = abs(y - mid_y)
+                half = half_at(x)
+                if d <= half:
+                    row = min(2, (y - ban_top) // cell_h)
+                    col = (x - ban_left) // cell_w
+                    c = FLAG if (row + col) % 2 == 0 else FLAG_LIGHT
+                    if d >= half - 1 or x >= ban_fly_r:
+                        c = FLAG_DARK                     # rim: the silhouette holds at small scale
+                    if x == ban_left:
+                        c = mix(FLAG, POLE_DARK, 0.55)    # cloth presses against the mast
+                    elif x == ban_left + 1:
+                        c = FLAG_DARK                     # the mast casts onto its own cloth
+                    # two metal rings at the hoist: without an attachment cue the cloth reads as a
+                    # slab glued to the post (eye check 19.09)
+                    if x <= ban_left + 4 and (y <= ban_top + 2 or y >= ban_bottom - 2):
+                        c = CAP_DARK
             if c is not None:
                 px[x, y] = (c[0], c[1], c[2], 255)
     return img

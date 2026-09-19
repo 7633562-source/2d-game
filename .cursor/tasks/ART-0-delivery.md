@@ -137,3 +137,44 @@ legacy source art.
 
 No `.cs` file of the simulation was touched; the change is data plus one editor-only check tool.
 `git status` shows only new files and this README/delivery card.
+
+## Repaint 19.09 - the eye check found two pictures below the ship bar
+
+ART-0's own tests passed, but the acceptance here is a PICTURE, so the four canvases were viewed at
+native resolution and at gameplay scale (contact sheets in `Trials/Runs/art-0-repaint-2026-09-19/`).
+Two defects came out that no byte, guid or seam test can see.
+
+`ground_fill` - the root fibres were 6 straight bars of constant thickness with blunt squared ends,
+52-130 px long and 5 rows tall. Measured before: 12+ rows in the top quarter carried a dark run
+>= 20 px (rows 21-30 and 37-49, runs up to 84 px) - they read as rectangular smudges in the soil.
+Now: 7 tapered fibres that meander (2 px thinning to 1 px, strength fading 0.30 -> 0.04 toward the
+tip, drifting `+-1` px), cracks fade in and out (`0.26 + 0.34*sin(pi*t)` instead of a constant 0.70
+mix) and fork, and stones get a 1-2 px contact shadow plus a jittered rim so the analytic ellipse
+edge is gone. Measured after: 2 rows with a run >= 20 px, both 20-21 px, and the eye now reads
+tapered meandering fibres instead of bars.
+
+`sign_finish` - the old canvas read as a rigid slalom pole: a 16 px mast (almost half the 0.18 m box)
+and a 28 px pennant tapering to a 1 px point, with one white stripe that cut the shape in two. Now:
+an 11 px mast with a metal cap, a 46 px (0.13 m) banner of a red/cream chequer clipped by the
+silhouette, a squared tag end (not a needle), regular integer steps on the taper, a 2 px mast-anchored
+shadow on the cloth and two metal rings at the hoist. The chequer is the one finish motif that still
+reads when the flag is 3 x 7 screen pixels: at 16x81 and 8x40 px on screen the chequer is legible, at
+5x25 px it degrades to a two-tone mark (the flag is 2-3 px wide there - nothing more can survive).
+
+Contracts kept: file names, sizes (`1024x256`, `64x320`), PPU (`128`, `100`), every `.meta` byte
+unchanged, and the seamless X wrap of the tiled surfaces (fill seam 8.42 vs inner 8.68, cap 0.14 vs
+3.30, sky 0.75 vs 0.63). Re-running `Tools/gen-level-textures.py` after the repaint changed exactly
+two PNGs and left the other nine byte-identical (`git status` names only `ground_fill.png` and
+`sign_finish.png`; the LANCZOS material path and the guids are deterministic).
+
+Evidence: `Logs/art-import-check-2026-09-19-repaint.log` - `UNITY EXIT=0`, `failures=0`,
+`Level/ground_fill via Load<Sprite> rect=1024x256 ppu=128`, `Level/sign_finish via Load<Sprite>
+rect=64x320 ppu=100`, `LevelArt.HasFill/HasCap/HasSign/Sky()/Fill()/Cap()/Sign()` all OK, and
+`TILE ground_cap ... -> REPEATS`, `TILE ground_fill box=32x2m period=256px colourDiffAtOneTile=0,0000
+-> REPEATS`. Physics: no `.cs` touched, no collider or size involved.
+
+Still open, unchanged by this cycle: the per-part sprites (`ART-1b`), the four `ArtLibrary` stubs
+(the seven material tiles are reachable but nothing draws them), the 32 m slab stretching the fill
+(`LevelArt.UseTiledFill()` + `ArtLibrary.Tiled` is the declared path and the fill is ready for it),
+and the legacy material tiles' approximate tiling (item 5 above).
+
