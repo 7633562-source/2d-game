@@ -132,6 +132,31 @@ def new_image(w, h, rgba=True):
 # draw at 1:1. Sliced stretches the whole canvas onto the piece, therefore the texel density is
 # texture_width / piece_width: 128 px/m on an 8 m slab, 32 px/m on the 32 m "Behind" slab.
 # Painting stays horizontal-dominant so a wide slab degrades without turning shapes into smears.
+#
+# 18th pass (20.09): the stone layer was the repeat's handle (see the block above the stone loop).
+# The three numbers below are the whole change - a stone core low enough to stay texture instead of
+# an object, and a spacing rule that refuses a second strong stone beside a strong one.
+FILL_STONE_CORE = 0.60          # was min(0.85, ...): the core of a light stone
+FILL_STONE_CORE_DARK = 0.72     # dark stones were the same 0.85
+FILL_STONE_PAIR_GAP = 10.0      # px: two strong stones are never closer than their boxes + this
+
+
+def stone_paired(cx, cy, rx, ry, placed):
+    """True when a stone of this box lands on top of an already placed strong stone.
+
+    Two high-contrast inclusions close together are a CONFIGURATION - the eye recognises it coming
+    round, which is what makes the 8 m repeat of `ground_fill` visible on a 16 m or 32 m slab
+    (measured 20.09, Tools/art0-fill-anchor-probe.py + the two eye reads in
+    Tools/art0-fill-strip-ab.py). One lone stone does not read as a repeat; a pair does.
+    """
+    for px0, py0, prx, pry in placed:
+        pairs = ((cx - px0) / (rx + prx + FILL_STONE_PAIR_GAP),
+                 (cy - py0) / (ry + pry + FILL_STONE_PAIR_GAP))
+        if abs(pairs[0]) < 1.0 and abs(pairs[1]) < 1.0:
+            return True
+    return False
+
+
 def paint_ground_fill(w=1024, h=256):
     img = new_image(w, h)
     px = img.load()
@@ -223,12 +248,39 @@ def paint_ground_fill(w=1024, h=256):
                             bx = int(cx + i + j) % w
                             cb = mix(px[bx, by][:3], PEBBLE_DARK, 0.26 * (1.0 - j / float(blen)))
                             px[bx, by] = (cb[0], cb[1], cb[2], 255)
-    for _ in range(48):                                 # stones, drawn in their own box
+    # 18th pass (20.09). The fill is 8 m wide and every ground piece wider than that draws it Tiled
+    # (LevelGenerator.chunkWidth = 16 m -> the same pixels come round twice, the 32 m "Behind" slab
+    # -> four times), so the player walks past this repeat for the whole game. Measured on the
+    # shipped bytes (Tools/art0-fill-anchor-probe.py, radius 6, |resid| >= 12, area >= 8): the tile's
+    # own noise floor is 13.1 levels and its strongest blobs stood 2.8-3.2x above it, and every one
+    # of them is a LIGHT stone - a core of PEBBLE_LIGHT mixed at 0.85, i.e. a +41 level step. Two
+    # independent eye reads of the tile repeated at 1:1 (Tools/art0-fill-strip-ab.py) named the same
+    # handles and nothing else: a PAIR of light pebbles and two PAIRS of dark dots. No lone stone
+    # was named ("одиночные размытые включения считываются намного слабее, чем контрастные пары"),
+    # and the strata/general tone were explicitly cleared ("тайлинг по общему тону и полосам
+    # выполнен бесшовно"). So the handle is a GROUPED, RECOGNISABLE configuration of high-contrast
+    # stones, not the tile's structure.
+    #
+    # The stones are therefore accents now, not objects: a lower core, a weaker lit edge, and a
+    # spacing rule that refuses to place a strong stone beside another strong one. Strata, grain,
+    # roots, cracks, stone count and the mean soil colour are untouched, which is what keeps the
+    # single-tile look (an 8 m plateau shows exactly one tile) the picture it was.
+    strong = []                                     # (cx, cy, rx, ry) of every non-subtle stone
+    stones = 0
+    tries = 0
+    while stones < 48 and tries < 600:              # stones, drawn in their own box
+        tries += 1
         cx, cy = rng.uniform(0.0, w), rng.uniform(h * 0.10, h * 0.97)
         ry = rng.uniform(1.5, 4.5)
-        rx = ry * rng.uniform(1.2, 2.2)                 # wider than tall, never a circle
+        rx = ry * rng.uniform(1.2, 2.2)             # wider than tall, never a circle
         light = rng.random() < 0.4
-        subtle = rng.random() < 0.22                    # a few stones barely leave the soil tone
+        subtle = rng.random() < 0.30                # a few stones barely leave the soil tone
+        if not subtle and stone_paired(cx, cy, rx, ry, strong):
+            continue                                # a pair is the one thing the eye names
+        if not subtle:
+            strong.append((cx, cy, rx, ry))
+        stones += 1
+        core = FILL_STONE_CORE if light else FILL_STONE_CORE_DARK
         if not subtle:
             # Contact shadow first, offset one pixel down-right and slightly larger than the
             # stone: what survives is a 1-2 px crescent, i.e. the stone sits IN the soil.
@@ -252,12 +304,12 @@ def paint_ground_fill(w=1024, h=256):
                 if d >= 1.0:
                     continue
                 x = int(cx + dx) % w
-                k = min(0.85, (1.0 - d) * 1.45)
+                k = min(core, (1.0 - d) * 1.45)
                 k *= 0.90 + rng.random() * 0.18         # jitters the rim: no analytic ellipse edge
                 if subtle:
                     k *= 0.45
                 if light and dy < -ry * 0.35:
-                    k = min(0.95, k + 0.25)             # lit top edge: reads as a stone
+                    k = min(core * 1.10, k + 0.15)      # lit top edge: reads as a stone
                 c = mix(px[x, y][:3], PEBBLE_LIGHT if light else PEBBLE_DARK, k)
                 px[x, y] = (c[0], c[1], c[2], 255)
     return img

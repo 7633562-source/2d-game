@@ -33,3 +33,22 @@ composited at the nine positions of the tile lattice, so it is seamless by const
 `.meta` field unchanged, 561 731 B -> 161 855 B. Measured wrap step 1.06/1.10 levels, at the median
 of the tile's own 511 edge pairs; frames `art0leaffield` (buildGuid `b2c011858b104923bc82a57262ea59f8`),
 report `Trials/Runs/art-0-leaf-field-report.md`.
+
+Status 20.09.2026 (ART-0, eighteenth pass): `ground_fill` - the stone layer stops making the 8 m
+repeat visible. The fill is drawn `Tiled` on every slab wider than one tile (LevelGenerator.chunkWidth
+= 16 m -> the same pixels twice; the 32 m "Behind" plate -> four times), and the tile's own strongest
+blobs stood 2.78-3.20x above its 13.1 level grain - every one of them a LIGHT stone (core
+PEBBLE_LIGHT mixed at 0.85). Two independent eye reads of the tile repeated at 1:1 named the handles
+and nothing else: a PAIR of light pebbles and two PAIRS of dark dots; no lone stone was named. So the
+repaint changes the stone layer only: `FILL_STONE_CORE` 0.60 / `FILL_STONE_CORE_DARK` 0.72 (were
+0.85), a weaker lit edge, `subtle` 0.22 -> 0.30, and `stone_paired()` refuses to place a strong stone
+beside another strong one (gap 10 px). Strata, grain, roots, cracks, stone count and the mean soil
+colour are untouched - mean rgb 93.1 67.3 36.5 on both sides, grain 13.14 -> 13.11, 447 090 ->
+446 743 B, one file rewritten and eleven pictures + twelve `.meta` byte-identical
+(`python Tools/art0-byte-snapshot-17th.py before18|after18`). Strongest blob 2.78x -> 2.19x grain and
+0 blobs at >= 3x (was 4); the 32 m plate's max residual 7.13x -> 5.22x grain
+(`python Tools/art0-fill-anchor-probe.py`). Blind pairwise reads (`Tools/art0-fill-strip-ab.py`, sides
+shuffled, `map.txt` opened after each pick): no read ever named the new bytes, two of three on the
+1:1 panel named the HEAD bytes, and the side-flipped sheet (seed 11, NEW on the RIGHT) picked
+LEFT = HEAD, so the verdict is not a side bias; both control pairs (HEAD against HEAD) read "no
+difference". Frames `art0fill18`, report `Trials/Runs/art-0-fill-18th-report.md`.

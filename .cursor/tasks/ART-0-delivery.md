@@ -1099,5 +1099,85 @@ recorded as such: `Tools/art0-bark-rhythm-probe.py` found no repeat signature at
 because that still's lower-middle region carries the crown's cut planes over the trunk - so the bark
 verdict rests on the panel read above, not on that frame.
 
+## Eighteenth pass 20.09 (artist) - `ground_fill`: the stone layer stops giving the 8 m repeat a handle
+
+Editor closed, bash only, HEAD `35f64b36`. Both picture gates re-run on today's bytes before anything
+was changed: `art0-import-gate.sh` -> `unity exit=0`, 0 `ART-IMPORT-CHECK FAIL`, the four `Level/*`
+through `Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100), the seven
+`Art/<key>` `512x512 readable=True`, `TILE ground_fill box=32x2m native=8m period=256px
+colourDiffAtOneTile=0,0000 -> REPEATS`; `art1-gate.sh` -> `ART-1A-CHECK end failures=0`, with `flower`
+and `UI icons` the only labelled gaps. The five brief items are re-proved on today's bytes.
+
+**What was left open and is now measured.** The card's "wide-slab fill's look" (`UseTiledFill()` +
+`ArtLibrary.Tiled` is the declared path) was the last item of the fill that no eye had ever judged.
+The fill is 8 x 2 m and `StaticPlatform` draws it `Tiled` on every piece wider than that, so
+`LevelGenerator.chunkWidth = 16` shows the same pixels **twice** and the 32 m `Behind` plate
+(`LevelTest1.cs:1066`) **four times**, for the whole length of the game. The tile is seamless
+(`seam x 8.32 vs inner 8.34`), so the question is not a seam but what the eye can recognise coming
+round again. `Tools/art0-fill-anchor-probe.py` (local mean radius 6, `|resid| >= 12`, area >= 8,
+salience = peak |resid| / the tile's own p95 grain) put the strongest blob at **2.78-3.20x** the
+13.1-level grain with 4 blobs at >= 3x, and every one of them a **light** stone (`PEBBLE_LIGHT` mixed
+at 0.85 = a +41 level step). Two independent reads of the tile repeated at 1:1
+(`Tools/art0-fill-strip-ab.py`) named the same handles and nothing else - a **pair of light pebbles**
+and **two pairs of dark dots** - and cleared the structure: "тайлинг по общему тону и полосам выполнен
+бесшовно"; the rule they gave is "одиночные размытые включения считываются намного слабее, чем
+контрастные пары".
+
+**The change.** One block of `Tools/gen-level-textures.py`, the stone pass of `paint_ground_fill`:
+`FILL_STONE_CORE = 0.60` / `FILL_STONE_CORE_DARK = 0.72` (both were 0.85), a weaker lit edge
+(`min(core * 1.10, k + 0.15)`), `subtle` 0.22 -> 0.30, and `stone_paired()` - a new strong stone is
+refused inside an ellipse of the two boxes expanded by `FILL_STONE_PAIR_GAP = 10` px, so the pairs the
+reads named can no longer be drawn. The roots and cracks are painted before the stones and consume the
+same `Random(104)` draws, so their pixels are untouched; strata, grain, stone count and mean colour too
+(mean rgb 93.1 67.3 36.5 on both sides). After: strongest blob **2.19x** grain, **0** blobs at >= 3x,
+the 32 m plate's worst residual 7.13x -> **5.22x** its grain.
+
+**Acceptance = the pairwise blind read, on the asset and on the shipped frame.** Four sheets, sides /
+order random, `map.txt` opened after each pick: on the 1:1 panel two of three reads named the HEAD
+bytes ("пара тёмных точек ... пара светлых камушков"; "RIGHT - парные тёмные точки ... парные светлые
+камешки"), one could not separate them; on the 32 m panel two of three named HEAD; **both** control
+pairs (HEAD against HEAD) read "no difference"; and the side-flip sheet (seed 11, NEW on the RIGHT)
+picked **LEFT = HEAD**, so the verdict is not a side artefact. In the shipped frame
+(`Tools/art0-frame-band-pair.py`, the LEVEL row's soil band, 1:1, order random) the read that located
+a difference named the **HEAD** build as the repetitive one and described the new strip as without
+those groups ("в верхней полосе эти группы отсутствуют"). No read, on any sheet, ever named this
+pass's bytes. What it is NOT: the tile is still identical every 8 m - handles removed, period still
+there.
+
+**Determinism.** `python Tools/gen-level-textures.py ground_fill` rewrote exactly one file
+(`Tools/art0-byte-snapshot-17th.py before18|after18`): `ground_fill.png` 447090 -> 446743 B, md5
+`bfed58fc14334159050be30536c593bd` -> `fc6a1e37893559a7cf9e80a6806f8877`. The other ten pictures and
+all twelve `.meta` files are byte-identical, `ground_fill.png.meta` md5 unchanged, and a second run of
+the generator reproduces the same md5. Both gates re-run after the last edit: `art0-import-gate.sh`
+unity exit=0 failures=0, `art1-gate.sh` failures=0.
+
+**The frame.** One build, one run, bash only (`art-gallery-capture.sh art0fill18`):
+`PREVIEW_BUILD_OK ... scenes=12 errors=0`, 8 stills + 165-frame / 16.5 s 1080p pan, 0 capture
+failures, `real=29 missing=11 dressed=5567`, buildGuid `ad2baf2279fd402f8e2f54026ed20dc3`. Against
+`art0wrap17` (`b73a4a9f44784f73af3dd705427723b7`, same lenses, same `GALLERY-BUILD predress bounds`):
+`tree` **pixel-identical** (that lens draws no ground - the control), `level` 4778 px in rows 680-799
+(the slab), `photo`/`placeholder` 2742 px each in rows 560-639 only (the floor line),
+`materials` 7696 px in rows 640-919 (its swatch band 480-630 untouched), `human` 10537 px in rows
+720-1079 (the floor of that row), `fire` 3682 px in rows 920-1079 (the floor; the 288 px at rows
+880-919 x 1375-1398 are the time-driven sparks recorded by the 15th pass, not claimed), `apple`
+6137 px of which 842 px sit in the crown - the plant lane's recorded build-to-build wobble, not
+claimed. `python Tools/art0-still-row-split.py` is the new tool that says where a difference sits
+band by band; the change is broad in the catalogue only because the fill **is** the floor of every row.
+
+**Physics.** No `.cs` under `Assets/` touched. The only `Assets/` file that changed is
+`Assets/Resources/Level/ground_fill.png` plus the status text in `Resources/Level/README.txt`; the
+picture carries no collider and `spriteGenerateFallbackPhysicsShape` stays 0. `Build/Headless` was
+neither rebuilt nor re-run. Full numbers: `Trials/Runs/art-0-fill-18th-report.md`; frames
+`art0fill18` (stills + `art0fill18.mp4`).
+
+**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the sign at
+native size only in the LEVEL row and `filterMode Point` for the pixel art (the "stretched checks" a
+frame read named are the lens's resampling - the art's cells are square by construction,
+`paint_sign_finish(cell_w=15, cell_h=15)` at PPU 100 = 0.15 x 0.15 m); sparks/smoke/embers in the FIRE
+row; the fill's remaining 5.22x residual on the 32 m plate (a 16 m native tile would halve the repeat
+count and change the Sliced path of every slab <= 8 m, i.e. every scene - the level lane's call, not a
+one-change cycle).
+
+
 
 
