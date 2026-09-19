@@ -36,6 +36,7 @@ import os
 import random
 import re
 import shutil
+import sys
 
 import numpy as np
 from PIL import Image
@@ -257,27 +258,171 @@ def paint_ground_fill(w=1024, h=256):
 # ─── ground_cap: grass strip, 128x14 @ 100 PPU = 1.28 x 0.14 m (cap height) ───
 # 0.14 m is fixed by StaticPlatform.SpawnSurfaceCap (capHeight = 0.14f), so the strip has to read
 # as grass inside 14 px: uneven blade silhouette, light blade tips, a dark root line at the bottom.
+#
+# Repaint 19.09 after the eye check on the tiled preview (Trials/Runs/ART-0-frames/cap-on-ground.png,
+# 8 m slab at game scale). Two defects were visible in the picture and measured in the pixels:
+#   1. the silhouette was flat. The old painter kept the top at 1..5 px of the 14, so the strip read
+#      as a green ribbon / rubber edge, not grass. Blades are now 3..11 px, grouped in clumps.
+#   2. one blade was painted full-height in GRASS_BLADE_DARK and stood 12.7 levels below both of its
+#      neighbours (mean neighbour step 0.45, so 28x the grain). Tiled every 1.28 m along every slab
+#      that single column read as a regular tick - a ruler mark - which is what the preview showed.
+#      Dark tufts are now drawn as runs (2..5 px wide) and a guard pass removes any column that is
+#      left standing >= 3 levels below BOTH of its neighbours.
+# The grain itself must stay: blade tips have to differ from their neighbours by more than the dark
+# tufts do, otherwise the strip flattens into a band again.
+GRASS_TUFT_MIN = 5          # px: shortest blade tip (9 px of 14 below it are still grass)
+GRASS_TUFT_MAX = 8          # px: tallest blade tip
+GRASS_ROOT_ROWS = 4         # px: unbroken dark line where the grass meets the soil
+
+
+def _cap_column_colours(h, w, px):
+    """Per-column brightness over the opaque pixels: the tick detector's input."""
+    lum, cnt = [0.0] * w, [0] * w
+    for x in range(w):
+        s = 0.0
+        for y in range(h):
+            c = px[x, y]
+            if c[3] > 0:
+                s += (c[0] + c[1] + c[2]) / 3.0
+                cnt[x] += 1
+        lum[x] = s / cnt[x] if cnt[x] else 0.0
+    return lum, cnt
+
+
+def _cap_de_tick(img, rounds=3):
+    """Remove single columns that stand out dark from both neighbours, keeping their height.
+
+    A tiled strip repeats whatever a single column does every 1.28 m, so one blade painted
+    darker than its neighbours turns into a regular ruler mark. The pass lifts only the colour
+    of such a column (never its silhouette, never a column inside a wider dark run), so the
+    strip keeps its tufts and loses the tick. Returns (image, columns touched).
+    """
+    w, h = img.size
+    start = list(_cap_column_colours(h, w, img.load()))
+    fixed = []
+    px = img.load()
+    for _ in range(rounds):
+        lum, cnt = _cap_column_colours(h, w, px)
+        worst = None
+        for x in range(w):
+            if cnt[x] == 0:
+                continue
+            a, b = lum[(x - 1) % w], lum[(x + 1) % w]
+            drop = min(a, b) - lum[x]
+            if drop > 3.0 and (worst is None or drop > worst[1]):
+                worst = (x, drop)
+        if worst is None:
+            break
+        x, boost = worst[0], worst[1]
+        target = (lum[(x - 1) % w] + lum[(x + 1) % w]) * 0.5
+        fixed.append(x)
+        for y in range(h):
+            c = px[x, y]
+            if c[3] == 0:
+                continue
+            l = (c[0] + c[1] + c[2]) / 3.0
+            if l <= 0.1:
+                continue
+            k = 1.0 + (target - l) / l          # one multiplicative step per column
+            px[x, y] = (min(255, int(round(c[0] * k))), min(255, int(round(c[1] * k))),
+                        min(255, int(round(c[2] * k))), c[3])
+    return img, fixed, start
+
+
+def _cap_taper(tops, h=14, rise=2, dip=3, rounds=4):
+    """Turn a needle into a clump: no blade may stand `rise` px above both of its neighbours.
+
+    The tile repeats every 1.28 m, and a single column jutting out of its neighbours is read as the
+    same stalk at every repeat - the ruler mark the eye check caught (ART-0 frames, 19.09). The
+    constraint is applied to the blade heights, not to the tops: a column that is 4 px taller than
+    both of its neighbours is one pixel wide at its tip, i.e. a needle, however smooth the tops
+    look. `dip` bounds how far a notch may cut down into the clump, so gaps stay notches and not
+    slots. Grass tapers; a needle does not.
+    """
+    w = len(tops)
+    height = [h - t for t in tops]
+    for _ in range(rounds):
+        changed = False
+        for x in range(w):
+            a, b = height[(x - 1) % w], height[(x + 1) % w]
+            hi = min(a, b) + rise
+            if height[x] > hi:
+                height[x] = hi
+                changed = True
+            elif height[x] < max(1, max(a, b) - dip):
+                height[x] = max(1, max(a, b) - dip)
+                changed = True
+        if not changed:
+            break
+    return [h - v for v in height]
+
+
 def paint_ground_cap(w=128, h=14):
     img = new_image(w, h)
     px = img.load()
-    tall = wrap_noise(w, 6, 201, octaves=3, gain=0.55)     # clumps of taller grass
-    teeth = wrap_noise(w, 32, 203, octaves=2, gain=0.5)    # per-blade variation
-    shade = wrap_noise(w, 16, 202, octaves=3, gain=0.5)
+    clump = wrap_noise(w, 7, 211, octaves=3, gain=0.62, growth=2.7)    # clumps of one height
+    blade = wrap_noise(w, 41, 212, octaves=2, gain=0.45, growth=2.6)   # blade-to-blade variation
+    shade = wrap_noise(w, 16, 202, octaves=3, gain=0.50)               # light falling across the strip
+    tip = wrap_noise(w, 23, 213, octaves=3, gain=0.50)                 # which tips catch the light
+    dark = wrap_noise(w, 11, 215, octaves=1, gain=0.5)                 # dark tufts, ~0.31 m wide runs
+    span = float(GRASS_TUFT_MAX - GRASS_TUFT_MIN)
+
+    tops = [0] * w
     for x in range(w):
-        f = tall(x) * 0.62 + teeth(x) * 0.38
-        top = int(round(1.0 + f * 4.2))          # 1..5: uneven top, sky shows above short blades
-        top = max(0, min(5, top))
-        dark = teeth(x) > 0.87                   # a few very dark blades break the ribbon
-        for y in range(h):
-            if y < top:
-                continue
-            if y >= h - 3:
-                c = mix(GRASS_ROOT, GRASS_BODY, 0.2 + shade(x) * 0.35)
+        # The clump field carries the low frequencies and the blade field the high ones. The tile
+        # is only 1.28 m of ground, so a dominant low-frequency hump would come back at every
+        # repeat as a wave (eye check, 19.09): the weight sits on the blade field instead.
+        f = clump(x) * 0.50 + blade(x) * 0.50
+        t = int(round(GRASS_TUFT_MIN + f * span))
+        if blade(x) < 0.16:                     # a gap in the clump: sky reaches the root line
+            t = max(1, t - 3)
+        tops[x] = max(1, min(GRASS_TUFT_MAX, t))
+    tops = _cap_taper(tops)
+    for x in range(w):
+        top = tops[x]
+        darkx = dark(x) > 0.86 and tops[x] < GRASS_TUFT_MAX - 1
+        lit = 0.55 + 0.45 * tip(x)
+        for y in range(top, h):
+            if y >= h - GRASS_ROOT_ROWS:
+                c = mix(GRASS_ROOT, GRASS_BODY, 0.24 + shade(x) * 0.30)
             elif y <= top + 1:
-                c = mix(GRASS_TIP, GRASS_BLADE, 0.3 + shade(x) * 0.5)
+                c = mix(GRASS_TIP, GRASS_BLADE, 0.20 + (1.0 - lit) * 0.35)
+            elif darkx:
+                c = mix(GRASS_BODY, GRASS_BLADE_DARK, 0.62 + shade(x) * 0.16)
             else:
-                c = GRASS_BLADE_DARK if dark else mix(GRASS_BODY, GRASS_BLADE, shade(x) * 0.65)
+                t = (y - top) / float(max(1, h - GRASS_ROOT_ROWS - top))
+                c = mix(GRASS_BLADE, GRASS_BODY, min(1.0, t) * (0.35 + shade(x) * 0.30))
+                if y <= top + 3:
+                    c = mix(c, GRASS_TIP, (0.30 + 0.25 * tip(x)) * (1.0 - (y - top) / 3.0))
+                    c = mix(c, GRASS_BLADE_DARK, 0.10)     # a dark edge under each lit tip
             px[x, y] = (c[0], c[1], c[2], 255)
+
+    # Root line: every column is opaque at the bottom, so tiled grass never breaks the soil line.
+    # The boundary is ragged on purpose (eye check, 19.09: a clean straight line between green and
+    # brown reads as two pasted strips). The last row carries soil-toned pixels where the grass
+    # does not cover - short runs, bounded by the same de-rhythm rule as the blades - and one row
+    # up a few roots dip into it. Nothing here changes the silhouette: the box stays 0.14 m.
+    edge = wrap_noise(w, 10, 218, octaves=1, gain=0.5)
+    edge2 = wrap_noise(w, 17, 219, octaves=1, gain=0.5)
+    for y in range(h - GRASS_ROOT_ROWS, h):
+        for x in range(w):
+            c = mix(GRASS_ROOT, GRASS_BODY, 0.24 + shade(x) * 0.30)
+            soil = mix(DIRT_TOP, DIRT_BASE, 0.45)
+            if y == h - 1:
+                # grass fingers over soil: ~6 px runs of each, so the contact line is broken
+                c = mix(c, soil, 0.05 if edge((x + 37) % w) > 0.52 else 0.85)
+            elif y == h - 2:
+                c = mix(c, soil, 0.45 if edge2((x + 11) % w) > 0.80 else 0.06)
+            else:
+                c = mix(c, DIRT_TOP, 0.08)
+            px[x, y] = (c[0], c[1], c[2], 255)
+
+    img, fixed, before = _cap_de_tick(img)
+    if fixed:
+        px = img.load()
+        after, _ = _cap_column_colours(h, w, px)
+        print("ground_cap de-tick: lifted columns %s (%.1f -> %.1f levels, neighbours %.1f / %.1f)"
+              % (fixed, before[fixed[0]], after[fixed[0]], after[fixed[0] - 1], after[(fixed[0] + 1) % w]))
     return img
 
 
@@ -427,10 +572,46 @@ def new_guid(rng):
     return "".join(rng.choice("0123456789abcdef") for _ in range(32))
 
 
+def existing_guid(path):
+    """The guid already in <path>.meta, if any.
+
+    A repaint must not churn the import identity: a new guid makes Unity re-import the asset as a
+    different one, which breaks every reference to it (and shows up as a needless diff in a cycle
+    that is supposed to change pixels only).
+    """
+    meta = path + ".meta"
+    if not os.path.exists(meta):
+        return None
+    with open(meta, "r", encoding="utf-8") as fh:
+        m = re.search(r"^guid: ([0-9a-f]+)$", fh.read(), re.MULTILINE)
+    return m.group(1) if m else None
+
+
 def save(img, path, pixels_per_unit, readable, alpha, guid_rng):
     img.save(path, "PNG", optimize=True)
-    write_meta(path, pixels_per_unit, readable, alpha, new_guid(guid_rng))
+    write_meta(path, pixels_per_unit, readable, alpha, existing_guid(path) or new_guid(guid_rng))
     return os.path.getsize(path)
+
+
+def cap_tick_report(img):
+    """The tiled-strip defect test: does one column stand out from both of its neighbours?
+
+    The cap repeats every 1.28 m, so a single column darker than its neighbours is a ruler mark,
+    not a blade. Only the opaque pixels count: a blade is short where the sky shows through, and
+    a mean that includes those transparent rows would report height, not colour.
+    Returns (worst stand-out, column, mean neighbour step).
+    """
+    a = np.asarray(img.convert("RGBA")).astype(np.float64)
+    rgb, alpha = a[:, :, :3].mean(axis=2), (a[:, :, 3] > 0)
+    col = (rgb * alpha).sum(axis=0) / np.maximum(alpha.sum(axis=0), 1)
+    height = alpha.sum(axis=0).astype(np.float64)
+    w = col.shape[0]
+    worse = np.minimum(col[(np.arange(w) - 1) % w], col[(np.arange(w) + 1) % w]) - col
+    spike = height - np.maximum(height[(np.arange(w) - 1) % w], height[(np.arange(w) + 1) % w])
+    step = np.abs(np.diff(col))
+    i = int(worse.argmax())
+    return float(worse.max()), int(i), float(step.mean()), float(spike.max())
+
 
 
 def seam_error(img):
@@ -439,12 +620,14 @@ def seam_error(img):
     A white-noise grain makes column 0 differ from the last column by the same amount two
     neighbouring columns differ by, so the seam is invisible; the structured strata/blades wrap
     exactly by construction. Reported as (seam jump, typical inner jump), mean over all rows.
+    Transparent rows are skipped: their RGB is (0,0,0) and would count as a black step.
     """
-    px = img.load()
-    w, h = img.size
-    seam = sum(abs(px[0, y][i] - px[w - 1, y][i]) for y in range(h) for i in range(3)) / float(h * 3)
-    inner = sum(abs(px[x, y][i] - px[x + 1, y][i])
-                for x in range(0, w - 1, 7) for y in range(h) for i in range(3)) / float(len(range(0, w - 1, 7)) * h * 3)
+    a = np.asarray(img.convert("RGBA")).astype(np.float64)
+    rgb, alpha = a[:, :, :3], (a[:, :, 3] > 0)
+    w = rgb.shape[1]
+    hit = alpha[:, 0] & alpha[:, w - 1]                 # rows where both edges are painted
+    seam = float(np.abs(rgb[hit, 0] - rgb[hit, w - 1]).mean()) if hit.any() else 0.0
+    inner = float(np.abs(np.diff(rgb, axis=1)).mean())
     return seam, inner
 
 
@@ -506,21 +689,37 @@ def main():
     guid_rng = random.Random(20260918)
     rows = []
 
+    # `python Tools/gen-level-textures.py ground_cap` repaints one file and leaves the other
+    # assets byte-identical (their guids are reused, so Unity sees no change at all).
+    want = set(sys.argv[1:])
+    if want:
+        unknown = want - set(["ground_fill", "ground_cap", "sky", "sign_finish"]) - set(MATERIALS)
+        assert not unknown, "unknown key(s): %s" % sorted(unknown)
+
     level = [
-        ("ground_fill", paint_ground_fill(), 128, False, False),
-        ("ground_cap", paint_ground_cap(), 100, False, True),
-        ("sky", paint_sky(), 32, False, False),
-        ("sign_finish", paint_sign_finish(), 100, False, True),
+        ("ground_fill", paint_ground_fill, 128, False, False),
+        ("ground_cap", paint_ground_cap, 100, False, True),
+        ("sky", paint_sky, 32, False, False),
+        ("sign_finish", paint_sign_finish, 100, False, True),
     ]
-    for name, img, ppu, readable, alpha in level:
+    for name, painter, ppu, readable, alpha in level:
+        if want and name not in want:
+            continue
+        img = painter()
         path = os.path.join(LEVEL_DIR, name + ".png")
         size = save(img, path, ppu, readable, alpha, guid_rng)
         seam, inner = seam_error(img)
+        note = "tile seam x: %.2f vs inner %.2f" % (seam, inner)
+        if name == "ground_cap":
+            worst, wx, step, spike = cap_tick_report(img)
+            note += "; worst dark column %.1f at x=%d, worst height spike %.0f px, mean step %.2f" % (
+                worst, wx, spike, step)
         rows.append(("Resources/Level/" + name + ".png", "%dx%d" % img.size, ppu,
-                     "%d KB" % (size // 1024) if size >= 1024 else "%d B" % size,
-                     "tile seam x: %.2f vs inner %.2f" % (seam, inner)))
+                     "%d KB" % (size // 1024) if size >= 1024 else "%d B" % size, note))
 
     for key in MATERIALS:
+        if want and key not in want:
+            continue
         src = os.path.join(LEGACY, key + ".png")
         before = os.path.getsize(src)
         img = Image.open(src).convert("RGB")
