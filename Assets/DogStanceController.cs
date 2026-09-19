@@ -912,6 +912,35 @@ public partial class DogStanceController : MonoBehaviour
     // sum(vertical Fn)/(m*g) for the frame, dimensionless: 1 = the paws carry
     // the whole weight, ~0 = the body is on its belly.
     public float pawWeightFraction;
+
+    // ─── CYCLE 3 SENSOR (read-only; no control law reads any of it) ───
+    // supportMargin above is the CoM PROJECTION against the support interval: it
+    // asks only where the body is, never where it is going. A body travelling at
+    // 1 m/s through a 0.5 m interval reads as "inside" up to the instant it is
+    // not — the human capture walker left its support at 1.26 m/s in single
+    // support and the projection never said so. These three fields are the same
+    // measurement with the momentum in it: the LINEAR INVERTED PENDULUM
+    // extrapolation of the CoM (the capture point), against the SAME interval.
+    //
+    //     omega = sqrt(g / h)        h = CoM height over the cached slab top
+    //     xi    = x_com + v_x / omega    (CapturePointPlanner's convention)
+    //
+    // h is the live CoM height over walkGroundTopY (the slab top measured from
+    // the ground collider at Start — rig geometry, not a controller-captured
+    // bar), floored at CapturePointHeightFloorM so a body flat on the floor
+    // cannot make omega singular; capturePointHeight publishes h, so the frames
+    // where the model is out of its range are visible in the recording instead
+    // of implied.
+    public float capturePointX;
+    public float capturePointHeight;
+    // Sign as supportMargin: + inside the support interval, 0 on the edge,
+    // − outside, m.
+    public float capturePointMargin;
+    // True while this Sense tick saw a live support interval. The else branch of
+    // the support block leaves supportMinX/MaxX at their last values, so the
+    // capture margin cannot be computed from them alone.
+    public bool hasSupportInterval;
+    public const float CapturePointHeightFloorM = 0.10f;
     // The controller's OWN heap bar in the Walk branch, m: WalkStandDrop
     // (standComHeight - comY), the value the walk fall test in Sense reads.
     // Published read-only so the recorder can log it beside its independent
@@ -1533,6 +1562,7 @@ public partial class DogStanceController : MonoBehaviour
 
         if (TryGetSupportBounds(out float minX, out float maxX))
         {
+            hasSupportInterval = true;
             supportMinX = minX;
             supportMaxX = maxX;
             supportWidth = maxX - minX;
@@ -1548,6 +1578,7 @@ public partial class DogStanceController : MonoBehaviour
         }
         else
         {
+            hasSupportInterval = false;
             supportWidth = 0f;
             comOffsetX = 0f;
             supportMargin = 0f;
@@ -5382,6 +5413,33 @@ public partial class DogStanceController : MonoBehaviour
         pawWeightFraction = bodyWeight > 0.01f
             ? verticalImpulse / Time.fixedDeltaTime / bodyWeight
             : 0f;
+
+        // ─── CYCLE 3 SENSOR: the capture point over the SAME support interval ───
+        // Read-only, like everything else here: the physics numbers of the run
+        // must stay bit-identical (the cycle's acceptance). h is the live CoM
+        // height over the slab top, floored so a body on the floor cannot make
+        // omega singular; the guard on the root keeps the divide finite if the
+        // slab was never found.
+        float cpHeight = Mathf.Max(CapturePointHeightFloorM, comPosition.y - walkGroundTopY);
+        float cpOmega = cpHeight > 0.001f
+            ? Mathf.Sqrt(Physics2D.gravity.magnitude / cpHeight)
+            : 0f;
+        capturePointHeight = cpHeight;
+        capturePointX = cpOmega > 0.001f ? comPosition.x + comVelocity.x / cpOmega : comPosition.x;
+        if (hasSupportInterval
+            && capturePointX >= supportMinX && capturePointX <= supportMaxX)
+        {
+            capturePointMargin = Mathf.Min(capturePointX - supportMinX, supportMaxX - capturePointX);
+        }
+        else if (hasSupportInterval)
+        {
+            capturePointMargin = -Mathf.Min(Mathf.Abs(capturePointX - supportMinX),
+                Mathf.Abs(capturePointX - supportMaxX));
+        }
+        else
+        {
+            capturePointMargin = 0f;
+        }
     }
 
     // Paw order FR, FL, RR, RL — the order of the CSV grounded flags.

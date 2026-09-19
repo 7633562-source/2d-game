@@ -667,6 +667,39 @@ cosmetic routine from writing a physical field. Surfaces for that step: the move
 183 controller members and 19 controller methods are called from the physical side (`FacingSign` x16
 + 18 Sit*/Walk*/LeapHunt* tail/head routines). Report: `Trials/Runs/dog-cycle2-cosmetic-split.md`.
 
+### DOG cycle 3 - the capture-point sensor (signal only), 19.09 17:35
+
+ONE change, no control law: the extrapolated CoM (`xi = x_com + v_x/omega`, `omega = sqrt(g/h)`,
+`h` = live CoM height over the slab top `walkGroundTopY`, floored at 0.10 m) is computed in
+`DogStanceController.SampleCycle1Instruments` from the SAME support interval the projection margin
+uses, published as `capturePointX`/`capturePointHeight`/`capturePointMargin`/`hasSupportInterval`
+(read-only), and logged as three append-only columns `captureXi`/`captureHeight`/`captureMargin`
+(39 -> 42) plus 12 JSON keys. `Sense()` now sets `hasSupportInterval` in both branches of the
+support block (the else branch leaves `supportMinX/MaxX` stale). Nothing reads the new fields.
+
+Build fp `cd88a4b5721ac9c0c0b4407b1c52a3c30bdd3eb20263df3ab401ad4db8fb7139` / guid
+`2e033a0821d04f6ca427d49c801161b4`, `TRIAL_BUILD_OK`, `executedSteps == samples`, `cycle1NanCount 0`.
+**A1 PASS - physics bit-identical**: 5/5 md5 `34f4df76259d153197d61fdf896fa8bb` and **0 of 5001 rows
+differ in the 39 pre-existing columns** vs the accepted `dog_art1_r6*` (fp `336a0296`); 12 JSON keys
+added, 0 removed, only `label`/`sourceFingerprint`/`wallSeconds`/`wallPerSim` move. **A3 PASS**:
+quiet `dog_gu15` keeps `captureMargin > 0` in 5000/5001 frames (99.98 %; 4998/4998 excluding the
+spawn frames) - one negative frame named: frame 1, t 0.010 s, -3.0793 m, the spawn CoM jump
+(finite difference of -17.687 m/s), not an excursion. **A4**: the walk runs carry the sustained
+excursion and it is the CAPTURE POINT's magnitude - `dog_c3_1` 63.69 % negative, p05 -0.3256, min
+(excl. frames 0-2) **-0.6485**; `dog_gu14c3` 59.74 %, p05 -0.3404, same min; the old projection
+column reaches only -0.4220 m on the same runs. The brief's "observed -0.70 m" is that capture
+number, not a projection number. Cycle-4 input: first crossing same frame (t 1.155 s, no lead), but
+under the rule `margin < -0.05 m held 0.15 s` the capture point fires at 1.425 s vs the
+projection's 1.965 s (**+0.540 s lead**, 3.105 s before the controller's own fall declaration at
+4.530 s); 8.82 % of frames flip from projection-safe to lost; at the fall instant -0.2302 vs
+-0.1481 m. Warning, measured: the margin is below -0.05 m in 53.56 % of walk frames and the bare
+rule fires 107/153 times, so cycle 4's stance-phase gate is the binding constraint.
+Report: `Trials/Runs/dog-cycle3-capture-sensor.md`. Stand `Tools/dog-stand-cycle3.sh`, checker
+`hermes/scripts/dog-cycle3-check.py`.
+NOTE: `Tools/impact-build.sh` writes `build-info.json` only - `Build/Headless/build-manifest.json`
+must be refreshed afterwards (`hermes/scripts/dog-write-manifest.sh`) or the player aborts with
+`TRIAL_PROVENANCE_FAILED`.
+
 ## BALANCE-ARENA-1 push-back: the blow and the body's answer are one column no more (level worker, 19.09 ~16:40)
 
 The card's own column - *"whether the rig pushed back at all (vertical force above body weight after

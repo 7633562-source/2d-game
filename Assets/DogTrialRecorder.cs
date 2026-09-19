@@ -60,6 +60,15 @@ public class DogTrialRecorder
     private readonly StringBuilder rows = new StringBuilder();
     private readonly char[] numberBuffer = new char[32];
     private int samples;
+    // DOG STEP CLOCK (harness only, 19.09): the executed physics steps of the run
+    // that owns this recorder, set by HeadlessTrial.RunDogTrial just before the
+    // summary is written. The dog loop's clock is derived from this count, so a
+    // healthy run reads `executedSteps == samples` and
+    // `simulatedSeconds == executedSteps * fixedDeltaTime`; a run that sampled a
+    // cadence the physics never ran (the 19.09 trap: 5002..5007 steps against
+    // 5001 samples on one build) is visible in the JSON instead of being averaged
+    // away.
+    private int executedSteps = -1;
     private double sumComOffsetSquared;
     private float maxAbsChestPitch;
     private float maxAbsPelvisTilt;
@@ -148,6 +157,26 @@ public class DogTrialRecorder
     // Every new column, every frame: a non-zero count is a failed acceptance.
     private int cycle1NanCount;
 
+    // ─── CYCLE 3 SENSOR (read-only; nothing here feeds a control law) ───
+    // The extrapolated CoM (capture point) of DogStanceController: xi in m,
+    // its height over the slab in m, and its signed margin against the support
+    // interval in m. Kept BESIDE the projection margin above, never instead of
+    // it: the two differ only by the momentum term, and the lead of the first
+    // over the second is the number this cycle exists to publish.
+    private readonly List<float> captureXiMargins = new List<float>();
+    private float captureXiMarginMin = float.MaxValue;
+    private int captureXiMarginMinFrame = -1;
+    private double sumCaptureXiMargin;
+    private int captureXiMarginNegativeFrames;
+    private int captureXiFirstNegativeFrame = -1;
+    private float captureXiFirstNegativeTime = -1f;
+    // Same first-crossing witnesses for the CoM projection, so the lead is a
+    // recorded pair of frames and not a re-derivation.
+    private int projectionFirstNegativeFrame = -1;
+    private float projectionFirstNegativeTime = -1f;
+    private float captureXiHeightMin = float.MaxValue;
+    private double sumCaptureXiHeight;
+
     public DogTrialRecorder(Dog dog, TrialRunInfo info)
     {
         this.dog = dog;
@@ -160,13 +189,20 @@ public class DogTrialRecorder
         DogPrey prey = UnityEngine.Object.FindFirstObjectByType<DogPrey>();
         preyLife = prey != null ? prey.GetComponent<Damageable>() : null;
 
-        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess,hipL,hipR,kneeL,kneeR,shoL,shoR,elbL,elbR,trunkBar,push,trunkLift,capturePointMargin,pawNormalImpulseFR,pawNormalImpulseFL,pawNormalImpulseRR,pawNormalImpulseRL,sumFnOverWeight,controllerTrunkDrop");
+        rows.AppendLine("t,chestPitch,pelvisTilt,lumbar,chestY,pelvisY,comX,comY,comOffset,frG,flG,rrG,rlG,sat,state,leapCount,jawAngle,paws,down,fell,upSuccess,hipL,hipR,kneeL,kneeR,shoL,shoR,elbL,elbR,trunkBar,push,trunkLift,capturePointMargin,pawNormalImpulseFR,pawNormalImpulseFL,pawNormalImpulseRR,pawNormalImpulseRL,sumFnOverWeight,controllerTrunkDrop,captureXi,captureHeight,captureMargin");
     }
 
     public void MarkPush(float time, float impulse)
     {
         pushTime = time;
         pushImpulse = impulse;
+    }
+
+    // Called by HeadlessTrial.RunDogTrial before the summary is written: how many
+    // physics steps the run really executed (see the `dogStepping` block there).
+    public void MarkExecutedSteps(int steps)
+    {
+        executedSteps = steps;
     }
 
     public void Sample(float time)
@@ -316,6 +352,39 @@ public class DogTrialRecorder
         float controllerDropNow = stance.walkStandDropBar;
         controllerTrunkDropFinal = controllerDropNow;
         if (controllerDropNow > controllerTrunkDropMax) controllerTrunkDropMax = controllerDropNow;
+
+        // ─── CYCLE 3 SENSOR: the extrapolated CoM, read beside the projection ───
+        // Same support interval, one extra term: captureXiMargin = the signed
+        // margin of xi = x_com + v_x/omega. Where the projection says "inside"
+        // and this says "outside", the body is leaving its support and the
+        // projection is the one that is lying. The pairs of first crossings are
+        // recorded together so the lead (in seconds) is measured, not argued.
+        float captureXiNow = stance.capturePointX;
+        float captureXiMarginNow = stance.capturePointMargin;
+        float captureXiHeightNow = stance.capturePointHeight;
+        captureXiMargins.Add(captureXiMarginNow);
+        sumCaptureXiMargin += captureXiMarginNow;
+        sumCaptureXiHeight += captureXiHeightNow;
+        if (captureXiHeightNow < captureXiHeightMin) captureXiHeightMin = captureXiHeightNow;
+        if (captureXiMarginNow < captureXiMarginMin)
+        {
+            captureXiMarginMin = captureXiMarginNow;
+            captureXiMarginMinFrame = samples;
+        }
+        if (captureXiMarginNow < 0f)
+        {
+            captureXiMarginNegativeFrames++;
+            if (captureXiFirstNegativeFrame < 0)
+            {
+                captureXiFirstNegativeFrame = samples;
+                captureXiFirstNegativeTime = time;
+            }
+        }
+        if (marginNow < 0f && projectionFirstNegativeFrame < 0)
+        {
+            projectionFirstNegativeFrame = samples;
+            projectionFirstNegativeTime = time;
+        }
         float barGap = Mathf.Abs(controllerDropNow - trunkDropNow);
         if (barGap > controllerVsRecorderMax)
         {
@@ -333,6 +402,9 @@ public class DogTrialRecorder
         }
         if (!IsFinite(fnOverWeightNow)) cycle1NanCount++;
         if (!IsFinite(controllerDropNow)) cycle1NanCount++;
+        if (!IsFinite(captureXiNow)) cycle1NanCount++;
+        if (!IsFinite(captureXiMarginNow)) cycle1NanCount++;
+        if (!IsFinite(captureXiHeightNow)) cycle1NanCount++;
 
         // A push up: an end of the dog lifts 12 cm off the lowest point the
         // heap reached — the front legs driving the chest, or the hind legs
@@ -486,6 +558,19 @@ public class DogTrialRecorder
         AppendCsvFloat(fnOverWeightNow);
         rows.Append(',');
         AppendCsvFloat(controllerDropNow);
+        // ─── CYCLE 3 SENSOR (append-only, after controllerTrunkDrop) ───
+        // captureXi m — the extrapolated CoM x (x_com + v_x/omega);
+        // captureHeight m — its height over the slab top, the h inside omega;
+        // captureMargin m — its signed margin against the support interval,
+        // + inside. The column `capturePointMargin` above (39th) is the CoM
+        // PROJECTION against the same interval; the two differ by the momentum
+        // term only.
+        rows.Append(',');
+        AppendCsvFloat(captureXiNow);
+        rows.Append(',');
+        AppendCsvFloat(captureXiHeightNow);
+        rows.Append(',');
+        AppendCsvFloat(captureXiMarginNow);
         rows.AppendLine();
 
         samples++;
@@ -523,6 +608,7 @@ public class DogTrialRecorder
                 AppendNum(json, "wallPerSim", wallSeconds / simulatedSeconds);
         }
         json.Append(",\"samples\":").Append(samples.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"executedSteps\":").Append(executedSteps.ToString(CultureInfo.InvariantCulture));
         AppendNum(json, "fixedDeltaTime", Time.fixedDeltaTime);
         AppendNum(json, "survivedSeconds", survived);
         json.Append(",\"fell\":").Append(dogFallTime >= 0f ? "true" : "false");
@@ -671,6 +757,31 @@ public class DogTrialRecorder
         AppendNum(json, "controllerTrunkDropFinal", controllerTrunkDropFinal);
         AppendNum(json, "controllerTrunkDropVsRecorderMax", controllerVsRecorderMax);
         json.Append(",\"controllerTrunkDropVsRecorderFrame\":").Append(controllerVsRecorderMaxFrame.ToString(CultureInfo.InvariantCulture));
+        // ─── CYCLE 3 SENSOR (read-only; no decision is taken on it) ───
+        // captureMargin* : the extrapolated CoM (xi = x_com + v_x/omega) against
+        // the same support interval the projection column uses, m, + inside.
+        // captureMarginLeadSeconds = the projection's first out-of-support time
+        // minus the extrapolated CoM's, s: positive means the momentum term saw
+        // the body leaving its support that much earlier (negative = it left
+        // later, 0 = one of them never crossed). captureHeightMin/Mean m — the h
+        // inside omega, so the frames where the inverted-pendulum model is out
+        // of range (a body on the floor, h pinned at its 0.10 m floor) are
+        // visible. Projection* is the same witness for the CoM projection.
+        AppendNum(json, "captureMarginMin", captureXiMargins.Count > 0 ? captureXiMarginMin : 0f);
+        AppendNum(json, "captureMarginP05", CaptureXiMarginP05());
+        AppendNum(json, "captureMarginMean", samples > 0 ? (float)(sumCaptureXiMargin / samples) : 0f);
+        json.Append(",\"captureMarginMinFrame\":").Append(captureXiMarginMinFrame.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"captureMarginNegativeFrames\":").Append(captureXiMarginNegativeFrames.ToString(CultureInfo.InvariantCulture));
+        json.Append(",\"captureMarginFirstNegativeFrame\":").Append(captureXiFirstNegativeFrame.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "captureMarginFirstNegativeTime", captureXiFirstNegativeTime);
+        json.Append(",\"projectionFirstNegativeFrame\":").Append(projectionFirstNegativeFrame.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "projectionFirstNegativeTime", projectionFirstNegativeTime);
+        float cycle3Lead = captureXiFirstNegativeTime >= 0f && projectionFirstNegativeTime >= 0f
+            ? projectionFirstNegativeTime - captureXiFirstNegativeTime
+            : 0f;
+        AppendNum(json, "captureMarginLeadSeconds", cycle3Lead);
+        AppendNum(json, "captureHeightMin", captureXiMargins.Count > 0 ? captureXiHeightMin : 0f);
+        AppendNum(json, "captureHeightMean", samples > 0 ? (float)(sumCaptureXiHeight / samples) : 0f);
         json.Append(",\"cycle1NanCount\":").Append(cycle1NanCount.ToString(CultureInfo.InvariantCulture));
         AppendApplied(json);
         json.Append("}");
@@ -879,6 +990,18 @@ public class DogTrialRecorder
     {
         if (captureMargins.Count == 0) return 0f;
         List<float> sorted = new List<float>(captureMargins);
+        sorted.Sort();
+        int idx = Mathf.Clamp(Mathf.FloorToInt(0.05f * sorted.Count), 0, sorted.Count - 1);
+        return sorted[idx];
+    }
+
+    // Same 5th percentile for the EXTRAPOLATED CoM margin (m), cycle 3: the
+    // matching tail of the projection's p05 above, so the two can be compared
+    // per run instead of per frame.
+    private float CaptureXiMarginP05()
+    {
+        if (captureXiMargins.Count == 0) return 0f;
+        List<float> sorted = new List<float>(captureXiMargins);
         sorted.Sort();
         int idx = Mathf.Clamp(Mathf.FloorToInt(0.05f * sorted.Count), 0, sorted.Count - 1);
         return sorted[idx];
