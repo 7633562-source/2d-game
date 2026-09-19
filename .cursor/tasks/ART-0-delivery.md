@@ -576,3 +576,65 @@ painted with no hard seams - two reads disagree, so there is no measurement to j
 
 
  
+
+## Tenth pass 19.09 (artist) - the five brief items re-verified, and `leaf` stops showing a seam
+
+Both picture gates were run again through bash on today's bytes (editor closed, no
+`Temp/UnityLockfile`; the first attempt was refused with exit 4 while another lane held
+`trial.lock`, and it was repeated after the lock cleared): `art0-import-gate.sh` -> `unity exit=0`,
+0 `ART-IMPORT-CHECK FAIL`, the four `Level/*` through `Load<Sprite>` (1024x256 ppu=128, 128x14
+ppu=100, 512x128 ppu=32, 64x320 ppu=100), the seven `Art/<key>` `512x512 readable=True`,
+`TILE ground_cap ... colourDiffAtOneTile=0,0135 -> REPEATS`, `TILE ground_fill box=32x2m ...
+0,0000 -> REPEATS`; `art1-gate.sh` -> `unity exit=0`, `ART-1A-CHECK end failures=0`, with
+`material Art/leaf (Tiled 0.5 m)` and `Art/leaf samples finite`. `Tools/art0-meta-audit.py`:
+`problems=0`, 318 `.meta` files with 318 distinct guids. Nothing had to be added to the ART-0 file
+set, and the loader contract is unchanged (lines quoted in full in the ninth pass above).
+
+The picture that failed a fresh read was `leaf`. The current built frame
+(`art0caph_materials.png`) had its material swatch row read again: the `leaf` column came back as
+*"a critical defect - a coarse 2x2 seam grid, the veins are cut off at the tile boundaries"*, while
+dirt, grass and denim were called clean. That is not a swatch-only surface: `ArtParts` dressses the
+tree crowns with it, `Tiled` at `LeafTileMeters = 0.5f`, so the seam was a line every 0.5 m on every
+crown in the catalogue.
+
+Measured on the shipped bytes: seam step 16.83 (X) / 17.07 (Y) levels against an own grain of
+12.53 / 12.20, and - the metric that matters - the seam step ranked **74.8 % / 76.0 %** among every
+step a 3x3 tiling shows, i.e. in the same place in every repeat. The first fix (tail faded into the
+head at the same offset) moved nothing: 16.83 -> 16.18, 17.07 -> 17.26, because a B-px gap is still a
+1-px jump of the same magnitude. The kept fix mirrors the head band so the fade ends exactly ON
+`H[0]`: `Tools/gen-level-textures.py` `wrap_blend(out, 32)`.
+
+| | before | after |
+|---|---|---|
+| seam step X / Y | 16.83 / 17.07 | 0.46 / 0.47 |
+| seam rank X / Y | 74.8 % / 76.0 % | 0.9 % / 1.0 % |
+| worst step inside the band vs outside | - | 96 vs 128 (X), 88 vs 119 (Y) |
+
+`old vs new: 31155 px of 262144 (11.88 %) | outside the 32 px tail bands: 0 px` - only the two tail
+bands moved, the interior is byte-identical. `md5sum` over 143 files names one changed PNG; all
+eleven `.meta` files are byte-identical, so the guid `c5a18e66de5ed39bce58bb956cdd388d` did not move.
+File 552.1 KB -> 548.6 KB.
+
+**Evidence.** Real frames from a real build (`art-gallery-capture.sh art0leaf`,
+`PREVIEW_BUILD_OK ... scenes=12 errors=0`, 8 stills, 165-frame / 16.5 s pan, `real=29 missing=11`,
+capture failures 0, buildGuid `9345bbc560654530a3132ca50859f9ac`; video `Trials/Runs/art0leaf.mp4`).
+Against `art0caph` with the same cameras (`ortho` equal to the digit): `fire` and `human`
+**pixel-identical** (the two lenses that draw no `leaf` - the same-build control), `materials` 2910 px
+inside one 150x150 box (the `leaf` swatch), `level` 528 px (the same swatch in the level lens),
+`tree` 222916 px (the crowns), `apple` 18567 px, `photo` 4155 px; `placeholder` 60 px, maxdelta 5,
+recorded as unexplained. Two blind magnified crops of the real frame (8x and 6x) named the previous
+build as the one with the hard cut and this build as the one where the veins continue; the tile
+tiled 12x5 at the drawn 64 px was read as *"RIGHT reads cleaner, LEFT has a regular grid of
+horizontal seams"*. The 1:1 3x3 sheet was read as "identical" and is recorded that way - at 1:1 the
+legacy leaf's vein node dominates the read and a 1-px step is below what it resolves.
+
+**Physics.** One PNG, `Tools/gen-level-textures.py` (outside `Assets/`, not compiled) and two offline
+tools under `Tools/`; no `.cs` touched. The material reaches the screen only through
+`Albedo`/`Tiled` -> `ArtParts.Dress` -> `SpriteRenderer`, and `fire`/`human` are byte-identical
+between builds. Full numbers: `Trials/Runs/art-0-leafwrap-report.md`.
+
+**Still open, unchanged.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles;
+`leaf`'s tiling *rhythm* (the legacy source is one leaf close-up, so its vein node repeats every
+0.5 m - `ArtParts.LeafTileMeters` is another lane's constant); `bark`/`grass`/`denim`/`dirt` keep
+their wrap, measured no worse than their own grain and read clean; the wide-slab fill's look, the
+flame core's spindle read, the sign's elongated cells, `filterMode Point` for the pixel art.

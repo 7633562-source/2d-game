@@ -658,6 +658,14 @@ def paint_sign_finish(w=64, h=320, cell_w=15, cell_h=38, rows=5, post=SIGN_POST_
 # ─── materials: LegacyArt 1024 -> Resources/Art 512 ───
 MATERIALS = ["skin", "fabric", "denim", "dirt", "grass", "bark", "leaf"]
 
+# Wrap blend bands, in px of the 512 tile (key -> band). A material dressed Tiled shows the
+# wrap every `LeafTileMeters` = 0.5 m, so a step at the edge is a line on a 0.5 m grid.
+# `level_tile` removes a brightness ramp (skin, fabric); it cannot touch a DETAIL mismatch,
+# which is what `leaf` has: its veins are cut by the tile boundary, and the 19.09 review read
+# the swatch as "coarse 2x2 seam grid, the pattern is destroyed". 32 px of 512 = 6.25 % per
+# axis, and at LeafTileMeters the band is 2 screen px at the level lens.
+WRAP_BLEND = {"leaf": 32}
+
 
 def write_meta(png_path, pixels_per_unit, readable, alpha, guid):
     """Copy the project's own Single-sprite .meta shape and set the fields the loaders need."""
@@ -816,6 +824,67 @@ def level_tile(img, ratio=2.0, floor=1.5, cap=64.0):
     return Image.fromarray(out, "RGB"), "; ".join(parts)
 
 
+def _band_max_step(a, axis, lo, hi):
+    """Worst single-pixel step inside [lo, hi) along one axis, in 0-255 levels."""
+    d = np.abs(np.diff(a.astype(np.int16), axis=axis))
+    sl = [slice(None)] * 3
+    sl[axis] = slice(lo, hi)
+    return float(d[tuple(sl)].max())
+
+
+def wrap_blend(img, band):
+    """Fade a tile's tail edge into the head it will sit next to, so the repeat has no line.
+
+    `level_tile` cancels a RAMP and cannot help a DETAIL mismatch: leaf's veins are sliced by
+    the boundary, and the leftover difference between the last and the first column is 1.3x
+    the tile's own grain - a systematic line at the same place in every repeat.
+
+    Two attempts, both measured (the number after each is the seam step `cut`, 0-255):
+
+    1. Tail faded into the head at the same offset: out[W-B+i] = mix(T[i], H[i], t). The
+       junction step becomes |H[B-1] - H[0]| - the head's own difference over B px. X 16.83 ->
+       16.18, Y 17.07 -> 17.26: a change of nothing. `cut` is a mean over rows and cannot see
+       why, but the reason is simple: distance does not matter to the eye, magnitude does. A
+       B-px gap is still a 1-px jump of the same size, and it is still in the same place in
+       every repeat, so the eye still draws the grid.
+    2. What is kept: the head band is MIRRORED, out[W-B+i] = mix(T[i], H[B-1-i], t), so the
+       band ends exactly ON H[0] - the pixel that follows the wrap. The junction step goes to
+       (1 - B/(B+1)) x |T[B-1] - H[0]|, i.e. ~3 % of the original, and the band approaches it
+       linearly from the tail, so nothing is stamped and no line is moved inside: `_band_max_step`
+       prints the worst step inside the band against the worst one outside it.
+
+    A crop cannot do this at all: rolling to the least discontinuous cut only moves the step
+    inside the tile, where the eye still finds it (the 2x2 A/B in the ART-0 card rated the
+    rolled sheet as seamless by the metric and worse by eye).
+
+    Returns (image, note).
+    """
+    a = np.asarray(img.convert("RGB")).astype(np.float64)
+    h, w = a.shape[:2]
+    t = (np.arange(band, dtype=np.float64) + 1.0) / (band + 1.0)
+    parts = []
+    for axis, n, name in ((1, w, "X"), (0, h, "Y")):
+        cut_before, inner = wrap_stats(a, axis)
+        tail = a.take(np.arange(n - band, n), axis=axis).copy()
+        # Mirrored head: index band-1 .. 0 along THAT axis, so the band ends exactly on H[0].
+        head = a.take(np.arange(band)[::-1], axis=axis).copy()
+        shape = [1, 1, 1]
+        shape[axis] = band
+        f = t.reshape(shape)
+        blended = (1.0 - f) * tail + f * head
+        if axis == 1:
+            a[:, n - band:, :] = blended
+        else:
+            a[n - band:, :, :] = blended
+        cut_after, _ = wrap_stats(a, axis)
+        outside = max(_band_max_step(a, axis, 0, band + 1), _band_max_step(a, axis, n - band - 1, n - 1))
+        inside = _band_max_step(a, axis, n - band, n)
+        parts.append("%s cut %.2f -> %.2f (grain %.2f), step in band %.0f vs outside %.0f"
+                     % (name, cut_before, cut_after, inner, inside, outside))
+    out = Image.fromarray(np.clip(np.round(a), 0, 255).astype(np.uint8), "RGB")
+    return out, "wrap blend band %d (mirror): %s" % (band, "; ".join(parts))
+
+
 def main():
     os.makedirs(LEVEL_DIR, exist_ok=True)
     os.makedirs(ART_DIR, exist_ok=True)
@@ -865,6 +934,10 @@ def main():
         src_size = img.size
         down = img.resize((512, 512), Image.LANCZOS)
         out, note = level_tile(down)
+        band = WRAP_BLEND.get(key, 0)
+        if band:
+            out, blend_note = wrap_blend(out, band)
+            note += "; " + blend_note
         path = os.path.join(ART_DIR, key + ".png")
         size = save(out, path, 512, True, False, guid_rng)
         rows.append(("Resources/Art/" + key + ".png",
