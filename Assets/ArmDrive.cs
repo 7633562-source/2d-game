@@ -82,14 +82,28 @@ public class ArmDrive : MonoBehaviour
     public float crossWeight = 1f;
     public float ipsWeight = 0.5f;
     // The right shoulder's own cross weight, i.e. the ratio is per side
-    // (crossWeight/ipsWeight on the left, this one on the right). Measured: the
-    // rig is not mirror-symmetric where it counts -- in the accepted walk window
-    // corr(dL,hipR) = +0.36 against corr(dR,hipL) = +0.56, so with ONE ratio the
-    // two acceptance pairings cannot both go below -0.5 (measured p_arms50 with
-    // the shared ratio 2: shL-hipR -0.658, shR-hipL -0.418). Swept on the run's
-    // own recorded hips (_arms-ratiofit.py): the right pairing needs ratio 3 and
-    // the left is already at -0.83 there, while on a gait whose legs alternate
-    // both ratios keep every pairing and the arm-arm term negative.
+    // (crossWeight/ipsWeight = 2 on the left, this one on the right). Rewritten
+    // 19.09: the citations this block used to carry (a p_arms50 pair
+    // "-0.658 / -0.418" and corr(dL,hipR) +0.36 vs corr(dR,hipL) +0.56) do NOT
+    // reproduce from the runs they named, so they are gone rather than patched
+    // (the audit is Trials/Runs/programmer-cycle-1909-1900-arm-default-claim.md and
+    // -2010-arm-build-identity.md). What does reproduce, re-read this cycle with
+    // `Tools/arm-pairing-check.py` on the arms5 build (fingerprint 0fd4f288), the
+    // walk's own measured shoulders against the thighs, "measured" = the joint
+    // columns, "drive" = the drive's own targets:
+    //
+    //     window 5.00-6.63 s (accepted, n = 327)   window 5.00-7.30 s
+    //     p_arms81  per-side 1.5:  -0.848/-0.749 measured, -0.868/-0.866 drive
+    //                                              -0.696/-0.628
+    //     p_arms75  one ratio 1.0: -0.842/-0.610 measured, -0.868/-0.732 drive
+    //                                              -0.657/-0.413  <- fails here
+    //
+    // So ONE shared ratio holds BOTH acceptance pairings in the accepted window
+    // (the earlier "with ONE ratio the two pairings cannot both go below -0.5" is
+    // not in the record), and breaks the right one in the wider window. The
+    // default therefore stands only because the accepted evidence was measured on
+    // it -- an A/B on the current build (`-armCrossR 1` against the default, two
+    // runs) is the measurement this field still owes, and it is Hermes' series.
     public float crossWeightR = 1.5f;
     // +1: left shoulder against the right thigh (the acceptance pattern).
     // -1 flips to the same-side pairing, for a measurement.
@@ -239,9 +253,28 @@ public class ArmDrive : MonoBehaviour
     // press samples carried a real contact. The correction moves the target in Y
     // only (that axis IS "how hard the palm is pressed"), never in X, so it cannot
     // walk the palm sideways. 0 = the latched world point is frozen as before.
-    // NOT MEASURED YET: the build that would test it could not run (the project
-    // editor was open, so Unity refused the batch build). Off by default.
-    public float pressPalmLiveDepth = 0f;
+    //
+    // MEASURED 19.09 at full size (`_arms-phases2.py` on the arms5 build,
+    // fingerprint 0fd4f288, ground window 7.88-40.00 s, 6426 frames, contact read
+    // from the recorded `handContactL/R` per phase):
+    //
+    //     label     phase share L/R      contact inside the phase L/R
+    //     p_arms81  plant 38.6/34.5 %    plant  0/0 %   <- the defect
+    //               press 35.2/36.4 %    press 64/73 %
+    //               hold  15.7/18.6 %    hold  57/66 %
+    //               lift  10.4/10.4 %    lift  45/55 %
+    //
+    // i.e. with the Y frozen at the latch the palm misses the slab ENTIRELY
+    // (0 % on both sides) for more than a third of the fall, and that dead phase
+    // is why only 2 of 10 (L) and 4 of 11 (R) strokes ever reached the 20 deg the
+    // acceptance asks for: a stroke cannot start or extend while the palm is in
+    // the air, and `plantReachSeconds` re-latches a fresh point that misses the
+    // same way. The latch is taken where the hand STANDs on end (half-height
+    // 0.08) and the palm arrives FLAT (0.03), so the frozen target sits about
+    // 50 mm high -- the p_arms43 error, not a new one. The palm's own thickness is
+    // the only thing this follows; the lateral offset stays latched. Default ON.
+    // `-armPalmLive 0` restores the frozen point, `-armPalmLive 0..1` lerps.
+    public float pressPalmLiveDepth = 1f;
     public float pressRequestHoldSeconds = 0.25f;
 
     // Read-only state, for the recorder and the get-up.
