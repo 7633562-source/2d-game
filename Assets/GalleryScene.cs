@@ -579,6 +579,9 @@ public class GalleryScene : MonoBehaviour
         Campfire.FirePiece[] pieces = Campfire.FrozenStack();
         int drawn = 0;
         int lit = 0;
+        int logDressed = 0;
+        int logSeen = 0;
+        string logRefused = null;
         for (int i = 0; i < pieces.Length; i++)
         {
             Campfire.FirePiece piece = pieces[i];
@@ -594,6 +597,23 @@ public class GalleryScene : MonoBehaviour
             if (piece.kind == Campfire.FirePieceKind.Log)
             {
                 HumanSegment.ApplyPicture(sr, piece.size, HumanVisualShape.Box, null, piece.color, piece.order);
+                // The logs' painted canvases (ART-0 nineteenth pass). Same call the
+                // yard's BuildLogs makes, so the catalogue cannot show a different
+                // pile: ArtParts.Dress puts the whole canvas Sliced onto the box the
+                // log already has, and a missing PNG leaves the flat box.
+                // The count is that call's own verdict, not the box: ApplyPicture
+                // runs first and leaves a pixel-snapped white body sprite
+                // (CreateBodySprite, 256 px/m, 64-px minimum side), so the box
+                // Dress reads and writes back sits 0.2-1.0 mm off piece.size and
+                // Unity's Vector2 == is false for all three logs by construction.
+                // The 20.09 finding: the old test read "logs dressed 0/3" on a
+                // frame whose pile window had lost BOTH flat LogWood blends to
+                // exactly 0 px. A refused dress returns false and is named.
+                logSeen++;
+                if (Campfire.DressLog(sr, Campfire.LogIndex(piece.name)))
+                    logDressed++;
+                else
+                    logRefused = logRefused == null ? piece.name : logRefused + "+" + piece.name;
             }
             else
             {
@@ -633,9 +653,11 @@ public class GalleryScene : MonoBehaviour
         }
         else
         {
-            Add(root, "campfire (assembled)", "Art/Campfire/core.png + Campfire.SoftSprite() x "
+            Add(root, "campfire (assembled)", "Art/Campfire/log_a|b|c.png + core.png + Campfire.SoftSprite() x "
                 + (Campfire.TongueCount + 1), true,
-                "the fire as the yard draws it: " + drawn + " pieces (" + lit + " lit), bands "
+                "the fire as the yard draws it: " + drawn + " pieces (" + lit + " lit), logs dressed "
+                + logDressed + "/" + logSeen + " by Campfire.DressLog"
+                + (logRefused == null ? "" : " (refused: " + logRefused + ")") + ", bands "
                 + Campfire.LogOrder + "/" + Campfire.EmberOrder + "/" + Campfire.FireOrder
                 + ", pose frozen at " + Campfire.FrozenStackTime.ToString("0.00") + " s, tint "
                 + Campfire.CoreTint.r.ToString("0.00") + "," + Campfire.CoreTint.g.ToString("0.00") + ","
