@@ -300,7 +300,7 @@ public class ImpactThrower : MonoBehaviour
         ImpactProjectile projectile = go.AddComponent<ImpactProjectile>();
         projectile.Configure(this, p.index, p.shape, p.width, p.height, p.mass,
             speed, p.impulseNs, p.part, p.side, launch, aim, velocity, projectileLifetime,
-            stepTime, body.gravityScale);
+            stepTime, body.gravityScale, human);
         live.Add(projectile);
         FiredCount++;
     }
@@ -384,12 +384,30 @@ public class ImpactProjectile : MonoBehaviour
     public float MaxAbsZ { get; private set; }
     public bool OutOfPlane { get; private set; }
 
+    // ─── ARRIVAL SPEED (the metric, not the engine's post-solve reading) ───
+    // Unity hands Collision2D.relativeVelocity over inside the step the contact was
+    // solved in, and on a class whose two bodies leave that step moving together it
+    // collapses to the post-hit residual: grid_rect_15_4 reported 0.059 m/s against an
+    // object launched at 3.940 m/s, while the delivered impulse of the same row
+    // (50.916 N*s) says the object did arrive at speed. Both bodies' velocities are
+    // therefore cached at the START of every fixed step - FixedUpdate runs before the
+    // solver and before the collision callbacks of the same step - and the closing
+    // speed is the relative speed of that pair: the speed the blow really arrived with.
+    // EngineRelativeSpeedMps keeps the old reading as this cycle's A/B witness.
+    public Vector2 PreStepVelocity { get; private set; }
+    public Vector2 PreStepOtherVelocity { get; private set; }
+    public float EngineRelativeSpeedMps { get; private set; }
+
     private float lifetimeSeconds;
+    // The human's own segment bodies, and their velocity entering the current step.
+    private Rigidbody2D[] parts = new Rigidbody2D[0];
+    private readonly Dictionary<Rigidbody2D, Vector2> partVelocity =
+        new Dictionary<Rigidbody2D, Vector2>(64);
 
     public void Configure(ImpactThrower owner, int throwIndex, string shape, float width,
         float height, float mass, float speed, float referenceImpulse, string aimedPart,
         int side, Vector2 launch, Vector2 aim, Vector2 velocity, float lifetime,
-        float birthTime, float gravityScale)
+        float birthTime, float gravityScale, Human target)
     {
         ThrowIndex = throwIndex;
         ShapeText = shape;
@@ -410,6 +428,12 @@ public class ImpactProjectile : MonoBehaviour
         ContactPart = string.Empty;
         Body = GetComponent<Rigidbody2D>();
         BodyCollider = GetComponent<Collider2D>();
+        parts = CollectPartBodies(target);
+        // The spawn step's own pre-solve velocity: if this component's FixedUpdate does
+        // not run in that step, the launch velocity is still the right arrival speed.
+        PreStepVelocity = velocity;
+        PreStepOtherVelocity = Vector2.zero;
+        EngineRelativeSpeedMps = 0f;
     }
 
     public bool LifetimeExpired(float time)
@@ -419,6 +443,15 @@ public class ImpactProjectile : MonoBehaviour
 
     private void FixedUpdate()
     {
+        // Start of the step: these are the velocities entering the solver, i.e. the ones
+        // the contact will be solved against. Read-only - nothing here can be seen by
+        // the physics engine.
+        if (Body != null) PreStepVelocity = Body.linearVelocity;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            Rigidbody2D part = parts[i];
+            if (part != null) partVelocity[part] = part.linearVelocity;
+        }
         if (transform.position.z != 0f)
         {
             OutOfPlane = true;
@@ -461,10 +494,35 @@ public class ImpactProjectile : MonoBehaviour
             ContactTime = StepTime;
             ContactPart = collision.collider.transform.name;
             ContactPoint = collision.GetContact(0).point;
-            ClosingSpeedMps = collision.relativeVelocity.magnitude;
+            // The engine's own reading is kept, but the closing speed is measured from
+            // the pre-step velocities of the two bodies that met - see the property note.
+            EngineRelativeSpeedMps = collision.relativeVelocity.magnitude;
+            Rigidbody2D otherBody = collision.rigidbody;
+            Vector2 otherVelocity = Vector2.zero;
+            if (otherBody != null && partVelocity.TryGetValue(otherBody, out Vector2 cached))
+                otherVelocity = cached;
+            PreStepOtherVelocity = otherVelocity;
+            ClosingSpeedMps = (PreStepVelocity - otherVelocity).magnitude;
             DeliveredImpulseAtEntryNs = total;
         }
         DeliveredImpulseNs += total;
         DeliveredVerticalImpulseNs += vertical;
+    }
+
+    // The human's own rigidbodies, one per segment: the relative speed needs the part's
+    // velocity beside the object's. Read-only - no force, no transform, and nothing the
+    // solver can see (the project's cosmetics-vs-physics boundary).
+    private static Rigidbody2D[] CollectPartBodies(Human target)
+    {
+        if (target == null) return new Rigidbody2D[0];
+        HumanSegment[] segments = target.GetComponentsInChildren<HumanSegment>(true);
+        List<Rigidbody2D> bodies = new List<Rigidbody2D>(segments.Length);
+        for (int i = 0; i < segments.Length; i++)
+        {
+            HumanSegment segment = segments[i];
+            if (segment != null && segment.rb != null && !bodies.Contains(segment.rb))
+                bodies.Add(segment.rb);
+        }
+        return bodies.ToArray();
     }
 }

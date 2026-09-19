@@ -746,3 +746,34 @@ Measured on build fp `78ea6d5f66e9e18e6dcb4a671693e933d57c52988244a284e3d6e1e1b2
 NOT this lane, still open: L1 latency is keyed on the collision (5.000 ms in 12/12) and the honest
 divergence definition needs an active-reaction-off mode in `Assets/BalanceController.cs` (walk
 stream's file); `closingSpeedMps` still prints a wrong number on `grid_rect_15_4` (finding 5d).
+
+## BALANCE-ARENA-1 closing-speed cycle: the metric is measured, not asked of the engine (level worker, 19.09 ~17:12)
+
+The grid audit's last open item in this lane (§5d: `grid_rect_15_4` reported a closing speed of
+**0.059 m/s** for an object launched at **3.940 m/s**, while the same row's delivered impulse
+50.916 N·s said otherwise). One change, `Assets/ImpactThrower.cs` + `Assets/ImpactRecorder.cs`:
+`Collision2D.relativeVelocity` is read inside the step the contact was solved in, so it collapses to
+the post-hit residual exactly when the man and the object leave that step moving together. The
+projectile now caches its own velocity and the velocities of the human's own segment bodies at the
+**start** of every fixed step (`FixedUpdate` runs before the solver and before the callbacks of the
+same step) and reports `ClosingSpeedMps = |PreStepVelocity − PreStepOtherVelocity|`; the engine's
+reading is kept as the append-only witness `engineRelativeSpeedMps` and printed beside it in the
+on-frame banner. Read-only: no force, no velocity write, no transform.
+
+Measured on build fp `336a0296c07c7892f6c76f41e9fc11ac26d85e78e6b9632b53d1ce4d0f96ba5d`,
+buildGuid `a308d8f65d754305b571183370905d3c`, `TRIAL_BUILD_OK`, player newer than every source.
+Rule zero: `close_quiet` (`-impactCount 0`, 40 s) reproduces the card's four numbers to the digit
+(0.0148 / 2.6542 / 7.5647 / 0.0) plus `sensorTick` 8002 and `maxAbsPelvisAccY` 14.2838; 700 shared
+keys, 11 differing, all identity/clock/switch-set. The 12-class grid against the **previous build**
+(`close_*` vs `cv_grid_*`, only this change between them): **11 of 12 classes with 0 keys moved**,
+and the three rect classes moved **exactly `closingSpeedMps` and nothing else** — the lying class
+`0.059292 → 3.93968` (= launch 3.939681, gravityScale 0), the other two in the last printed digit
+(19.69841 → 19.6984, the contacted part's own ≈1e-5 m/s pre-step motion). Strictly 2D in 12/12
+(`outOfPlane false`, `maxAbsZ 0`). Evidence: two rendered takes (rect 0.6 m/15 kg/4 m/s = the fixed
+class; circle 0.25 m/0.5 kg/20 m/s = he stands), 24.05 s 1920×1080 each, the 36.10 s cut
+`Trials/Runs/impact_closing_two_takes.mp4`, stills incl. the window-end frame whose banner now reads
+`closing 3.94 m/s (engine 0.059)`. Tools: `Tools/impact-build.sh` (bash build with the gate's lock and
+an explicit OK/FAILED line), `impact-closing-grid.sh`, `impact-closing-table.py`,
+`impact-closing-accept.sh`. Report `Trials/Runs/impact-closing-report.md`. **This lane's grid-audit
+list (5a-5f) is now empty**: L1 (latency keyed on the collision) and L3 (no active-reaction-off
+switch) remain the walk stream's, in `Assets/BalanceController.cs`.

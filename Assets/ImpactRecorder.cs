@@ -118,6 +118,9 @@ public class ImpactRecorder
         public Vector2 aimPoint;
         public float referenceImpulseNs;
         public float closingSpeedMps;
+        // The engine's own post-solve reading of the same contact, kept as the A/B
+        // witness of the cycle that replaced it (see ImpactThrower.PreStepVelocity).
+        public float engineRelativeSpeedMps;
         public float comXAtContact;
         public float comYAtContact;
         public int stepsAtContact;
@@ -333,6 +336,7 @@ public class ImpactRecorder
                 window.aimPoint = projectile.AimPoint;
                 window.referenceImpulseNs = projectile.ReferenceImpulseNs;
                 window.closingSpeedMps = projectile.ClosingSpeedMps;
+                window.engineRelativeSpeedMps = projectile.EngineRelativeSpeedMps;
                 window.deliveredImpulseAtEntryNs = projectile.DeliveredImpulseAtEntryNs;
                 window.comXAtContact = comPosition.x;
                 window.comYAtContact = comPosition.y;
@@ -455,7 +459,8 @@ public class ImpactRecorder
         sb.Append("hit ").Append(window.contactPart.ToLowerInvariant())
             .Append(" @ ").Append(Fmt3(window.contactTime)).Append(" s  |  reference impulse ")
             .Append(Fmt(window.referenceImpulseNs)).Append(" N*s  |  closing ")
-            .Append(Fmt(window.closingSpeedMps)).Append(" m/s");
+            .Append(Fmt(window.closingSpeedMps)).Append(" m/s (engine ")
+            .Append(Fmt(window.engineRelativeSpeedMps)).Append(')');
         sb.Append('\n');
         float percent = window.referenceImpulseNs > 0f
             ? 100f * window.deliveredImpulseNs / window.referenceImpulseNs
@@ -1125,6 +1130,8 @@ public class ImpactRecorder
         json.Append("\"aimMissMeters\":").Append(window.contacted
             ? F(Vector2.Distance(window.contactPoint, window.aimPoint)) : "-1").Append(',');
         json.Append("\"closingSpeedMps\":").Append(F(window.closingSpeedMps)).Append(',');
+        json.Append("\"engineRelativeSpeedMps\":")
+            .Append(F(window.engineRelativeSpeedMps)).Append(',');
         json.Append("\"deliveredImpulseNs\":").Append(F(window.deliveredImpulseNs)).Append(',');
         json.Append("\"deliveredImpulseAtEntryNs\":")
             .Append(F(window.deliveredImpulseAtEntryNs)).Append(',');
