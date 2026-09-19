@@ -46,6 +46,18 @@ def report(tag, cap):
     hit = alpha[:, 0] & alpha[:, w - 1]
     seam = float(np.abs(rgb[hit, 0] - rgb[hit, w - 1]).mean()) if hit.any() else 0.0
     grain = float(np.abs(np.diff(rgb, axis=1)).mean())
+    # Tuft fraction: the share of columns that share their top with a neighbour within 1 px. A
+    # silhouette built from 1 px needles scores low, and that is the comb-teeth look at game scale.
+    tops = np.array([int(np.argmax(alpha[:, x])) if alpha[:, x].any() else -1 for x in range(w)])
+    tuft = float(np.mean([min(abs(tops[x] - tops[(x - 1) % w]), abs(tops[x] - tops[(x + 1) % w])) <= 1
+                          for x in range(w)]))
+    # Root band: the rows under the blades. A flat slab there (std ~1.4) reads as a painted stripe.
+    under = alpha[h - 4:, :].sum(axis=0)
+    slab_rows = [(h - 4 + i,
+                  float(rgb[h - 4 + i, alpha[h - 4 + i], :].mean()),
+                  float(rgb[h - 4 + i, alpha[h - 4 + i], :].mean(axis=1).std()),
+                  len(set(tuple(int(v) for v in c) for c in cap[h - 4 + i, alpha[h - 4 + i], :3])))
+                 for i in range(4)]
     print("%s: %dx%d  column brightness %.1f..%.1f (mean %.1f)  blade height %d..%d px"
           % (tag, w, h, col.min(), col.max(), col.mean(), heights.min(), heights.max()))
     print("   wrap |col0-col127| %.3f   mean neighbour step %.3f   worst stand-out column %.3f at x=%d"
@@ -58,6 +70,13 @@ def report(tag, cap):
           % int(spike.max()))
     print("   worst BRIGHT stand-out column %.3f at x=%d"
           % ((-stand).max(), int((-stand).argmax())))
+    over = col - np.maximum(left, right)
+    print("   worst stand-out vs BOTH neighbours: dark %.3f, bright %.3f (0-255 levels, mean step %.2f)"
+          % (stand.max(), over.max(), step.mean()))
+    print("   tuft columns %.0f%% (share of tops within 1 px of a neighbour)"
+          % (tuft * 100))
+    print("   root rows (y, mean, std across x, distinct colours): "
+          + "; ".join("y%d %.1f/%.2f/%d" % r for r in slab_rows))
     print("   seam across the wrap %.2f vs the tile's own grain %.2f (levels, 0-255)"
           % (seam, grain))
     return col

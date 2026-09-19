@@ -274,6 +274,44 @@ GRASS_TUFT_MIN = 5          # px: shortest blade tip (9 px of 14 below it are st
 GRASS_TUFT_MAX = 8          # px: tallest blade tip
 GRASS_ROOT_ROWS = 4         # px: unbroken dark line where the grass meets the soil
 
+# Second repaint 19.09, same canvas, after an eye check at game scale
+# (Trials/Runs/ART-0-frames/cap-on-ground.png, 8 repeats at 2x) and a per-column measurement:
+#   3. the silhouette was a 1 px sawtooth - 9 columns at the top row, 10 at the next, 56 at the
+#      third - which at 0.14 m reads as bristles / comb teeth, not as grass. Blades are now drawn
+#      as TUFTS: a run of 2..5 columns that shares one top edge and one light face.
+#   4. two columns measured 5.1 and ~3.0 levels brighter than BOTH of their neighbours (mean
+#      neighbour step 0.67, so 7.7x the tile's own grain). The strip repeats every 1.28 m, so the
+#      brightest blade came back as a regular picket: the eye named the exact spot on the tiled
+#      preview. The de-tick pass now guards bright columns as well as dark ones.
+#   5. rows 10-12 of 14 were a flat slab (std 1.4 levels across 128 px): the strip read as two
+#      pasted bands under the blades. The root rows carry grain now (std target >= 2).
+GRASS_CLUMP_MIN = 2         # px: narrowest tuft (blades sharing a top)
+GRASS_CLUMP_MAX = 5         # px: widest tuft
+GRASS_TICK_LEVELS = 3.0     # levels: a column this far from BOTH neighbours is a ruler mark
+
+
+def _cap_clumps(w, seed, lo=GRASS_CLUMP_MIN, hi=GRASS_CLUMP_MAX):
+    """Cut the 128 px strip into tufts of 2..5 px that cover it exactly.
+
+    Grass grows in tufts, and the tile repeats every 1.28 m: a blade exactly one column wide is
+    both a bristle to the eye and the same bristle at every repeat. The widths are drawn from a
+    seeded sequence and the ring is closed on the last clump, so the tuft pattern across the wrap
+    seam is the same as inside the tile. Returns [(start_x, width), ...].
+    """
+    rng = random.Random(seed)
+    out, x = [], 0
+    while x < w:
+        left = w - x
+        if left <= hi:
+            width = left                          # close the ring exactly
+        else:
+            width = rng.randint(lo, hi)
+            if left - width < lo:                 # never leave a stub thinner than a tuft
+                width = left - lo
+        out.append((x, width))
+        x += width
+    return out
+
 
 def _cap_column_colours(h, w, px):
     """Per-column brightness over the opaque pixels: the tick detector's input."""
@@ -289,13 +327,14 @@ def _cap_column_colours(h, w, px):
     return lum, cnt
 
 
-def _cap_de_tick(img, rounds=3):
-    """Remove single columns that stand out dark from both neighbours, keeping their height.
+def _cap_de_tick(img, rounds=6):
+    """Remove single columns that stand out from both neighbours, dark OR bright.
 
-    A tiled strip repeats whatever a single column does every 1.28 m, so one blade painted
-    darker than its neighbours turns into a regular ruler mark. The pass lifts only the colour
-    of such a column (never its silhouette, never a column inside a wider dark run), so the
-    strip keeps its tufts and loses the tick. Returns (image, columns touched).
+    A tiled strip repeats whatever a single column does every 1.28 m, so one blade painted darker
+    (or lighter) than its neighbours turns into a regular ruler mark. The pass moves only the
+    colour of such a column toward the mean of its two neighbours (never its silhouette, never a
+    column inside a wider run), so the strip keeps its tufts and loses the tick. Returns
+    (image, columns touched, before-levels per column).
     """
     w, h = img.size
     start = list(_cap_column_colours(h, w, img.load()))
@@ -308,9 +347,11 @@ def _cap_de_tick(img, rounds=3):
             if cnt[x] == 0:
                 continue
             a, b = lum[(x - 1) % w], lum[(x + 1) % w]
-            drop = min(a, b) - lum[x]
-            if drop > 3.0 and (worst is None or drop > worst[1]):
-                worst = (x, drop)
+            drop = min(a, b) - lum[x]                  # dark stand-out
+            rise = lum[x] - max(a, b)                  # bright stand-out
+            dev = max(drop, rise)
+            if dev > GRASS_TICK_LEVELS and (worst is None or dev > worst[1]):
+                worst = (x, dev)
         if worst is None:
             break
         x, boost = worst[0], worst[1]
@@ -365,23 +406,43 @@ def paint_ground_cap(w=128, h=14):
     shade = wrap_noise(w, 16, 202, octaves=3, gain=0.50)               # light falling across the strip
     tip = wrap_noise(w, 23, 213, octaves=3, gain=0.50)                 # which tips catch the light
     dark = wrap_noise(w, 11, 215, octaves=1, gain=0.5)                 # dark tufts, ~0.31 m wide runs
+    grain = wrap_noise(w, 54, 216, octaves=2, gain=0.5, growth=2.3)    # 2 px cells: root-row grain
     span = float(GRASS_TUFT_MAX - GRASS_TUFT_MIN)
 
+    # One top and one light face per TUFTS, not per column: the silhouette is a run of blades that
+    # share an edge. A 1 px column would come back at every repeat as the same picket.
     tops = [0] * w
-    for x in range(w):
+    lit_by_x = [1.0] * w
+    dark_by_x = [False] * w
+    for start, width in _cap_clumps(w, 217):
+        mid = (start + width // 2) % w
         # The clump field carries the low frequencies and the blade field the high ones. The tile
         # is only 1.28 m of ground, so a dominant low-frequency hump would come back at every
         # repeat as a wave (eye check, 19.09): the weight sits on the blade field instead.
-        f = clump(x) * 0.50 + blade(x) * 0.50
-        t = int(round(GRASS_TUFT_MIN + f * span))
-        if blade(x) < 0.16:                     # a gap in the clump: sky reaches the root line
-            t = max(1, t - 3)
-        tops[x] = max(1, min(GRASS_TUFT_MAX, t))
+        f = clump(mid) * 0.50 + blade(mid) * 0.50
+        base = int(round(GRASS_TUFT_MIN + f * span))
+        if blade(mid) < 0.16:                   # a gap in the cover: sky reaches the root line
+            base = max(1, base - 3)
+        base = max(1, min(GRASS_TUFT_MAX, base))
+        for i in range(width):
+            x = start + i
+            step = 0
+            if width >= 4 and i == width - 1 and blade(x) > 0.58:
+                step = -1                       # the tuft's last blade is a step short
+            elif width >= 3 and i - width // 2 == 1 and blade(x) < 0.34:
+                step = 1                        # one blade leans out INSIDE its own tuft
+            tops[x] = max(1, min(GRASS_TUFT_MAX, base - step))
+        lit = 0.55 + 0.45 * tip(mid)            # a tuft catches the light as a group
+        darkx = dark(mid) > 0.86 and base < GRASS_TUFT_MAX - 1
+        for i in range(width):
+            x = start + i
+            lit_by_x[x] = lit
+            dark_by_x[x] = darkx
     tops = _cap_taper(tops)
     for x in range(w):
         top = tops[x]
-        darkx = dark(x) > 0.86 and tops[x] < GRASS_TUFT_MAX - 1
-        lit = 0.55 + 0.45 * tip(x)
+        darkx = dark_by_x[x]
+        lit = lit_by_x[x]
         for y in range(top, h):
             if y >= h - GRASS_ROOT_ROWS:
                 c = mix(GRASS_ROOT, GRASS_BODY, 0.24 + shade(x) * 0.30)
@@ -393,7 +454,7 @@ def paint_ground_cap(w=128, h=14):
                 t = (y - top) / float(max(1, h - GRASS_ROOT_ROWS - top))
                 c = mix(GRASS_BLADE, GRASS_BODY, min(1.0, t) * (0.35 + shade(x) * 0.30))
                 if y <= top + 3:
-                    c = mix(c, GRASS_TIP, (0.30 + 0.25 * tip(x)) * (1.0 - (y - top) / 3.0))
+                    c = mix(c, GRASS_TIP, (0.30 + 0.25 * lit) * (1.0 - (y - top) / 3.0))
                     c = mix(c, GRASS_BLADE_DARK, 0.10)     # a dark edge under each lit tip
             px[x, y] = (c[0], c[1], c[2], 255)
 
@@ -402,11 +463,17 @@ def paint_ground_cap(w=128, h=14):
     # brown reads as two pasted strips). The last row carries soil-toned pixels where the grass
     # does not cover - short runs, bounded by the same de-rhythm rule as the blades - and one row
     # up a few roots dip into it. Nothing here changes the silhouette: the box stays 0.14 m.
+    # Second eye check 19.09: rows 10-12 came out as one flat slab (std 1.4 levels over 128 px), so
+    # the root rows now mix in the grain field and a per-pixel dither: a band under the blades has
+    # to look like depth of cover, not like a painted stripe.
     edge = wrap_noise(w, 10, 218, octaves=1, gain=0.5)
     edge2 = wrap_noise(w, 17, 219, octaves=1, gain=0.5)
+    dither = random.Random(220)
     for y in range(h - GRASS_ROOT_ROWS, h):
+        deep = (h - 1 - y) / float(GRASS_ROOT_ROWS - 1)   # 0 at the soil line, 1 under the blades
         for x in range(w):
-            c = mix(GRASS_ROOT, GRASS_BODY, 0.24 + shade(x) * 0.30)
+            c = mix(GRASS_ROOT, GRASS_BODY,
+                    0.24 + shade(x) * 0.30 + (grain(x) - 0.5) * 0.46)
             soil = mix(DIRT_TOP, DIRT_BASE, 0.45)
             if y == h - 1:
                 # grass fingers over soil: ~6 px runs of each, so the contact line is broken
@@ -415,14 +482,18 @@ def paint_ground_cap(w=128, h=14):
                 c = mix(c, soil, 0.45 if edge2((x + 11) % w) > 0.80 else 0.06)
             else:
                 c = mix(c, DIRT_TOP, 0.08)
-            px[x, y] = (c[0], c[1], c[2], 255)
+            j = dither.choice((-2, -1, 0, 0, 1, 2))       # kills the flat slab look
+            j = j if deep > 0.5 else j // 2
+            px[x, y] = (max(0, min(255, c[0] + j)), max(0, min(255, c[1] + j)),
+                        max(0, min(255, c[2] + j)), 255)
 
     img, fixed, before = _cap_de_tick(img)
     if fixed:
         px = img.load()
         after, _ = _cap_column_colours(h, w, px)
-        print("ground_cap de-tick: lifted columns %s (%.1f -> %.1f levels, neighbours %.1f / %.1f)"
-              % (fixed, before[fixed[0]], after[fixed[0]], after[fixed[0] - 1], after[(fixed[0] + 1) % w]))
+        print("ground_cap de-tick: %d column(s) %s (%.1f -> %.1f levels, neighbours %.1f / %.1f)"
+              % (len(fixed), fixed, before[fixed[0]], after[fixed[0]],
+                 after[fixed[0] - 1], after[(fixed[0] + 1) % w]))
     return img
 
 
@@ -596,10 +667,13 @@ def save(img, path, pixels_per_unit, readable, alpha, guid_rng):
 def cap_tick_report(img):
     """The tiled-strip defect test: does one column stand out from both of its neighbours?
 
-    The cap repeats every 1.28 m, so a single column darker than its neighbours is a ruler mark,
-    not a blade. Only the opaque pixels count: a blade is short where the sky shows through, and
-    a mean that includes those transparent rows would report height, not colour.
-    Returns (worst stand-out, column, mean neighbour step).
+    The cap repeats every 1.28 m, so a single column darker (or brighter) than its neighbours is
+    a ruler mark, not a blade. Only the opaque pixels count: a blade is short where the sky shows
+    through, and a mean that includes those transparent rows would report height, not colour.
+    Also reports the tuft fraction: the share of columns that share their top with a neighbour
+    within 1 px. A strip built from 1 px needles scores near 0 - that is the comb-teeth look.
+    Returns (worst dark stand-out, column, mean neighbour step, worst height spike,
+             worst bright stand-out, column, tuft fraction).
     """
     a = np.asarray(img.convert("RGBA")).astype(np.float64)
     rgb, alpha = a[:, :, :3].mean(axis=2), (a[:, :, 3] > 0)
@@ -607,10 +681,16 @@ def cap_tick_report(img):
     height = alpha.sum(axis=0).astype(np.float64)
     w = col.shape[0]
     worse = np.minimum(col[(np.arange(w) - 1) % w], col[(np.arange(w) + 1) % w]) - col
+    rise = col - np.maximum(col[(np.arange(w) - 1) % w], col[(np.arange(w) + 1) % w])
     spike = height - np.maximum(height[(np.arange(w) - 1) % w], height[(np.arange(w) + 1) % w])
     step = np.abs(np.diff(col))
+    tops = np.array([int(np.argmax(alpha[:, x])) if alpha[:, x].any() else -1 for x in range(w)])
+    tuft = float(np.mean([min(abs(tops[x] - tops[(x - 1) % w]), abs(tops[x] - tops[(x + 1) % w])) <= 1
+                          for x in range(w)]))
     i = int(worse.argmax())
-    return float(worse.max()), int(i), float(step.mean()), float(spike.max())
+    j = int(rise.argmax())
+    return (float(worse.max()), i, float(step.mean()), float(spike.max()),
+            float(rise.max()), j, tuft)
 
 
 
@@ -711,9 +791,10 @@ def main():
         seam, inner = seam_error(img)
         note = "tile seam x: %.2f vs inner %.2f" % (seam, inner)
         if name == "ground_cap":
-            worst, wx, step, spike = cap_tick_report(img)
-            note += "; worst dark column %.1f at x=%d, worst height spike %.0f px, mean step %.2f" % (
-                worst, wx, spike, step)
+            worst, wx, step, spike, bright, bx, tuft = cap_tick_report(img)
+            note += ("; worst dark column %.1f at x=%d, worst BRIGHT %.1f at x=%d, worst height spike %.0f px,"
+                     " mean step %.2f, tuft columns %.0f%%"
+                     % (worst, wx, bright, bx, spike, step, tuft * 100))
         rows.append(("Resources/Level/" + name + ".png", "%dx%d" % img.size, ppu,
                      "%d KB" % (size // 1024) if size >= 1024 else "%d B" % size, note))
 

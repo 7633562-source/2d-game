@@ -292,3 +292,68 @@ reads the lone core as a light spindle rather than a living fire, which is recor
 item (a static stand-in of the assembled stack, or a repaint that carries more silhouette). Full
 numbers: `Trials/Runs/art-0-fire-gallery-report.md`.
 
+## Fifth pass 19.09 - the grass cap is drawn in tufts, and the root band stops being a slab
+
+The ART-0 brief's five items were re-verified from scratch this cycle on today's bytes: two fresh Unity
+batch runs, `art0-import-gate.sh` and `art1-gate.sh`, both `unity exit=0`, `failures=0` - four
+`Level/*` via `Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100), the
+seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap ... colourDiffAtOneTile=0,0083 -> REPEATS`,
+`TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`, `ART-1A-CHECK end failures=0` with
+`flower -> MISSING (procedural)` and `UI icons -> MISSING` as the only two gaps. Nothing about the
+loader contract or the file set changed; what changed is one picture that did not survive the eye.
+
+**The defect.** Judged at game scale on the frame the previous cap pass used as its own acceptance
+(`Trials/Runs/ART-0-frames/cap-on-ground.png`, 10.24 m of ground at 200 px/m), the shipped strip read
+as comb teeth with one thin spike standing up at the top of EVERY repeat - a ruler mark that gives the
+tiling away. Measured on the old bytes: the top three rows held 9 / 10 / 56 columns (a 1 px sawtooth,
+not grass), one bright blade measured 5.125 levels against the dimmer neighbour (7.7x the tile's own
+grain of 0.665), and rows 10-12 of 14 were a flat slab - std 1.39 / 1.39 / 1.92 with 17 distinct
+colours across 128 px.
+
+**The repaint** (same 128x14 canvas, same PPU 100, same `.meta` guid - `git status` does not name the
+meta). `Tools/gen-level-textures.py` now builds the silhouette from **tufts**: `_cap_clumps` cuts the
+128 px ring into runs of 2..5 columns, each tuft gets one top, one light face and a bounded step
+inside itself, and the widths wrap exactly so the pattern across the seam matches the pattern inside.
+The de-tick guard now pulls BRIGHT columns toward their neighbours as well as dark ones
+(`GRASS_TICK_LEVELS = 3.0`, both signs; it fired 0 times - the tuft construction removed the outliers
+before the guard had to). The root rows mix a 2 px grain field plus a ±2 dither.
+
+Measured after (same probe, both revisions reported by the same code):
+
+| measurement | before | after |
+|---|---|---|
+| blade silhouette | 1 px needle sawtooth | tufts of 2..5 columns sharing a top |
+| worst height spike (taller than BOTH neighbours) | 2 px | 1 px |
+| tuft columns (top within 1 px of a neighbour) | 95 % | 99 % |
+| worst bright stand-out vs the dimmer neighbour | 5.125 (7.7x grain) | 3.794 (3.4x grain) |
+| worst stand-out vs BOTH neighbours | dark 1.778 / bright 2.083 (grain 0.665) | dark 2.413 / bright 2.095 (grain 1.112) |
+| root rows y10-12 | std 1.39 / 1.39 / 1.92, 17 / 17 / 24 colours | std 2.39 / 2.32 / 2.83, 59 / 59 / 52 colours |
+| wrap seam vs the tile's own grain | 0.08 vs 5.31 | 1.14 vs 5.09 (seamless) |
+
+Stated plainly: the strict "above BOTH neighbours" metric did not improve (2.08 -> 2.10) and was never
+the defect - grass has a grain by design. The silhouette, the periodic bright clump and the flat slab
+are what moved, and the eye agrees: on `cap-before-after.png` (old row on top, new row below, same 8
+repeats, same soil) the reviewer named the spike at every repeat in the old row and called the new row
+"soft organic clumps - the defect is gone".
+
+**Evidence.**
+- `Trials/Runs/art-0-cap-tufts-report.md` (this cycle's full report: loader lines, the file table with
+  original -> final sizes, the metrics, the commands).
+- Pictures: `Trials/Runs/ART-0-frames/cap-before-after.png`, `cap-on-ground.png`, `cap-tiled-8x.png`.
+- The real frame from a real build: `bash scripts/art-gallery-capture.sh art0cap` ->
+  `PREVIEW_BUILD_OK ... scenes=12 errors=0`, `GALLERY-CAPTURE DONE label=art0cap stills=8
+  panFrames=165 real=29 missing=11 dressed=5567`, capture failures 0. `art0cap_level.png` against
+  `gallery4_level.png` (same still definition, same camera, `ortho=8,35`) differs in 3717 px of
+  2 073 600, all of them inside rows 670-677 - the grass strip. Nothing else in the frame moved.
+- Physics: no `.cs` touched, `Tools/` is outside `Assets/` and not compiled, and the cap hangs on a
+  `SpriteRenderer` in `Tiled` mode with no collider, so the reference runs cannot move.
+
+**Still open** (unchanged): `flower` and `UI icons` (labelled MISSING in the gallery), the next look
+item on the finish sign (the red/cream chequer reads like a roadworks barrier at small scale; the
+classic black/white chequer is the stronger read), a style mismatch between the flat-shaded grass cap
+and the noisy soil fill (a second read of the WIDE gallery still picked exactly that, at 9 px of strip
+it cannot judge the cap itself - recorded in the report, with the fill's wide-slab stretch bands, as
+the next ground item), and the earlier passes' items - per-part binding of the creatures (ART-2/ART-3),
+the flame core's spindle read.
+
+ 
