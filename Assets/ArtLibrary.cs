@@ -1,8 +1,14 @@
+using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
-// Picture keys stay for callers (ground, campfire). This layer no longer
-// loads Resources/Art PNGs: every sprite is a flat color box, same as Human.
-// Dog / Crow / Chicken replace the debug rainbow tints at bake time.
+// Picture keys stay for callers (ground, campfire). Albedo / Tiled / Sample
+// read the real PNGs under Resources/Art/<key>.png (ART-1a): a key is a path
+// fragment, so "bark" is Art/bark.png and "Human/head" is Art/Human/head.png.
+// A key with no file returns null, and the caller must then show a labelled
+// MISSING ART tile - never a silent placeholder.
+// BindPicture stays a tint-only hook: the per-part redraw is ArtParts.Dress,
+// which a scene calls explicitly (RealArtEnabled gates it, default OFF).
 public static class ArtLibrary
 {
     public const string Skin = "skin";
@@ -106,30 +112,77 @@ public static class ArtLibrary
 
     public static string ResolveAlbedoKey(string objectName, Transform node)
     {
-        _ = objectName;
         _ = node;
-        return null;
+        string key = ArtParts.KeyForName(objectName);
+        return Albedo(key) != null ? key : null;
     }
+
+    // ─── real art (ART-1a) ────────────────────────────────────────────────
+    // OFF by default: a headless trial and every scene that does not ask for
+    // real art stays on the collider-sized colour boxes, so no reference
+    // number and no existing look changes. The gallery sets it in Start().
+    public static bool RealArtEnabled { get; set; }
+
+    private static readonly Dictionary<string, Texture2D> Sources = new Dictionary<string, Texture2D>();
+    private static readonly Dictionary<string, Sprite> Tiles = new Dictionary<string, Sprite>();
 
     public static Texture2D Albedo(string key)
     {
-        _ = key;
-        return null;
+        if (string.IsNullOrEmpty(key))
+            return null;
+        if (Sources.TryGetValue(key, out Texture2D cached))
+            return cached;
+
+        // Resources.Load handles the folder in the key: "Human/head" ->
+        // Assets/Resources/Art/Human/head.png. Sprite assets are Texture2D
+        // here as well, so a part PNG needs no second lookup.
+        Texture2D tex = Resources.Load<Texture2D>("Art/" + key);
+        Sources[key] = tex;
+        return tex;
     }
 
-    public static Color Sample(string key, float xMeters, float yMeters)
+    public static bool HasArt(string key)
     {
-        _ = key;
-        _ = xMeters;
-        _ = yMeters;
-        return Color.white;
+        return Albedo(key) != null;
     }
 
     // GroundBuilder / LevelArt already fall back to a white square + tint.
     public static Sprite Tiled(string key, float metersPerTile = GroundTileMeters)
     {
-        _ = key;
-        _ = metersPerTile;
-        return null;
+        if (string.IsNullOrEmpty(key) || metersPerTile <= 0.01f)
+            return null;
+
+        Texture2D tex = Albedo(key);
+        if (tex == null)
+            return null;
+
+        string cacheKey = key + "@" + metersPerTile.ToString("0.####", CultureInfo.InvariantCulture);
+        if (Tiles.TryGetValue(cacheKey, out Sprite cached) && cached != null)
+            return cached;
+
+        // ppu follows the requested period, so Tiled draw mode repeats at
+        // metersPerTile in world metres and never scales the picture.
+        float ppu = tex.width / metersPerTile;
+        Sprite sprite = Sprite.Create(
+            tex,
+            new Rect(0f, 0f, tex.width, tex.height),
+            new Vector2(0.5f, 0.5f),
+            ppu,
+            0,
+            SpriteMeshType.FullRect);
+        sprite.name = "tile_" + cacheKey;
+        Tiles[cacheKey] = sprite;
+        return sprite;
+    }
+
+    public static Color Sample(string key, float xMeters, float yMeters)
+    {
+        Texture2D tex = Albedo(key);
+        if (tex == null || !tex.isReadable)
+            return Color.white;
+
+        float u = Mathf.Repeat(xMeters, 1f);
+        float v = Mathf.Repeat(yMeters, 1f);
+        return tex.GetPixelBilinear(u, v);
     }
 }

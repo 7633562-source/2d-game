@@ -32,10 +32,17 @@ public static class StaticPlatform
 
         bool isSign = piece.kind == LevelArt.SignKey;
         bool isDecor = !piece.hasCollider && !isSign;
-        bool tiledFill = !isSign && !isDecor && LevelArt.UseTiledFill();
+        Sprite fill = isSign ? null : (isDecor ? null : LevelArt.Fill());
+        // A slab WIDER than one native tile is what stretched the fill
+        // (8 m plateau 128 px/m, the 32 m "Behind" plate 32 px/m - ART-0).
+        // Tiled repeats the same pixels instead of scaling them. A slab that
+        // is not wider than the tile keeps Sliced, exactly as before.
+        bool tiledFill = !isSign && !isDecor && fill != null
+            && LevelArt.UseTiledFill()
+            && piece.size.x > fill.bounds.size.x + 0.001f;
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = isSign ? LevelArt.Sign() : (isDecor ? LevelArt.White() : LevelArt.Fill());
+        sr.sprite = isSign ? LevelArt.Sign() : (isDecor ? LevelArt.White() : fill);
         if (isSign)
             sr.color = LevelArt.HasSign() ? Color.white : LevelArt.SignTint();
         else if (isDecor)

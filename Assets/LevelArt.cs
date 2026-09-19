@@ -64,10 +64,14 @@ public static class LevelArt
         return new Color(0.30f, 0.58f, 0.28f, 1f);
     }
 
-    // true when there is no own 9-slice from Level/, but seamless Art/dirt exists.
+    // true when the fill is a real texture that can repeat: the Level PNG or
+    // the seamless Art/dirt tile. White() is a flat colour and cannot tile, so
+    // a slab keeps the Sliced stretch then. StaticPlatform asks this before it
+    // draws a slab wider than one native tile (the 32 m "Behind" plate).
     public static bool UseTiledFill()
     {
-        return !HasFill() && ArtLibrary.Albedo(ArtLibrary.Dirt) != null;
+        return HasFill()
+            || ArtLibrary.Tiled(ArtLibrary.Dirt, ArtLibrary.GroundTileMeters) != null;
     }
 
     public static Color SignTint()
