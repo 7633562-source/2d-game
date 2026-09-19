@@ -274,8 +274,15 @@ def paint_ground_fill(w=1024, h=256):
 #      left standing >= 3 levels below BOTH of its neighbours.
 # The grain itself must stay: blade tips have to differ from their neighbours by more than the dark
 # tufts do, otherwise the strip flattens into a band again.
-GRASS_TUFT_MIN = 5          # px: shortest blade tip (9 px of 14 below it are still grass)
-GRASS_TUFT_MAX = 8          # px: tallest blade tip
+GRASS_TUFT_MIN = 5          # px: smallest blade tip row (a tip at row 5 leaves 9 rows of grass)
+GRASS_TUFT_MAX = 8          # px: largest blade tip row, i.e. the shortest blade
+# Third repaint 19.09f. The "gap in the cover" branch below used to SUBTRACT 3 from the tip row, and
+# a smaller row is a TALLER blade: the two tufts that hit `blade(mid) < 0.16` were painted as the
+# strip's tallest blades (tip row 2..4 against a 6..7 line, 5 columns wide at x=112) instead of as
+# the gap the comment promised. At the tile's 1.28 m repeat that mound is the only landmark on the
+# strip, and a blind eye read of the 8x preview named it a ruler mark. A gap is now painted where
+# the comment always said it was: at the root line.
+GRASS_TOP_GAP = 9           # px: tip row of a gap tuft, one row above the 4 root rows
 GRASS_ROOT_ROWS = 4         # px: unbroken dark line where the grass meets the soil
 
 # Second repaint 19.09, same canvas, after an eye check at game scale
@@ -341,7 +348,7 @@ def _cap_de_tick(img, rounds=6):
     (image, columns touched, before-levels per column).
     """
     w, h = img.size
-    start = list(_cap_column_colours(h, w, img.load()))
+    start = _cap_column_colours(h, w, img.load())[0]   # per-column luminance before the pass
     fixed = []
     px = img.load()
     for _ in range(rounds):
@@ -425,8 +432,8 @@ def paint_ground_cap(w=128, h=14):
         # repeat as a wave (eye check, 19.09): the weight sits on the blade field instead.
         f = clump(mid) * 0.50 + blade(mid) * 0.50
         base = int(round(GRASS_TUFT_MIN + f * span))
-        if blade(mid) < 0.16:                   # a gap in the cover: sky reaches the root line
-            base = max(1, base - 3)
+        if blade(mid) < 0.16:
+            base = GRASS_TOP_GAP                  # a gap in the cover: the tuft sits at the root line
         base = max(1, min(GRASS_TUFT_MAX, base))
         for i in range(width):
             x = start + i
@@ -435,7 +442,7 @@ def paint_ground_cap(w=128, h=14):
                 step = -1                       # the tuft's last blade is a step short
             elif width >= 3 and i - width // 2 == 1 and blade(x) < 0.34:
                 step = 1                        # one blade leans out INSIDE its own tuft
-            tops[x] = max(1, min(GRASS_TUFT_MAX, base - step))
+            tops[x] = max(1, min(GRASS_TOP_GAP, base - step))
         lit = 0.55 + 0.45 * tip(mid)            # a tuft catches the light as a group
         darkx = dark(mid) > 0.86 and base < GRASS_TUFT_MAX - 1
         for i in range(width):
