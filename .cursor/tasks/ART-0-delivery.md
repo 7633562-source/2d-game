@@ -638,3 +638,60 @@ between builds. Full numbers: `Trials/Runs/art-0-leafwrap-report.md`.
 0.5 m - `ArtParts.LeafTileMeters` is another lane's constant); `bark`/`grass`/`denim`/`dirt` keep
 their wrap, measured no worse than their own grain and read clean; the wide-slab fill's look, the
 flame core's spindle read, the sign's elongated cells, `filterMode Point` for the pixel art.
+
+## Eleventh pass 19.09 (artist) - the flame core was drawn UPSIDE DOWN, and now it is a licked fire
+
+The ART-0 brief's five items were re-verified on today's bytes (both gates re-run through bash, editor
+closed, output kept): `art0-import-gate.sh` -> `unity exit=0`, `failures=0`, the four `Level/*` through
+`Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100), the seven
+`Art/<key>` `512x512 readable=True`, `TILE ground_cap ... 0,0135 vs rowStd 0,0202 -> REPEATS`,
+`TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`; `art1-gate.sh` -> `ART-1A-CHECK end failures=0` with
+the flame assertions green (`Albedo` resolves, `81x192 readable=True`, `canvas aspect 0,422 vs box
+0,421`, `Sprite.Create` succeeds). `Tools/art0-meta-audit.py`: `problems=0`, 318 `.meta` with 318
+distinct guids. Nothing had to be added to the ART-0 file set, and the loader contract is unchanged
+(lines quoted in full in the eighth pass above).
+
+The picture that failed a fresh read was the campfire flame core, and the defect was not a matter of
+taste: it was **drawn upside down**. The eye on today's still (`art0leaf_fire.png`) called it *"a smooth
+glowing spindle / lamp, no flame tongues"*; measured on those pixels the core is 23x68 px whose width
+rises to 23 px in rows 17..19 from the top and then falls to 5 px at its bottom row - the body sat at
+the top and the point pointed at the ground. Cause: `flame_mask` measures `ys` as height ABOVE the
+root, but a PIL array's row 0 is the TOP of the PNG, so every painted canvas was returned inverted
+(only the core ships, so only the core could show it). Second, measured defect: one dome
+(`peaks=1, valley=0.0 px`), no crown.
+
+Change, in `Tools/gen-fire-textures.py` only (one PNG shipped): the field is flipped on the way out;
+`CORE_BODY` + three `CORE_LICKS` (each in its own y band, at its own `x_off`, with its own lean, wobble
+and dissolve, pasted through the same `flame_mask` by `lobe()`); fused with a p-norm soft union
+(`SOFT_UNION_P = 8`) because a plain `np.maximum` leaves a corner where a lick leaves the body - the
+first eye read named it *"rough flat cuts at the base of the side tongues"*; each lick is ramped in over
+the lower third of its band, and the body's alpha ramps over `CORE_ROOT_FADE = 0.22` so its base
+dissolves into the coal bed instead of ending in a chevron.
+
+| measurement (81x192 canvas) | shipped | new |
+|---|---|---|
+| crown peaks / valley | 1 / 0.0 px | 2 / 32.2 px (the eye counts 3 tongues + a shoulder) |
+| silhouette width, top third / bottom third | 36.9 / 18.4 px -> **UPSIDE DOWN** | 10.6 / 35.9 px -> **upright** |
+| rows cut by the canvas border | 0 | 0 |
+| coverage | 27.8 % | 29.7 % |
+| same in a REAL frame (23x68 px -> 31x55 px), top/bottom third width | 17.5 / 11.4 px | 5.8 / 23.1 px |
+
+**Evidence.** A real player build of the whole tree (`art-gallery-capture.sh art0flame1`,
+`PREVIEW_BUILD_OK ... scenes=12 errors=0`, 8 stills, 165-frame / 16.5 s pan, `real=29 missing=11`,
+capture failures 0, buildGuid `0114b556a23e4529aa49c9331438d87b`; video encoded separately with
+`Tools/art0-pan-encode.py`, `art0flame1.mp4`). Against `art0leaf` the `fire` still differs in **5700 px
+inside one 54x129 box** (x 933-986 y 683-811) and `human`, `level`, `materials`, `tree` are
+**pixel-identical** - the same-build camera control; `apple` (1087 px) is the plant lane's rig compiled
+between the two builds. Two A/B sheets rendered through the generator's own mirrored fire (identical
+tongue pool, ages, flicker, logs, tint) and one real-frame 6x: the shipped core is read as *"a geometric
+rhombus / crystal"* or *"a candle"*, the new one as *"an upright flame, three tongues, **Ship**"*. Both
+differences are in `Trials/Runs/art-flamecore-2026-09-19/` (`art-0-flamecore-report.md` has the full
+numbers). Residual recorded, not fixed: the tongues are thin and straight in a 16 cm box (no turbulence
+in a still), and the coal bed/logs/sparks are the code's discs and particles, not art.
+
+**Physics.** One PNG (`Art/Campfire/core.png`, RGBA32, readable, guid `3b4ac812...` unchanged, `.meta`
+byte-identical) + `Tools/gen-fire-textures.py` + `Tools/art0-flamecore-probe.py` (both outside `Assets/`,
+not compiled). The core reaches the screen through `Albedo` -> `Sprite.Create` -> `Campfire.MakeDisc`,
+which writes `sr.sprite` only; box, `localScale`, tint and sorting order are the same constants, and the
+campfire has no collider and no `Rigidbody2D`. No simulation file touched.
+

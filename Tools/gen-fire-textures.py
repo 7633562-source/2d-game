@@ -16,6 +16,12 @@ What this tool paints
     and its licked crown, which is what the procedural soft disc cannot give it:
     a defined top.
 
+    The crown is a COMPOSITION (eleventh pass): the body (`CORE_BODY`) plus the
+    licks of `CORE_LICKS`, unioned with `np.maximum`. The first core was one
+    dome; a real frame read it as "a smooth light spindle - no flame tongues".
+    Two or three licks of different height, lean and side are what makes the top
+    of the sprite read as fire rather than as a lamp.
+
     REJECTED: `tongue_a/b/c`, the three pooled-tongue canvases (0.055 x 0.46,
     0.080 x 0.38, 0.110 x 0.30 m). They are still generated - in memory - for the
     evidence sheets, and are deliberately NOT written into Resources. Three blind
@@ -112,13 +118,68 @@ FLAME = {
                      bulge_at=0.28, bulge_amp=0.28, bulge_w=0.22,
                      wob_amp=0.08, wob_cells=1.6, wob_phase=4.2,
                      lean_q=0.10, lean_s=0.13, lean_cells=0.95, lean_phase=2.0),
-    # core: broad and rounded - it is the body of the fire, its crown is short
+    # core: broad and rounded - the BODY of the fire. The crown above it is not
+    # this envelope any more: it is built from CORE_LICKS below (eleventh pass).
     "core": dict(half=0.95, tip_pow=2.00, taper=1.00, dissolve=0.72, dissolve_from=0.34,
                  feather=1.90, base_in=0.20, base_pow=0.85,
                  bulge_at=0.26, bulge_amp=0.20, bulge_w=0.26,
                  wob_amp=0.06, wob_cells=1.3, wob_phase=1.7,
                  lean_q=-0.06, lean_s=0.08, lean_cells=0.85, lean_phase=0.9),
 }
+
+# ─── the core's crown (ART-0, eleventh pass) ─────────────────────────────────
+# The first core was ONE dome. Measured on the shipped bytes its top edge was a
+# single plateau (1 peak, no valley deeper than 2 px), and a fresh eye read of a
+# real gallery frame named the result "a smooth light spindle / lamp - no flame
+# tongues". A flame's top is a CROWN: two or three licks of different height and
+# lean, fused at the body. So the core canvas is composed - the body keeps the
+# rounded mass low in the box and each CORE_LICKS entry adds one licked tongue in
+# its own y band (`y0..y1`, canvas units, 0 = root) at `x_off` (canvas
+# half-widths). The licks are unioned with np.maximum, so the valleys between
+# them survive: that union is the read a single dome cannot produce.
+CORE_BODY = dict(
+    # The body: the widest, flattest part of the fire, sitting on the coal bed.
+    # base_in/base_pow keep it wide down to the root (a fire does not taper into
+    # the ground), tip_pow/taper close it above the middle so the licks - not a
+    # dome - own the crown.
+    half=0.72, tip_pow=2.20, taper=1.90, dissolve=0.62, dissolve_from=0.38,
+    feather=1.85, base_in=0.05, base_pow=0.50,
+    bulge_at=0.20, bulge_amp=0.32, bulge_w=0.30,
+    wob_amp=0.08, wob_cells=1.6, wob_phase=1.7,
+    lean_q=-0.06, lean_s=0.08, lean_cells=0.85, lean_phase=0.9)
+
+# The body's alpha ramps up over the bottom 22 % of the canvas (the tongues keep
+# flame_mask's 0.10): a long, wide fade is what makes the base dissolve into the
+# coal bed instead of ending in a chevron cut.
+CORE_ROOT_FADE = 0.22
+
+# p of the p-norm soft union in `core_mask`: 8 rounds the lick/body crossings
+# without flattening the two valleys (which the same union at p = 2 does fill).
+SOFT_UNION_P = 8.0
+
+CORE_LICKS = (
+    # the tall centre lick - the hottest point of the fire, leaning a little
+    dict(x_off=0.00, y0=0.34, y1=1.00, fade_in=0.30,
+         p=dict(half=0.44, tip_pow=2.40, taper=0.90, dissolve=0.52, dissolve_from=0.50,
+                feather=1.75, base_in=0.03, base_pow=1.00,
+                bulge_at=0.28, bulge_amp=0.14, bulge_w=0.26,
+                wob_amp=0.14, wob_cells=2.20, wob_phase=0.5,
+                lean_q=0.20, lean_s=0.14, lean_cells=0.80, lean_phase=0.4)),
+    # the left lick: shorter, and it curls out to its own side
+    dict(x_off=-0.40, y0=0.24, y1=0.76, fade_in=0.34,
+         p=dict(half=0.34, tip_pow=2.30, taper=0.95, dissolve=0.54, dissolve_from=0.46,
+                feather=1.75, base_in=0.03, base_pow=1.00,
+                bulge_at=0.30, bulge_amp=0.12, bulge_w=0.24,
+                wob_amp=0.12, wob_cells=1.90, wob_phase=2.2,
+                lean_q=-0.26, lean_s=-0.20, lean_cells=0.90, lean_phase=1.5)),
+    # the right lick: the shortest, so the two shoulders do not match
+    dict(x_off=0.40, y0=0.24, y1=0.66, fade_in=0.34,
+         p=dict(half=0.32, tip_pow=2.30, taper=0.95, dissolve=0.56, dissolve_from=0.42,
+                feather=1.75, base_in=0.03, base_pow=1.00,
+                bulge_at=0.30, bulge_amp=0.12, bulge_w=0.24,
+                wob_amp=0.12, wob_cells=1.80, wob_phase=4.1,
+                lean_q=0.24, lean_s=0.16, lean_cells=0.85, lean_phase=2.7)),
+)
 
 # The tint ramp, mirrored from Campfire.FlameColor / TickTongues.
 TONGUE_WHITE = (1.00, 0.97, 0.88)
@@ -148,13 +209,20 @@ def canvas_size(key):
     return w, h
 
 
-def flame_mask(w, h, p):
+def flame_mask(w, h, p, x_off=0.0, root_fade=0.10):
     """Alpha-only flame: 1 on the centre line, 0 outside the silhouette.
 
     The top closes as a dome (`1 - v**tip_pow`, whose derivative is 0 at v = 1)
     and the last third loses alpha (`dissolve`), so a tongue fades into the dark
     instead of ending in a point. A pointed, high-contrast tip is what the first
     pass drew, and the eye read 24 of them as glass fibres.
+
+    `x_off` moves the centre line sideways in canvas half-widths; it is what
+    places one crown lick (see `lobe`). `root_fade` is the fraction of the height
+    over which the alpha ramps up from the root: the tongues keep the original
+    0.10, and the core's body asks for a longer one so its base dissolves into
+    the coal bed instead of ending in a V wedge (the base_in pinch alone draws
+    that wedge - a measured eye read of the 4x canvas named it twice).
     """
     ys = (np.arange(h, dtype=np.float64) + 0.5) / h          # 0 = root, 1 = tip
     us = (np.arange(w, dtype=np.float64) + 0.5) / w * 2.0 - 1.0   # -1..1 half-width
@@ -165,7 +233,7 @@ def flame_mask(w, h, p):
     wob = 1.0 + p["wob_amp"] * np.sin(2.0 * math.pi * p["wob_cells"] * ys + p["wob_phase"])
     half = p["half"] * base * env * bulge * wob
 
-    cx = p["lean_q"] * ys ** 2 + p["lean_s"] * np.sin(
+    cx = x_off + p["lean_q"] * ys ** 2 + p["lean_s"] * np.sin(
         math.pi * p["lean_cells"] * ys + p["lean_phase"]) * ys ** 0.8
 
     t = np.abs(us[None, :] - cx[:, None]) / np.maximum(half, 1e-6)[:, None]
@@ -175,14 +243,66 @@ def flame_mask(w, h, p):
     d = np.clip((ys - p["dissolve_from"]) / max(1e-6, 1.0 - p["dissolve_from"]), 0.0, 1.0)
     a *= 1.0 - p["dissolve"] * (d * d * (3.0 - 2.0 * d))[:, None]
 
-    a *= np.clip(ys / 0.10, 0.0, 1.0)[:, None]            # no hard cut at the root
+    a *= np.clip(ys / root_fade, 0.0, 1.0)[:, None]       # no hard cut at the root
+
+    # Row 0 of a PIL array is the TOP of the PNG, and a flame's root sits at the
+    # BOTTOM of its box (the coal bed is below it), while `ys` measures height
+    # ABOVE the root - so the field is flipped on the way out. Without this the
+    # sprite is drawn as an upside-down drop: measured in a real gallery frame,
+    # the shipped core was 23 px wide in rows 17..19 of 68 and 5 px at its bottom
+    # row, i.e. the body sat at the top and the point pointed at the ground.
+    return np.clip(a, 0.0, 1.0)[::-1]
+
+
+def lobe(w, h, p, y0, y1, x_off=0.0, fade_in=0.30):
+    """One crown lick: `flame_mask`'s shape squeezed into the y band y0..y1.
+
+    `y0`/`y1` are canvas heights ABOVE THE ROOT (0 = the coal bed, 1 = the top of
+    the canvas), and `flame_mask` returns rows top-first, so the band is pasted
+    at the mirrored rows.
+
+    `fade_in` is the fraction of the band over which the lick rises out of the
+    body. A lick unioned at full strength makes a flat shelf where it leaves the
+    body (a hard corner in the outline - the first read of the licks called it
+    "rough flat cuts at the base of the side tongues"), so its lower end is
+    ramped in instead: the union with `np.maximum` then hands over gradually.
+    """
+    r0 = int(round((1.0 - y1) * h))
+    r1 = int(round((1.0 - y0) * h))
+    hb = max(4, r1 - r0)
+    band = flame_mask(w, hb, p, x_off)
+    # `flame_mask` returns rows top-first, so the ramp is indexed from the LAST
+    # row: t = 0 at the lick's own root, 1 further up. Ramping from row 0 would
+    # fade the TIP instead and leave the flat shelf at the base - measured as
+    # "detached plates at the base of the side tongues".
+    t = np.clip((hb - 1 - np.arange(hb, dtype=np.float64)) / max(1e-6, fade_in * hb), 0.0, 1.0)
+    band *= (t * t * (3.0 - 2.0 * t))[:, None]        # smoothstep: no shelf
+    out = np.zeros((h, w), dtype=np.float64)
+    out[r0:r0 + hb, :] = band
+    return out
+
+
+def core_mask(w, h):
+    """The core: the body plus the licked crown, fused (ART-0, eleventh pass).
+
+    A plain `np.maximum` unions the licks with the right valleys between them, but
+    the outline crosses at a CORNER where a lick leaves the body, and the eye read
+    that corner as a flat shelf ("detached plates"). A SOFT union - the p-norm
+    (a^p + b^p)^(1/p) with p = SOFT_UNION_P - rounds exactly that crossing and
+    leaves the valleys alone, because a valley is where the body, not a lick,
+    owns the alpha.
+    """
+    a = flame_mask(w, h, CORE_BODY, 0.0, CORE_ROOT_FADE)
+    for lick in CORE_LICKS:
+        band = lobe(w, h, lick["p"], lick["y0"], lick["y1"], lick["x_off"], lick["fade_in"])
+        a = (a ** SOFT_UNION_P + band ** SOFT_UNION_P) ** (1.0 / SOFT_UNION_P)
     return np.clip(a, 0.0, 1.0)
 
 
 def paint(key):
     """White RGB + the shape in alpha: the age ramp writes the colour."""
     w, h = canvas_size(key)
-    a = flame_mask(w, h, FLAME[key])
+    a = core_mask(w, h) if key == "core" else flame_mask(w, h, FLAME[key])
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[:, :, :3] = 255
     rgba[:, :, 3] = np.round(a * 255.0).astype(np.uint8)
