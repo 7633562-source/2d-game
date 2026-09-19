@@ -510,5 +510,69 @@ Point for the pixel art.
 **Physics.** No simulation file touched this pass - the change is one report card plus a report under
 `Trials/Runs/` (gitignored), zero `.cs`, zero PNG, zero `.meta`. The reference runs cannot move.
 
+## Ninth pass 19.09 (artist) - the five brief items re-verified, and the cap gets a silhouette the frame can carry
+
+Both picture gates were run again through bash on today's bytes (editor closed, no
+`Temp/UnityLockfile`, no `trial.lock`): `art0-import-gate.sh` -> `unity exit=0`, `failures=0`, the four
+`Level/*` through `Load<Sprite>` (1024x256 ppu=128 RGB24, 128x14 ppu=100 RGBA32, 512x128 ppu=32 RGB24,
+64x320 ppu=100 RGBA32), the seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap 8x0,14m ...
+colourDiffAtOneTile 0,0135 vs rowStd 0,0202 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 ->
+REPEATS`; `art1-gate.sh` -> `ART-1A-CHECK end failures=0`, 55 part keys + 7 materials + 4 level keys +
+the campfire flame core real, `flower -> MISSING (procedural)` and `UI icons -> MISSING` the only gaps.
+`Tools/art0-meta-audit.py` (offline) passes all twelve shipped pictures on
+`textureType 8 / spriteMode 1 / spriteMeshType 0 / wrapU-writeRepeat / fallbackPhysicsShape 0 /
+isReadable` exactly where each loader needs it, and finds 318 `.meta` files with 318 distinct guids.
+Nothing had to be added to the ART-0 file set.
+
+The one thing that failed a fresh read was a PICTURE, and it was one the gates could never have
+caught: the 19.09f cap had only ever reached them as a Tiled pixel test - no player build had shown
+it. The first real frames of it (`art-gallery-capture.sh art0verify1909h`, buildGuid
+`5a7c8f0e79854710a089ca87baf990cc`) put the strip's top edge at rows 17..19 with **std 0.34 px, 3
+distinct rows over 1300 columns, tuft columns 100 %, 0 height spikes**: every tuft top sat within 1 px
+of its neighbour, and at the level lens' 64.67 px/m (14 px canvas = 9 px on screen, 1 canvas px =
+0.65 screen px) that averages out to a straight line. Two eye reads of that frame named the strip a
+flat ribbon, and the teeth they could see sat on the SOIL line - the wrong end of the strip.
+
+Repainted within the same canvas, PPU and `.meta` (guid `d818758150410510d3a9e73dae17dec1`, meta md5
+unchanged, file 1342 -> 1519 B): `GRASS_TUFT_MIN 5 -> 3`, `GRASS_TUFT_MAX 8 -> 9` and the tuft height
+field re-weighted `clump*0.50 + blade*0.50 -> clump*0.45 + blade*0.55` in
+`Tools/gen-level-textures.py`. The tuft construction, the brightness fields, the de-tick guard, the
+wrap-exact clump ring and the 4 root rows are untouched.
+
+| measurement | 19.09f | 19.09h |
+|---|---|---|
+| canvas tip rows | 5..9, std 0.71, 5 distinct, max step 1 px | 4..9, std 1.18, 6 distinct, max step 2 px |
+| same resampled to the frame's 83x9 px | tops 4..5, 2 distinct, std 0.49 | tops 3..6, 4 distinct, std 0.76 |
+| frame top edge (level still) | rows 17..19, std 0.34 | rows 17..19, std 0.61 (79 % more variation) |
+| generator seam / worst dark / worst bright | 1.14 vs 4.80 / 2.4 / 2.1 | 4.33 vs 6.08 / 1.2 / 2.2 |
+
+Determinism: the rerun reproduces `md5 67f407c7122aece81fb239440709daea`, the other ten PNGs and all
+eleven `.meta` files are byte-identical, and `git status` names one file
+(`Assets/Resources/Level/ground_cap.png`).
+
+**Evidence.** Real frames from a real build (`art-gallery-capture.sh art0caph`, `scenes=12 errors=0`,
+8 stills, 16.5 s / 165-frame pan, `real=29 missing=11`, buildGuid `f17128ba30f2439d9915bc61a0c8ed95`):
+all seven lenses framed identically to the previous capture (`ortho` 33,99 / 1,97 / 1,30 / 5,30 /
+3,58 / 8,35 / 1,59) and the `dress geometry ... delta=0,0164 m` line is identical in both builds, so
+nothing in the scene graph moved; every pixel that differs between the two builds lies inside a cap
+strip (`level` 6161 px in y 671-677, 77358 px over the eight stills). Two blind eye reads of the two
+canvases resampled to the frame's 83x9 px and tiled 4x both named the new strip the tufted one and the
+old one "a flat band with 1 px teeth"; the on-ground A/B at the same camera
+(`art0caph_level_640_660_ab.png`) reads "new = uneven grass, old = flat ribbon", "no ruler or comb
+teeth in either", "the green/brown contact line stays ragged". Video `Trials/Runs/art0caph.mp4`
+(1920x1080, 165 frames, 16.5 s). Full numbers and the loader lines quoted from the sources:
+`Trials/Runs/art-0-cap-1909h-report.md`.
+
+**Physics.** No simulation file touched: one PNG, `Tools/gen-level-textures.py` and offline probes
+under `Tools/` (outside `Assets/`, not compiled). The cap is a child `SpriteRenderer` in Tiled mode
+with no collider and no Rigidbody2D, and `StaticPlatform` writes only `sr.sprite`/`sr.size` on it, so
+no collider, size or transform can move.
+
+**Still open, unchanged.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles;
+the wide-slab fill's look (one read calls the soil "stretched with visible tiling", another calls it
+painted with no hard seams - two reads disagree, so there is no measurement to justify a repaint yet);
+`leaf`'s sliced vein at the wrap; the flame core's spindle read; the sign's elongated cells;
+`filterMode Point` for the pixel art.
+
 
  

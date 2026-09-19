@@ -274,8 +274,20 @@ def paint_ground_fill(w=1024, h=256):
 #      left standing >= 3 levels below BOTH of its neighbours.
 # The grain itself must stay: blade tips have to differ from their neighbours by more than the dark
 # tufts do, otherwise the strip flattens into a band again.
-GRASS_TUFT_MIN = 5          # px: smallest blade tip row (a tip at row 5 leaves 9 rows of grass)
-GRASS_TUFT_MAX = 8          # px: largest blade tip row, i.e. the shortest blade
+# Fourth repaint 19.09 (ART-0 verify 19.09h). The engine gate was green and the canvas metrics were
+# green, but the strip had never been measured in a FRAME: the 19.09f cap only ever reached the gates
+# as a Tiled pixel test, no player build showed it. First real frames (Trials/Runs/art0verify1909h_*,
+# 1920x1080, 64.7 px/m -> the 14 px canvas is 9 px on screen, 1 canvas px = 0.65 screen px) put the
+# strip's top edge at rows 17..19 with std 0.34 px, 3 distinct rows over 20 m, tuft columns 100 % and
+# 0 height spikes: every tuft top sat within 1 px of its neighbour, so the silhouette averaged out to
+# a straight line and two independent eye reads named the result a flat ribbon, not grass. The teeth
+# the eye did see sat on the SOIL line (the ragged root edge), which is the wrong end of the strip.
+# A 1 px step is 0.65 screen px: below the sampling of the frame. The tips therefore have to span
+# more rows, and neighbouring tufts have to differ by more than one - that is what MIN/MAX buy, and
+# it is the only thing this repaint changes: the tuft construction, the brightness fields, the
+# de-tick guard and the wrap-exact clump ring are untouched.
+GRASS_TUFT_MIN = 3          # px: smallest blade tip row (a tip at row 3 leaves 11 rows of grass)
+GRASS_TUFT_MAX = 9          # px: largest blade tip row, i.e. the shortest blade
 # Third repaint 19.09f. The "gap in the cover" branch below used to SUBTRACT 3 from the tip row, and
 # a smaller row is a TALLER blade: the two tufts that hit `blade(mid) < 0.16` were painted as the
 # strip's tallest blades (tip row 2..4 against a 6..7 line, 5 columns wide at x=112) instead of as
@@ -430,7 +442,7 @@ def paint_ground_cap(w=128, h=14):
         # The clump field carries the low frequencies and the blade field the high ones. The tile
         # is only 1.28 m of ground, so a dominant low-frequency hump would come back at every
         # repeat as a wave (eye check, 19.09): the weight sits on the blade field instead.
-        f = clump(mid) * 0.50 + blade(mid) * 0.50
+        f = clump(mid) * 0.45 + blade(mid) * 0.55
         base = int(round(GRASS_TUFT_MIN + f * span))
         if blade(mid) < 0.16:
             base = GRASS_TOP_GAP                  # a gap in the cover: the tuft sits at the root line
@@ -833,6 +845,11 @@ def main():
         note = "tile seam x: %.2f vs inner %.2f" % (seam, inner)
         if name == "ground_cap":
             worst, wx, step, spike, bright, bx, tuft = cap_tick_report(img)
+            tops = np.array([int(np.argmax(np.asarray(img.convert("RGBA"))[:, :, 3][:, x] > 0))
+                             if np.asarray(img.convert("RGBA"))[:, :, 3][:, x].any() else -1
+                             for x in range(img.size[0])])
+            note += ("; tip rows %d..%d std %.2f, %d distinct," %
+                     (tops.min(), tops.max(), float(tops.std()), len(set(tops.tolist()))))
             note += ("; worst dark column %.1f at x=%d, worst BRIGHT %.1f at x=%d, worst height spike %.0f px,"
                      " mean step %.2f, tuft columns %.0f%%"
                      % (worst, wx, bright, bx, spike, step, tuft * 100))
