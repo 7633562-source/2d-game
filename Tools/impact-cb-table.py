@@ -20,6 +20,9 @@ import sys
 
 PROJECT = r"E:/Games/2D Game/My project"
 RUNS = os.path.join(PROJECT, "Trials", "Runs")
+# The 19:24 (7ebbad89) evidence was superseded by the 22:32 (bf191843) re-run, so it was
+# moved aside instead of deleted: a superseded run is still the only record of that build.
+ARCHIVE = os.path.join(RUNS, "impact-pre-bf191843")
 MANIFEST = os.path.join(PROJECT, "Build", "Headless", "build-manifest.json")
 
 CARD_NUMBERS = ["pelvisDrop", "rmsShoulderJointSpeed", "rmsElbowJointSpeed", "armSwingFraction",
@@ -31,16 +34,19 @@ ROW_KEYS = ["contactTime", "contactPart", "referenceImpulseNs", "deliveredImpuls
             "backInsideSupportSeconds", "latencyActiveMs", "pushedBack", "pushFrameAfterContact",
             "pushBackPeakFzRatio", "peakFzTotalN", "limitHitFraction"]
 
-# build -> run label whose throw[0] is the same class, oldest first.
+# build -> run label whose throw[0] is the same class, oldest first, with the folder that
+# holds it (a label reused by a later re-run names two different players, so the row has to
+# say which file it read).
 TRACE = [
-    ("5794f0ef 11:56", "imp_v1"),
-    ("59b8b311 18:03", "l2_hit_s1"),
-    ("7ebbad89 19:24", "imp_cb1"),
+    ("5794f0ef 11:56", "imp_v1", RUNS),
+    ("59b8b311 18:03", "l2_hit_s1", RUNS),
+    ("7ebbad89 19:24", "imp_cb1", ARCHIVE),
+    ("bf191843 22:32", "imp_cb1", RUNS),
 ]
 
 
-def load(label):
-    with io.open(os.path.join(RUNS, label + "-impacts.json"), encoding="utf-8-sig") as handle:
+def load(label, folder=RUNS):
+    with io.open(os.path.join(folder, label + "-impacts.json"), encoding="utf-8-sig") as handle:
         return json.load(handle)
 
 
@@ -79,23 +85,20 @@ def main():
 
     print("\n== the same class on every accepted build (throw[0])")
     rows = []
-    for build, label in TRACE:
+    for build, label, folder in TRACE:
         try:
-            rows.append((build, label, load(label)["throws"][0]))
+            rows.append((build + " " + label + ("" if folder == RUNS else " (kept)"),
+                         load(label, folder)["throws"][0]))
         except (IOError, KeyError, IndexError):
             print("  {0}: no run".format(label))
     if rows:
         for key in ROW_KEYS:
             line = "  {0:26s}".format(key)
-            first = None
-            for _, _, row in rows:
-                value = row.get(key)
-                if first is None:
-                    first = value
-                line += " {0!r:>26s}".format(value)
+            for _, row in rows:
+                line += " {0!r:>26s}".format(row.get(key))
             print(line)
         print("  {0:26s}".format("build/run") + "".join(
-            " {0:>26s}".format(build + " " + label) for build, label, _ in rows))
+            " {0:>26s}".format(name) for name, _ in rows))
 
 
 if __name__ == "__main__":
