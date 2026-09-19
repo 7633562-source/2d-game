@@ -413,6 +413,33 @@ measurement. Report `Trials/Runs/tree-t1oak-report.md`; pictures
 isolated oak, nothing else in frame); helpers `_t1oak-accept.py`,
 `_t1oak-detail.py`, `_t1oak-csv.py`, `_t1oak-window.py`, `_t1oak-gate.py`.
 
+## T1 re-verified on a FOURTH player, and the pinned metric read against the trace (19.09, cycle `T1f`)
+
+Zero source edits, eight labels, player fp `fc6471dd…` (gitCommit `35c7fbbd`, gate "OK at 19:01").
+Eleven bit-identical pairs — apple `apple_t1f_hold`/`_wind012`/`_windoff` against the accepted
+`apple_t1sw_*` / `apple_t1c2_windoff`, the wind-off repeat against its own sibling, all three
+against the previous cycle's `apple_t1e_*`, and oak `tree_t1f_*` against `tree_t1oak_*` — run
+block AND build block AND **0 of 1600 `joints.csv` rows** on every pair. The apple canon now
+reproduces across four players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53` -> `fc6471dd`); the
+negative controls (PRE-T2 pair, STALE `apple_t1sw_windoff`) move as they must.
+`apple_t1f_photo_windoff` (41 frames, mp4 865 646 B, still 725 666 B, one whole tree, nothing
+else in frame) is byte-identical (`md5`) to the two previous cycles' pictures.
+
+**The apple's pinned number does not answer the question the acceptance asks.**
+`TreeBase.GetHingePinnedFraction()` (`Assets/TreeBase.cs:640-655`) counts a joint when
+`|jointAngle - limit| <= 0.2` deg and the recorder keeps the MAX instant, so a joint sitting
+0.7 deg OUTSIDE its stop is NOT counted. The trace's per-joint TIME fraction in a 0.2 deg band
+(within the band or past the stop): hold J01 0.7781 with an overshoot of 0.6740 deg, J08 0.6831
+at 0.0418 deg; wind 0.12 J01 0.8244 / 2.0664 and J08 0.7625 / 1.1959; no other joint ever enters
+the band. So `hingePinnedFraction` 0.06666667 is true and "pinned = 0.00" can still be met while
+the crown rests on a soft stop — read `maxHingeOverrunDeg` beside it (T4's item). No new signal
+was added: the plan allows new knobs only in T4/T5.
+
+Wind off at 4 s: the wind-off trace is row-identical to its own wind-on sibling through row 799,
+first differing at row 800 (t = 4.004949 s) — the `-appleWindUntil 4` gate. Mean |dAngle|/step in
+the last second falls 0.004357 -> 0.000923 over all 15 joints (ratio 0.212); residual 0.022004 deg
+from the hold pose, crown tip back within 0.000672 m. Report `Trials/Runs/apple-t1f-report.md`.
+
 ## `-visual` is not a neutral flag (measured 19.09, cycle `T1`)
 
 The plant harness has TWO deterministic runs per switch set, and `-visual` chooses which: the

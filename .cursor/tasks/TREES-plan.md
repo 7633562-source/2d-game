@@ -274,6 +274,45 @@ gate "OK at 17:54", no editor, plant sources clean against HEAD).
   `_t1e-photo.sh`, `_t1e-dump.py`.
 - **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
 
+### T1 re-verified on a FOURTH player, and the pinned metric read against the trace — cycle `T1f` (apple worker), 19.09
+
+T1 had no open work again, so the cycle is T1's own acceptance test: a rerun in the accepted
+switch shape. **Zero source edits.** Eight labels (7 physics + 1 picture) on the player
+`fc6471dd…` (gitCommit `35c7fbbd`, built `16:01:04Z`, 632 files, gate "OK at 19:01", 0
+`error CS`, no editor, no lock, plant sources clean against HEAD).
+
+- **11 of 11 bit-identical pairs** — run block AND build block AND 0 of 1600 `joints.csv`
+  rows: apple `apple_t1f_hold`/`_wind012`/`_windoff` == the accepted `apple_t1sw_hold`/
+  `_wind012` and `apple_t1c2_windoff`; the wind-off repeat == its own sibling; the same
+  three == the previous cycle's `apple_t1e_*`; oak `tree_t1f_*` == `tree_t1oak_*` and
+  `tree_t1e_*`. The apple canon now reproduces across FOUR players (`cb7e4ef6` ->
+  `4681f70b` -> `3c4dfc53` -> `fc6471dd`). Negative controls move as they must: PRE-T2
+  `apple_t1_hold` 23 run keys moved / 11 added and its CSV from row 1, the STALE
+  `apple_t1sw_windoff` 12 keys and its CSV from row 2. `tree-const-assert.py` fires on the
+  same discrete sets as the close-out (apple 3, oak 1).
+- Picture `apple_t1f_photo_windoff` (41 frames, mp4 865 646 B, still 725 666 B) is
+  byte-identical (`md5`, frames included) to `apple_t1e_photo_windoff` and
+  `apple_t1d_windoff`; one whole apple tree, nothing else in frame, checked on the image.
+- **New reading (from the CSV, no code change, no new signal):** `GetHingePinnedFraction`
+  (`TreeBase.cs:640-655`) counts `|angle - limit| <= 0.2` deg and reports the MAXIMUM
+  instantaneous fraction, so a joint sitting 0.7 deg OUTSIDE its stop is not counted. The
+  trace's per-joint TIME fractions in the band: hold J01 0.7781 (worst overshoot 0.6740 deg,
+  OUTSIDE), J08 0.6831 (0.0418 deg outside); wind 0.12 J01 0.8244 / 2.0664 and J08 0.7625 /
+  1.1959. Both are the same two joints and no other joint ever enters the band. Consequence
+  for acceptance: **"pinned fraction 0.00" can be met while the crown still rests on a soft
+  stop** — read `maxHingeOverrunDeg` beside it. T4's business.
+- Wind off at 4 s: the wind-off trace is row-identical to its own wind-on sibling up to and
+  including row 799 and first differs at row 800, t = 4.004949 s (the gate). Motion in the
+  last second falls 0.004357 -> 0.000923 mean |dAngle|/step over all 15 joints (ratio 0.212);
+  residual 0.022004 deg from the no-wind hold pose, crown tip back within 0.000672 m, and the
+  release overshoots the wind-on peak (6.448067 against 6.335289).
+- The apple's three unmet acceptance numbers are unchanged and belong to T4/T5: pinned
+  0.06666667, settled sway 0.02222349 m against the 0.10-0.30 band, `crownDrop` 0.00667548 m
+  against 2 mm. Lean 1.166476 (under 4), base slide 0, no joint at its cap.
+- Report `Trials/Runs/apple-t1f-report.md`; helpers `_t1f-runs.sh`, `_t1f-accept.py`,
+  `_t1f-detail.py`, `_t1f-dump.py`, `_t1f-photo.sh`.
+- **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,
