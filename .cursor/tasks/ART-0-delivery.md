@@ -417,4 +417,98 @@ Still open, unchanged: `flower` and `UI icons` (labelled MISSING), the per-part 
 now the two look items this pass recorded (the sign's elongated cells need a shorter banner to become
 square; `filterMode` Point for the pixel art).
 
+## Eighth pass 19.09 (artist) - the five brief items re-verified, and the 19.09f cap's import proof is closed
+
+The ART-0 brief's five items were walked once more on today's bytes (HEAD `5972c095`), and the one thing
+the previous cycle had to leave open - the engine proof for the repainted `ground_cap` - is now green.
+
+**Item 1, the loader contract (quoted from the files, not guessed).** `Assets/LevelArt.cs`:
+
+```
+PathsFor:  FillKey  -> "Level/ground_fill"
+           CapKey   -> "Level/ground_cap"
+           SkyKey   -> "Level/sky",  "Art/sky"
+           SignKey  -> "Level/sign_finish", "Art/sign_finish"
+Load:      for (int i = 0; i < paths.Length && found == null; i++) found = LoadAt(paths[i]);
+LoadAt:    Sprite single = Resources.Load<Sprite>(path);            if (single != null) return single;
+           Sprite[] many = Resources.LoadAll<Sprite>(path);         if (many.Length > 0) return many[0];
+Fill():    Load(FillKey) ?? ArtLibrary.Tiled(ArtLibrary.Dirt, ArtLibrary.GroundTileMeters) ?? White();
+Cap():     Load(CapKey)  ?? ArtLibrary.Tiled(ArtLibrary.Grass, ArtLibrary.GrassTileMeters) ?? White();
+```
+
+So the four level pictures are **Sprite** assets under `Assets/Resources/Level/` with those exact
+names - satisfied. `Assets/ArtLibrary.cs`, the material path:
+
+```
+Albedo(key):  Texture2D tex = Resources.Load<Texture2D>("Art/" + key);   // line 139
+              // "bark" -> Art/bark.png, "Human/head" -> Art/Human/head.png
+Tiled(key, metersPerTile): float ppu = tex.width / metersPerTile;        // line 165
+              Sprite.Create(tex, full rect, pivot .5/.5, ppu, 0, SpriteMeshType.FullRect)
+```
+
+So the seven material keys (`skin`, `fabric`, `denim`, `dirt`, `grass`, `bark`, `leaf`) are **readable**
+`Texture2D` assets under `Assets/Resources/Art/`, key = path fragment - satisfied. A key with no file
+returns `null` on purpose, and the caller must then show the labelled MISSING-ART tile.
+
+**Item 2, the materials, downscaled before bundling.** 1024x1024 sources in `Assets/LegacyArt/` (which is
+not a Resources folder and still must not be bundled) -> 512x512 in `Assets/Resources/Art/`. 512 is not
+taste: `Tiled` derives its own ppu from `tex.width`, and a tiled surface at this camera scale buys
+nothing from 2048.
+
+| file (key) | source | original | final | ratio |
+|---|---|---|---|---|
+| `Art/skin.png` | `LegacyArt/skin.png` | 1 024x1 024, 2003.7 KB | 512x512, 407.8 KB | 4.91x |
+| `Art/fabric.png` | `LegacyArt/fabric.png` | 1 024x1 024, 2149.8 KB | 512x512, 334.6 KB | 6.42x |
+| `Art/denim.png` | `LegacyArt/denim.png` | 1 024x1 024, 3096.3 KB | 512x512, 623.1 KB | 4.97x |
+| `Art/dirt.png` | `LegacyArt/dirt.png` | 1 024x1 024, 2658.8 KB | 512x512, 550.6 KB | 4.83x |
+| `Art/grass.png` | `LegacyArt/grass.png` | 1 024x1 024, 2920.5 KB | 512x512, 664.6 KB | 4.39x |
+| `Art/bark.png` | `LegacyArt/bark.png` | 1 024x1 024, 2871.0 KB | 512x512, 597.5 KB | 4.81x |
+| `Art/leaf.png` | `LegacyArt/leaf.png` | 1 024x1 024, 2126.8 KB | 512x512, 552.1 KB | 3.85x |
+| total | | 17.41 MB | 3.64 MB | 4.78x |
+
+**Item 3, the four level pictures the README asked for, with the exact names.** All four exist in
+`Assets/Resources/Level/` (plus `README.txt`): `ground_fill` 1024x256 PPU 128, `ground_cap` 128x14 PPU 100,
+`sky` 512x128 PPU 32, `sign_finish` 64x320 PPU 100; painted by `Tools/gen-level-textures.py`, seamless
+where they tile. Nothing from the brief is left absent, so no MISSING-ART tile is needed for them.
+
+**Item 4, the import, verified on the `.meta` bytes.** Every one of the eleven pictures carries
+`textureType: 8` (Sprite), `spriteMode: 1` (Single), `spriteMeshType: 0` (Full Rect - what `Sliced` and
+`Tiled` need), `wrapU/wrapV: 1`, `spriteGenerateFallbackPhysicsShape: 0` (art never carries a collider),
+`isReadable: 1` on the seven material tiles (only they need CPU pixels for `Sample`) and `0` on the four
+level pictures. PPU 128 / 100 / 32 / 100 on `Level/*`, 512 on the materials. `Assets/` holds 318 `.meta`
+files with 318 distinct guids, 0 duplicates - the copied metas did not collide.
+Command: `python Temp/grok-burn/art0-meta-audit.py` (offline, no Unity).
+
+**Item 5, bash only, and the engine proof.** Both gates were run through bash on HEAD `5972c095` with the
+shipped 19.09f `ground_cap.png` (`md5 9ce2387464b8135e1fd7ebb2873413d7`, identical before and after the
+run):
+
+```
+bash $LOCALAPPDATA/hermes/scripts/art0-import-gate.sh  -> unity exit=0, failures=0, no "error CS"
+  OK Level/ground_fill 1024x256 ppu=128 RGB24 | Level/ground_cap 128x14 ppu=100 RGBA32
+  OK Level/sky 512x128 ppu=32 RGB24            | Level/sign_finish 64x320 ppu=100 RGBA32
+  OK Art/skin .. Art/leaf  7 x 512x512 readable=True RGB24
+  TILE ground_cap  box=8x0,14m native=1,28m period=164px rowStd near=0,0178 far=0,0177 colourDiffAtOneTile=0,0103 -> REPEATS
+  TILE ground_fill box=32x2m   native=8m    period=256px rowStd near=0,0133 far=0,0133 colourDiffAtOneTile=0,0000 -> REPEATS
+bash $LOCALAPPDATA/hermes/scripts/art1-gate.sh         -> unity exit=0, "ART-1A-CHECK end failures=0"
+  55 part keys + 7 materials + the 4 level keys + the campfire flame core -> real; flower -> MISSING (procedural); UI icons -> MISSING
+```
+
+The cap's wrap cost (`0,0103`) is still below the tile's own grain (`0,0178`), so the tuft repaint did
+not reintroduce the ruler mark as a seam. Full output kept at
+`Temp/grok-burn/art0-cap1909f-close-gate.out`; the previous cycle's report
+(`Trials/Runs/art-0-cap-rhythm-report.md` section 4) is updated from PENDING to CLOSED. The editor was
+closed for both runs (no `Temp/UnityLockfile`), and the waiter held off until the other lane's
+`trial.lock` cleared, so no trial was raced.
+
+**Still open, unchanged.** `flower` (procedural; the caller is the plant lane) and `UI icons` (out of
+scope) as labelled MISSING tiles; the per-part binding of the creatures (ART-2/ART-3); the flame core's
+spindle read; the cap/soil style mismatch; the wide-slab fill stretch (`LevelArt.UseTiledFill()` +
+`ArtLibrary.Tiled` is the declared path, the fill is ready); the sign's elongated cells; `filterMode`
+Point for the pixel art.
+
+**Physics.** No simulation file touched this pass - the change is one report card plus a report under
+`Trials/Runs/` (gitignored), zero `.cs`, zero PNG, zero `.meta`. The reference runs cannot move.
+
+
  
