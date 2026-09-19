@@ -29,6 +29,10 @@ every interior difference and every detail is left alone.
 
 Run from the project root:   python Tools/gen-level-textures.py
 Writes the PNGs plus their .meta import settings, then prints a verification table.
+
+`leaf` is painted here as well (19.09): the legacy leaf is a macro photograph of ONE
+leaf, so a crown dressed `Tiled` at LeafTileMeters = 0.5 m showed the same vein node
+every half metre. See PAINTED_MATERIALS below.
 """
 
 import math
@@ -39,7 +43,7 @@ import shutil
 import sys
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEGACY = os.path.join(ROOT, "Assets", "LegacyArt")
@@ -692,6 +696,222 @@ def paint_sign_finish(w=64, h=320, cell_w=15, cell_h=15, rows=12, post=SIGN_POST
     return img
 
 
+# ─── leaf (painted 19.09): a FIELD of leaves, not one macro leaf ───
+# The legacy leaf is a macro photograph of a single leaf: its vein fan starts at one node
+# near an edge, so a crown dressed `Tiled` at LeafTileMeters = 0.5 m showed the same leaf
+# contour every half metre. The tree read on 19.09: "the same contours repeat, a regular
+# carpet". No downscale can fix that - the picture contains one leaf. This paints the
+# material a crown needs: overlapping oak-ish leaves of 0.09-0.17 m, so the thing that
+# repeats at 0.5 m is a leaf, which is what a crown is made of.
+#
+# Palette is anchored on the tile it replaces: its mean is (66.7, 135.9, 3.9) and the
+# tones below are chosen around it, so the crowns keep the colour the tree lane and the
+# reviews already know. Low blue on purpose: the source leaf is a saturated green and the
+# crown must stay in that family.
+LEAF_SHADOW = (28, 59, 3)
+LEAF_TONES = ((44, 98, 3), (61, 128, 4), (78, 159, 5), (94, 188, 6))
+LEAF_EDGE = (35, 76, 2)
+LEAF_VEIN = (116, 214, 9)
+
+
+def _smooth01(t):
+    return t * t * (3.0 - 2.0 * t)
+
+
+def wrap_noise2(w, h, cells, seed, octaves=3, gain=0.55, growth=3.0):
+    """Value noise over a canvas with an INTEGER cell count, so it wraps in x and in y."""
+    rng = random.Random(seed)
+    acc = np.zeros((h, w), dtype=np.float64)
+    total = 0.0
+    n = cells
+    ys = np.arange(h, dtype=np.float64)
+    xs = np.arange(w, dtype=np.float64)
+    for o in range(octaves):
+        grid = np.array([[rng.random() for _ in range(n)] for _ in range(n)], dtype=np.float64)
+        fy, fx = ys / h * n, xs / w * n
+        y0, x0 = np.floor(fy).astype(int), np.floor(fx).astype(int)
+        ty = _smooth01(fy - y0)[:, None]
+        tx = _smooth01(fx - x0)[None, :]
+        g00 = grid[y0 % n][:, x0 % n]
+        g01 = grid[y0 % n][:, (x0 + 1) % n]
+        g10 = grid[(y0 + 1) % n][:, x0 % n]
+        g11 = grid[(y0 + 1) % n][:, (x0 + 1) % n]
+        top = g00 + (g01 - g00) * tx
+        bot = g10 + (g11 - g10) * tx
+        acc += (gain ** o) * (top + (bot - top) * ty)
+        total += gain ** o
+        n = max(2, int(round(n * growth)))
+    return acc / total
+
+
+def _leaf_sprite(length, width, tone, scale=2):
+    """One leaf on its own transparent canvas: ovate, pointed tip, midrib and side veins.
+
+    Supersampled `scale` times so the rotated edge stays soft - painted-parts.mdc's rule for
+    a cut face (a hard outline becomes a seam when two shapes meet) applies to the overlap
+    between two leaves as well. The rim and the veins are drawn at partial alpha on purpose:
+    a contrasty outline turns a field of leaves into a vector pattern (the 19.09 read of the
+    first attempt: "a hard, contrasty border on every leaf, hundreds of identical sharp
+    ovals"), which is not the level's painted language.
+    """
+    pl, pw = int(length * scale), int(width * scale)
+    pad = 4 * scale
+    img = Image.new("RGBA", (pl + 2 * pad, pw + 2 * pad), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cy = (pw + 2 * pad) * 0.5
+    top, bot = [], []
+    for i in range(pl + 1):
+        t = i / float(pl)
+        half = pw * 0.5 * (math.sin(math.pi * t) ** 0.62) * (1.0 - 0.18 * t)
+        top.append((pad + i, cy - half))
+        bot.append((pad + i, cy + half))
+    d.polygon(top + bot[::-1], fill=tone + (255,))
+    d.line(bot, fill=LEAF_EDGE + (110,), width=max(1, scale - 1))
+    d.line([(pad, cy), (pad + pl, cy)], fill=LEAF_VEIN + (150,), width=1)
+    for k in range(5):
+        t = 0.16 + 0.17 * k
+        x = pad + pl * t
+        v = pw * 0.30 * (1.0 - 0.12 * k)
+        for sign in (-1.0, 1.0):
+            d.line([(x, cy), (x + v * 0.95, cy + sign * v * 0.72)],
+                   fill=LEAF_VEIN + (110,), width=1)
+    return img
+
+
+def _over(field, sprite, x, y):
+    """Alpha-over one RGBA sprite at (x, y) into a float RGBA field, clipping at the field."""
+    fh, fw = field.shape[:2]
+    sh, sw = sprite.shape[:2]
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(fw, x + sw), min(fh, y + sh)
+    if x0 >= x1 or y0 >= y1:
+        return
+    sub = sprite[y0 - y:y1 - y, x0 - x:x1 - x].astype(np.float64)
+    a = sub[:, :, 3:4] / 255.0
+    dst = field[y0:y1, x0:x1, :3]
+    field[y0:y1, x0:x1, :3] = sub[:, :, :3] * a + dst * (1.0 - a)
+    field[y0:y1, x0:x1, 3] = 255.0
+
+
+def paint_leaf(w=512, h=512, seed=20260919, count=44, fill=14):
+    """A foliage field, 2x supersampled and painted TOROIDALLY.
+
+    Every leaf is composited at nine positions (its own plus the eight shifted copies of the
+    tile lattice), so the tile is seamless in x and y by construction: the seam is not a
+    joint between two pictures, it is a joint inside the same painted scene. `wrap_blend`
+    is therefore not applied to this key - a mirrored band would smear a composition that
+    already has no cut (Tools/art0-leaf-field-probe.py measures the rank of the wrap step
+    among the steps a 3 x 3 repeat shows).
+    """
+    scale = 2
+    margin = 230 * scale          # wider than the largest leaf, so no copy falls off the field
+    fw, fh = w * scale + 2 * margin, h * scale + 2 * margin
+
+    tile_noise = wrap_noise2(w * scale, h * scale, 6, seed + 1, octaves=3, gain=0.55, growth=3.0)
+    # Tiled up to the field: the final crop is exactly one tile wide, and a window of one
+    # period through a periodic field is the tile rotated, so both stay seamless.
+    base = np.tile(tile_noise, (3, 3))[:fh, :fw]
+    field = np.zeros((fh, fw, 4), dtype=np.float64)
+    for c in range(3):
+        field[:, :, c] = LEAF_SHADOW[c] * (0.80 + 0.40 * base)
+    field[:, :, 3] = 255.0
+
+    rng = random.Random(seed)
+    # Directions are dealt from a full circle (one per leaf, jittered) instead of drawn
+    # independently: with independent draws the field came back with most leaves lying
+    # near-horizontal, which reads as a woven mat rather than a crown.
+    angles = [360.0 * k / float(count) + rng.uniform(-14.0, 14.0) for k in range(count)]
+    rng.shuffle(angles)
+
+    leaves = []
+    for i in range(count):
+        # Every third leaf is a smaller, darker one in the back: a field of one size reads
+        # as a print, and the eye needs a scale ladder plus something dark to look INTO.
+        # Depth 0 puts the fillers at the front of the sort, i.e. painted first and darkest.
+        filler = i < fill
+        if filler:
+            length, depth = rng.uniform(34.0, 60.0) * scale, 0.0
+        else:
+            length, depth = rng.uniform(70.0, 130.0) * scale, rng.random()
+        leaves.append({
+            "depth": depth,
+            "length": length,
+            "ratio": rng.uniform(0.42, 0.70),
+            "angle": angles[i],
+            "cx": rng.uniform(0.0, w),
+            "cy": rng.uniform(0.0, h),
+            # Tone jitter per leaf: a field of four exactly repeated greens reads printed.
+            "tone": rng.uniform(-0.13, 0.13),
+            # The light comes from the upper left, but not from one single point: a shadow
+            # offset that is identical on every leaf is what makes a field look like scales.
+            "shadow_angle": math.radians(rng.uniform(18.0, 74.0)),
+            "shadow_len": rng.uniform(3.0, 6.5) * scale,
+            "shadow_alpha": rng.uniform(0.26, 0.38),
+            "i": i,
+        })
+    leaves.sort(key=lambda row: (row["depth"], row["i"]))   # back to front: depth is the key
+
+    for leaf in leaves:
+        depth, i = leaf["depth"], leaf["i"]
+        tone = LEAF_TONES[int(round(depth * (len(LEAF_TONES) - 1)))]
+        if leaf["tone"] >= 0.0:
+            tone = mix(tone, LEAF_VEIN, leaf["tone"])
+        else:
+            tone = mix(tone, LEAF_SHADOW, -leaf["tone"])
+        arr = np.asarray(_leaf_sprite(leaf["length"], leaf["length"] * leaf["ratio"],
+                                      tone, scale).rotate(leaf["angle"],
+                                                          resample=Image.BICUBIC, expand=True))
+        shadow = arr.copy()
+        shadow[:, :, :3] = LEAF_SHADOW
+        shadow[:, :, 3] = (arr[:, :, 3].astype(np.float64) * leaf["shadow_alpha"]).astype(np.uint8)
+        off_x = int(round(math.cos(leaf["shadow_angle"]) * leaf["shadow_len"]))
+        off_y = int(round(math.sin(leaf["shadow_angle"]) * leaf["shadow_len"]))
+        for dx in (-w * scale, 0, w * scale):
+            for dy in (-h * scale, 0, h * scale):
+                px = int(round(margin + leaf["cx"] * scale + dx - arr.shape[1] * 0.5))
+                py = int(round(margin + leaf["cy"] * scale + dy - arr.shape[0] * 0.5))
+                _over(field, shadow, px + off_x, py + off_y)
+                _over(field, arr, px, py)
+
+    grain = np.tile(wrap_noise2(w * scale, h * scale, 96, seed + 7, octaves=2, gain=0.5), (3, 3))
+    out = field[margin:margin + h * scale, margin:margin + w * scale, :3]
+    grain = grain[margin:margin + h * scale, margin:margin + w * scale]
+    out = out + (grain[:, :, None] - 0.5) * 6.0
+    # Which window of the (exactly periodic) field becomes the tile decides WHICH neighbour
+    # pair sits at the wrap. Every window is seamless - the composition has no discontinuity
+    # to hide - so the only question is whether the pair at the wrap is a typical one. It is
+    # set to the tile's own MEDIAN busyness, not to the quietest pair: a repeat should show
+    # an ordinary pair of neighbours, and the probe checks that it does. (The older, legacy
+    # leaf scored 0.0 % of its own pairs - its wrap was the flattest pair in the tile,
+    # because `wrap_blend` had mirrored a band across it.)
+    def _median_pair_offset(rgb, axis):
+        """The window start whose wrap pair is the tile's MEDIAN-busyness neighbour pair."""
+        ext = np.concatenate([rgb, np.take(rgb, [0], axis=axis)], axis=axis)
+        pair = np.abs(np.diff(ext, axis=axis)).mean(
+            axis=tuple(i for i in range(3) if i != axis))
+        med = float(np.median(pair))
+        return (int(np.argmin(np.abs(pair - med))) + 1) % rgb.shape[axis]
+
+    def _window(rgb, axis, start):
+        return np.concatenate([rgb.take(np.arange(start, rgb.shape[axis]), axis=axis),
+                               rgb.take(np.arange(start), axis=axis)], axis=axis)
+
+    # Downscale 2:1 with a plain 2 x 2 box average, not a resampling filter: a box kernel
+    # never reaches outside the tile, so the periodic tile stays exactly periodic (LANCZOS
+    # runs off the edge, clamps to the edge pixel and leaves a ~1 level step exactly AT the
+    # wrap - the one place this tile must not have one). At 2:1 the two are visually the
+    # same; the difference is that this one wraps to the level, and that is measured.
+    tile = out.reshape(h, scale, w, scale, 3).mean(axis=(1, 3))
+    tile = _window(tile, 1, _median_pair_offset(tile, 1))
+    tile = _window(tile, 0, _median_pair_offset(tile, 0))
+    return Image.fromarray(np.clip(np.round(tile), 0, 255).astype(np.uint8), "RGB")
+
+
+# Materials painted here instead of downscaled from LegacyArt. `bark`, `dirt`, `grass`,
+# `denim`, `fabric` and `skin` stay on the legacy path (level_tile + wrap_blend).
+PAINTED_MATERIALS = {"leaf": paint_leaf}
+
+
 # ─── materials: LegacyArt 1024 -> Resources/Art 512 ───
 MATERIALS = ["skin", "fabric", "denim", "dirt", "grass", "bark", "leaf"]
 
@@ -701,7 +921,13 @@ MATERIALS = ["skin", "fabric", "denim", "dirt", "grass", "bark", "leaf"]
 # which is what `leaf` has: its veins are cut by the tile boundary, and the 19.09 review read
 # the swatch as "coarse 2x2 seam grid, the pattern is destroyed". 32 px of 512 = 6.25 % per
 # axis, and at LeafTileMeters the band is 2 screen px at the level lens.
-WRAP_BLEND = {"leaf": 32}
+#
+# EMPTY since the leaf pass (19.09): `leaf` is no longer a downscaled legacy photo but a
+# canvas painted toroidally (PAINTED_MATERIALS below), so it has no wrap to blend - and a
+# mirrored 32 px band across a painted composition would smear it. The band stays documented
+# here because it is what fixed the other materials' ramps, and because the leaf seam it was
+# written for is the reason the leaf is painted now.
+WRAP_BLEND = {}
 
 
 def write_meta(png_path, pixels_per_unit, readable, alpha, guid):
@@ -965,6 +1191,19 @@ def main():
     for key in MATERIALS:
         if want and key not in want:
             continue
+        path = os.path.join(ART_DIR, key + ".png")
+
+        painter = PAINTED_MATERIALS.get(key)
+        if painter is not None:
+            img = painter()
+            size = save(img, path, 512, True, False, guid_rng)
+            seam, inner = seam_error(img)
+            rows.append(("Resources/Art/" + key + ".png", "painted %dx%d" % img.size, 512,
+                         "%d KB" % (size // 1024),
+                         "readable; painted foliage field, seamless by construction; "
+                         "tile seam x %.2f vs inner %.2f" % (seam, inner)))
+            continue
+
         src = os.path.join(LEGACY, key + ".png")
         before = os.path.getsize(src)
         img = Image.open(src).convert("RGB")
@@ -975,7 +1214,6 @@ def main():
         if band:
             out, blend_note = wrap_blend(out, band)
             note += "; " + blend_note
-        path = os.path.join(ART_DIR, key + ".png")
         size = save(out, path, 512, True, False, guid_rng)
         rows.append(("Resources/Art/" + key + ".png",
                      "%dx%d -> %dx%d" % (src_size[0], src_size[1], 512, 512), 512,

@@ -23,3 +23,13 @@ Verification 19.09.2026 (ART-0 re-run, editor closed, bash only):
   Tiled draw mode really repeats: ground_cap colourDiffAtOneTile 0.0030, ground_fill 0.0000.
   Wrap check on the committed bytes: every material tile's cut is within 1.81x its own grain,
   so no tile shows a visible step at the repeat.
+
+Status 19.09.2026 late (ART-0, sixteenth pass): `leaf` is no longer a downscaled legacy photo.
+The legacy leaf is a macro photograph of ONE leaf, so every crown drew the same vein node every
+`ArtParts.LeafTileMeters` = 0.5 m. `Tools/gen-level-textures.py` now PAINTS it
+(`PAINTED_MATERIALS = {"leaf": paint_leaf}`): 44 overlapping leaves of 0.033-0.127 m at that tile,
+composited at the nine positions of the tile lattice, so it is seamless by construction and
+`WRAP_BLEND` is empty. Mean colour kept (66.7, 135.9, 3.9 -> 66.8, 135.8, 4.5), guid and every
+`.meta` field unchanged, 561 731 B -> 161 855 B. Measured wrap step 1.06/1.10 levels, at the median
+of the tile's own 511 edge pairs; frames `art0leaffield` (buildGuid `b2c011858b104923bc82a57262ea59f8`),
+report `Trials/Runs/art-0-leaf-field-report.md`.

@@ -84,9 +84,15 @@ def pan(label):
     print("=== pan %s: %d frames ===" % (label, len(frames)))
     if not frames:
         return
+    # The player writes the frame number with the width the count needs, and it grows
+    # within one run: 165 frames are `_00` .. `_99` then `_100`. A fixed %03d therefore
+    # finds no input at all above 99 frames (it did on 19.09, ffmpeg exit 2), so the width
+    # is read off the files that are actually there.
+    width = len(frames[0].rsplit("_", 1)[1][:-4])
+    first = int(frames[0].rsplit("_", 1)[1][:-4])
     out = os.path.join(RUNS, "%s.mp4" % label)
-    cmd = ["ffmpeg", "-y", "-framerate", "10",
-           "-i", os.path.join(RUNS, "shot_%s_%%03d.png" % label),
+    cmd = ["ffmpeg", "-y", "-framerate", "10", "-start_number", str(first),
+           "-i", os.path.join(RUNS, "shot_%s_%%0%dd.png" % (label, width)),
            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", out]
     r = subprocess.run(cmd, capture_output=True, text=True)
     print("ffmpeg exit=%d -> %s (%d bytes)" % (r.returncode, out,

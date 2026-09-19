@@ -938,4 +938,83 @@ wide-slab fill's look; the sign at native size only in the LEVEL row; `leaf`'s 0
 time-driven - they would make a catalogue frame unrepeatable). **Closed by this pass: the FIRE row
 showing the core alone.**
 
+## Sixteenth pass 19.09 (artist) - the leaf material is painted as a foliage field
+
+Both picture gates were run again through bash on today's bytes (editor closed, no
+`Temp/UnityLockfile`): `art0-import-gate.sh` -> `unity exit=0`, 0 `ART-IMPORT-CHECK FAIL`, the four
+`Level/*` through `Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100),
+`Art/leaf tex=leaf 512x512 readable=True format=RGB24`, the seven `Art/<key>` `512x512 readable=True`,
+`TILE ground_cap ... 0,0083 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`;
+`art1-gate.sh` -> `ART-1A-CHECK end failures=0` (55 part keys + 7 materials + 4 level keys). The five
+brief items are re-proved on today's bytes and nothing had to be added to the ART-0 file set.
+
+The next item on this file's own list, and the last one in the material set: **`leaf`'s 0.5 m tiling
+rhythm**. `ArtParts.DressAll` dresses every crown with `ArtLibrary.Leaf` through `Tiled(key,
+LeafTileMeters = 0.5f)`, and the legacy tile is a macro photograph of ONE leaf - its vein fan starts
+at one node near an edge. The tenth pass took the seam out of it; what the eye then found was the
+thing that was left: *"the same contours repeat, a regular carpet"* (read of `gallery6_tree.png`). No
+blend and no downscale can fix that, because the picture contains one leaf.
+
+`Assets/Resources/Art/leaf.png` is now **painted** by `Tools/gen-level-textures.py`
+(`PAINTED_MATERIALS = {"leaf": paint_leaf}`; `bark`, `dirt`, `grass`, `denim`, `fabric`, `skin` stay
+on the legacy path): 44 leaves of 0.033-0.127 m at the tile's 0.5 m, directions dealt one per leaf
+from a full circle, a four-step depth ladder with per-leaf tone jitter, a per-leaf shadow direction
+and alpha, and rim/vein lines at 110-150 of 255 alpha instead of 200-215. Every leaf is composited at
+NINE positions of the tile lattice on a 2x canvas, so the tile is seamless **by construction** and
+`WRAP_BLEND` is empty (a mirrored band would smear a composition that has no cut). `wrap_blend` is
+what the tenth pass needed and what this pass retires for this key; the reason is written next to the
+now-empty dict.
+
+**The two traps this lane has already paid for, and how they were avoided.** (1) A blind read of the
+first painting caught every leaf lying near-horizontal - "a woven mat" - because the directions were
+drawn independently; they are now dealt one per leaf. (2) LANCZOS at the edge of an isolated crop
+clamps to the edge pixel and left a 1.0-1.6 level step exactly AT the wrap; the 2:1 downscale is now a
+plain 2x2 box average, which never reaches outside the tile. The tile is one window of the periodic
+canvas, and the window start is the pair at the tile's **median** neighbour busyness - **not** the
+quietest pair: the legacy tile scored 0.0 % of its own 511 edge pairs (the mirrored band had pinned
+its wrap to the flattest pair in the picture), the painted one sits at 44.4 % / 50.3 %.
+
+| | legacy photo | painted field |
+|---|---|---|
+| mean rgb | 66.7, 135.9, 3.9 | 66.8, 135.8, 4.5 |
+| wrap step X / Y (levels, % of range) | 0.46 / 0.47 (0.18 / 0.19 %) | 1.06 / 1.10 (0.41 / 0.43 %) |
+| wrap vs tile's own edge pairs | 0.0 % of 511 | 44.4 % / 50.3 % (median) |
+| wrap / mean interior grain | 0.04 | 0.88 / 0.93 |
+| rank max in a 3x3 repeat | 0.9 % | 88.0 % |
+| distinct colours | 40 602 | 3 260 |
+| file | 561 731 B | 161 855 B |
+
+The 3x3 `rank max` is a percentile over every single pixel step, and a painted tile's interior is
+nearly flat (grain 1.20 against the photo's 12.25), so a sub-level wrap step lands high in a
+distribution of near-zero steps. **Read it with the grain or it inverts the truth**; the statistic
+that answers "is the wrap special?" is the wrap against the tile's own edge pairs, which is now
+printed as its own line by `Tools/art0-leaf-field-probe.py`. The palette is anchored on the tile it
+replaces (mean rgb above, blue 4/255 kept) so the crowns keep the colour the tree lane and every
+review knows.
+
+**Evidence.** One build, one run, bash only (`art-gallery-capture.sh art0leaffield`):
+`PREVIEW_BUILD_OK ... scenes=12 errors=0`, 8 stills + 165-frame / 16.5 s 1080p pan, 0 capture
+failures, `real=29 missing=11 dressed=5567`, buildGuid `b2c011858b104923bc82a57262ea59f8`;
+`Tools/gallery-refresh-check.py art0leaffield` -> `OK stills_bad=0 fields_moved=6`, row boxes 23 -> 23.
+Against `gallery6` (the same player, leaf at `HEAD`): `fire` and `human` **pixel-identical** (the two
+lenses that draw no `leaf` - the control), `tree` 751 665 px (the crowns), `photo` 10 179, `apple`
+80 913, `materials` 22 391 px inside one 150x150 box (the `leaf` swatch), `level` 4 091 px inside
+64x64 (the same swatch), `placeholder` 251 px. **Three blind reads** (`Tools/art0-leaf-frames-ab.py`,
+zoom centred on the pixels that MOVED, mapping in `map.txt`, read after the pick) chose the painted
+build each time, and the third was run with a seed that puts it on the RIGHT, so the verdict is not a
+left-side bias. Two reads also flagged the crown GEOMETRY's cut planes - recorded for the plant lane
+(`TREES-plan.md`), not acted on here. Full numbers: `Trials/Runs/art-0-leaf-field-report.md`.
+
+**Physics.** One PNG, `Tools/gen-level-textures.py` (outside `Assets/`, never compiled) and three
+offline tools under `Tools/`; no `.cs` under `Assets/` touched. The material reaches the screen only
+through `Albedo` -> `Tiled` -> `ArtParts.Dress` -> `SpriteRenderer`, `RealArtEnabled` defaults to
+false, and `fire`/`human` are byte-identical across two players and three other lanes' `.cs` edits.
+`Build/Headless` was neither rebuilt nor re-run.
+
+**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the
+wide-slab fill's look; the sign at native size only in the LEVEL row; `filterMode Point` for the pixel
+art; sparks/smoke/embers and the night glow in the FIRE row (time-driven, so they would make a
+catalogue frame unrepeatable); the crowns' cut planes (plant lane). **Closed by this pass: `leaf`'s
+0.5 m tiling rhythm** - the material set is now free of the "one leaf fills the tile" defect.
+
 
