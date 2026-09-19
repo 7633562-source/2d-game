@@ -586,14 +586,29 @@ def paint_sky(w=512, h=128):
 # roadworks barrier"), 4 columns of 11 px came THIRD ("the fine grid dissolves into grey mush at
 # 8x40"), 2x3 on metal came SECOND, and the winner is 3 x 5 cells of 15 x 38 px on the metal mast -
 # dense enough to be a chequer, coarse enough to survive the 11 x 47 px the banner really occupies.
+#
+# Fourth pass 19.09: those 15 x 38 px cells are 2.53:1, and both a fresh eye read of the frame and
+# three blind A/B reads at the size the piece really ships named that elongation ("long vertical
+# rectangles, not a chequer"). A finish chequer is square; the elongation was never a decision, it
+# was the banner height divided by 5. So the grid is now square cells of 15 x 15 (12 rows over the
+# 186 px banner) and the row count follows the cell size instead of the other way round.
+#
+# The scale the judgement is made at is the level's own, not the gallery's: `LevelTest1.cs:3059`
+# places the piece as 0.18 x 0.90 m and `GameProcess.cs:939` runs ortho 4.6, so the sign occupies
+# 21.1 x 105.7 px and one 15 px cell is 5.0 x 5.0 screen px. The gallery's LEVEL row draws the
+# sprite at its native 0.64 x 3.2 m (3.55x bigger) - `Tools/art0-sign-cells.py` renders both sizes
+# and is the sheet the variants were judged on (`Trials/Runs/art-0-sign-cells/`, sizes in map.txt).
 SIGN_POST_WOOD = (POLE_DARK, POLE_LIGHT, POLE)                      # (dark, light, mid)
 SIGN_POST_METAL = ((84, 88, 96), (172, 176, 182), (126, 130, 138))
 
 
-def paint_sign_finish(w=64, h=320, cell_w=15, cell_h=38, rows=5, post=SIGN_POST_METAL):
-    """Finish banner on a post. Defaults = the shipped look (third pass).
+def paint_sign_finish(w=64, h=320, cell_w=15, cell_h=15, rows=12, post=SIGN_POST_METAL):
+    """Finish banner on a post. Defaults = the shipped look (fourth pass, square cells).
 
+    cell_w=15, cell_h=38, rows=5 reproduces the third pass byte for byte.
     cell_w=23, cell_h=62, rows=3, post=SIGN_POST_WOOD reproduces the second pass byte for byte.
+    cell_h == cell_w is what makes the cloth a chequer rather than vertical bars; the row count is
+    derived from the cell size (186 px of banner / cell_h), not fixed.
     """
     post_dark, post_light, post_mid = post
     img = new_image(w, h)

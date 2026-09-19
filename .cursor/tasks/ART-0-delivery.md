@@ -695,3 +695,58 @@ not compiled). The core reaches the screen through `Albedo` -> `Sprite.Create` -
 which writes `sr.sprite` only; box, `localScale`, tint and sorting order are the same constants, and the
 campfire has no collider and no `Rigidbody2D`. No simulation file touched.
 
+## Twelfth pass 19.09 (artist) - the finish chequer is square, and it is judged at the size the level draws
+
+The ART-0 brief's five items were re-verified on today's bytes (both gates through bash, editor closed,
+output kept): `art0-import-gate.sh` -> `unity exit=0`, `failures=0`, the four `Level/*` through
+`Load<Sprite>` (1024x256 ppu=128 RGB24, 128x14 ppu=100 RGBA32, 512x128 ppu=32 RGB24, 64x320 ppu=100
+RGBA32), the seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap box=8x0,14m ... colourDiffAtOneTile
+0,0135 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`; `art1-gate.sh` -> `unity exit=0`,
+`ART-1A-CHECK end failures=0`, 55 part keys + 7 materials + 4 level keys + the flame core real,
+`flower -> MISSING (procedural)` and `UI icons -> MISSING` the only gaps. `Tools/art0-meta-audit.py`:
+`problems=0`, 318 `.meta` files with 318 distinct guids. Nothing had to be added to the ART-0 file set.
+
+The open look item carried since the seventh pass - "the sign's elongated cells" - was closed, and
+closing it moved the question to the scale the picture is judged at. `Assets/LevelTest1.cs:3059` places
+the piece as `0.18 x 0.90 m` and `Assets/GameProcess.cs:939` runs the camera at ortho 4.6 (3.6 / 4.0 /
+5.0 in the other branches), so at 1080p the sign is **21.1 x 105.7 px** and one 15 px cell is 5.0 x 5.0
+screen px. The gallery's LEVEL row draws the sprite at its **native 0.64 x 3.2 m** (3.55x bigger) - that
+is the view the elongation was ever seen in, and the label says so.
+
+`Tools/art0-sign-cells.py` renders the shipping painter into the 0.18 x 0.90 m box at 117.39 px/m,
+magnifies 4x NEAREST and writes blind two-panel sheets (`Trials/Runs/art-0-sign-cells/`, mapping in
+`map.txt`). Four reads: B (15x15, 12 rows) beat the shipped 15x38 ("long vertical rectangles, 1:3-1:4,
+not a chequer"); C (21x21) beat it too ("stretched along Y, an incorrect UV mapping"); D (11x11) LOST to
+it ("dissolves into a grey mesh" - the too-fine end is rejected); and B beat C ("harlequin / hazard
+marking"). So the repaint is "make the cells square", not "add detail".
+
+`paint_sign_finish` defaults `cell_w=15, cell_h=38, rows=5` -> `cell_w=15, cell_h=15, rows=12`; the row
+count now follows the cell size. Same canvas, PPU, palette and `.meta` (guid `b759f8b7...` did not move,
+all eleven `.meta` files byte-identical). `python Tools/gen-level-textures.py sign_finish` changed exactly
+one file: 959 -> 990 B, md5 `6bea0ce0...` -> `5e1b7827...`. On the shipped bytes
+(`Tools/art0-sign-cells-verify.py`): **alpha byte-identical, opaque 11172 -> 11172, RGB changed 3576 of
+20480 px (17.46 %)**, cell boundaries at pitch 15 px down and across the cloth (was 38 / 15), drawn cell
+5.0 x 5.0 px, aspect h/w 1.00 (was 2.53).
+
+**Evidence.** Real build (`art-gallery-capture.sh art0signc`, `scenes=12 errors=0`, 8 stills, 165 pan
+frames / 16.5 s, `real=29 missing=11`, capture failures 0, buildGuid
+`9b33c953507046558ae4e8d65b7ffc5f`, video `Trials/Runs/art0signc.mp4`). Against `art0flame1` (buildGuid
+`0114b556...`): `fire`, `human`, `materials`, `tree` **pixel-identical** (the same-build control), `level`
+1983 px differing inside x 1055-1083 y 477-589 (the cloth), `photo` and `placeholder` 231 px each at the
+same cloth seen from the whole-gallery lens, `apple` 709 px (the plant lane's rig compiled between the two
+builds). Blind read of the identical window in both LEVEL stills
+(`frame_level_1000_430_art0flame1_vs_art0signc.png`, 3x NEAREST, mapping in `map_frame.txt`): the new
+cloth is "a correct racing finish chequer, 1:1 cells, no digital noise", the shipped one "clearly
+stretched along Y, cells 1:2 or worse". Full numbers: `Trials/Runs/art-0-sign-cells-report.md`.
+
+**Physics.** One PNG + `Tools/gen-level-textures.py` + three offline probes under `Tools/` (outside
+`Assets/`, never compiled). The sign is a `Decor` drawn by `StaticPlatform`, which writes `sr.sprite` on a
+child `SpriteRenderer` with no collider and no `Rigidbody2D`; the piece size comes from the level data and
+was not touched. No `.cs` file of the simulation is in `git status` for this pass.
+
+**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the LEVEL row
+shows the sign at native size only (a gameplay-size instance next to it is the next step there, now that
+the cells read square at every scale); `leaf`'s tiling rhythm; the wide-slab fill's look; the flame core's
+spindle read and its thin straight tongues.
+
+
