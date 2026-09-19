@@ -235,6 +235,45 @@ every `.cs` older than the DLL, no editor, no lock. The accepted baselines were 
   (output `apple-t1d-accept-output.txt`), `_t1d-visual.py`, `_t1d-firstdiff.py`.
 - **Next: T2 (diagnosis), not started here.**
 
+### T1 re-verified on the ART-0 player, zero edits — cycle `T1` (apple worker), 19.09
+
+T1 had **no open work** (trace, run/build split, the constant-suspect assertion, the apple
+`gravityGradient` gap, the settled window + stable tip + wind-off run, and the T2 frame fix
+that had been sitting uncommitted are all landed and committed), so the cycle is the test
+T1 itself names: a rerun in the accepted switch shape. Seven runs, **zero source edits**,
+one picture, on the player `3c4dfc53…` (gitCommit `8ce38675`, built 14:54:08Z, 632 files,
+gate "OK at 17:54", no editor, plant sources clean against HEAD).
+
+- **Bit-identical, run block AND build block AND all 1600 CSV rows:** `apple_t1e_hold` ==
+  `apple_t1sw_hold`, `apple_t1e_wind012` == `apple_t1sw_wind012`, `apple_t1e_windoff` ==
+  `apple_t1c2_windoff`, `apple_t1e_windoff` == its own repeat `_b`, all three also == the
+  previous cycle's `apple_t1d_nv_*`, and `tree_t1e_*` == `tree_t1oak_*`. Run `moved=0
+  lost=0 added=0` on every pair; the only moving keys are the run-file meta and the wind
+  config in `build:`. The negative controls move as they must: the PRE-T2 `apple_t1_hold`
+  pair moves 23 run keys (11 added, build `joints` + the four gradients) and the STALE
+  `apple_t1sw_windoff` moves 12, CSV from row 2.
+- **New: the canon reproduces across THREE players** (`cb7e4ef6` -> `4681f70b` ->
+  `3c4dfc53`, two rebuilds by other lanes): the plant trajectory is invariant to a rebuild,
+  so the plant instrumentation reads nothing the other lanes can move.
+- Const-assert FIRED with the same discrete sets as the close-out (apple 3:
+  `hingePinnedFraction` 0.06666667, `hingePinnedJointCount` 2, `springSatFraction` 0; oak
+  1: `springSatFraction`), and J08 stays the one pinned joint (0.683 of the hold samples,
+  0.296 at wind 0.12, 2.066 deg outside its own SOFT stop; the oak's worst overrun is
+  0.1518 deg = hard stops).
+- The apple's three unmet acceptance numbers are unchanged and not instrumentation
+  (`hingePinnedFraction` 0.0667, settled sway 0.0222 m against 0.10-0.30, `crownDrop`
+  6.68 mm); the wind-off run proves decay (residual 0.022004 deg, tip back within
+  0.000672 m).
+- Picture `apple_t1e_photo_windoff` (41 frames, mp4 865 646 B, photo 725 666 B) is
+  **byte-identical** (`md5`) to `apple_t1d_windoff`'s picture and frames, so the `-visual`
+  variant is deterministic across players too.
+- **The apple brief's job 2 is already landed by the level worker** (`Assets/Scenes/
+  TreeApple.unity` + `GameProcess.cs:500-519` routing `AppleTree` via `treeSpecies`), so a
+  future apple brief must not ask for it again.
+- Report `Trials/Runs/apple-t1e-report.md`; helpers `_t1e-runs.sh`, `_t1e-accept.py`,
+  `_t1e-photo.sh`, `_t1e-dump.py`.
+- **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,

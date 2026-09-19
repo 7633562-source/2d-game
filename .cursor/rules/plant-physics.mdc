@@ -438,3 +438,29 @@ moving as they must, born-behind 0/15 and no joint at its cap. Report
 `Trials/Runs/apple-t1d-report.md`; helpers `_t1d-accept.py`, `_t1d-visual.py`,
 `_t1d-firstdiff.py`.
 
+## T1 re-verified after two more rebuilds — cycle `T1` (apple worker), 19.09
+
+T1 had no open work left, so the cycle ran T1's own acceptance on the player the other lanes
+have since rebuilt: fp `3c4dfc53…`, gitCommit `8ce38675`, built `2026-09-19T14:54:08Z`, gate
+"OK at 17:54", no editor, plant sources clean against HEAD, **zero source edits**.
+
+- Bit-identical again on run block AND build block AND all 1600 `joints.csv` rows:
+  `apple_t1e_hold`/`_wind012`/`_windoff` == `apple_t1sw_hold`/`_wind012`/`apple_t1c2_windoff`,
+  the wind-off repeat == its own sibling, and `tree_t1e_*` == `tree_t1oak_*`. The accepted
+  apple canon now reproduces across THREE players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53`).
+- Negative controls move as they must: the PRE-T2 `apple_t1_hold` pair (23 run keys, 11
+  added, build `joints` + the four gradients) and the STALE `apple_t1sw_windoff` (12 keys,
+  CSV from row 2). `tree-const-assert.py` FIRES on the same discrete sets as the close-out
+  (apple 3, oak 1), so the signal is live.
+- The three unmet apple acceptance numbers are unchanged and belong to T4/T5, not to T1:
+  `hingePinnedFraction` 0.06666667 (J08 + J01; J08 sits 0.674 deg outside its own SOFT stop in
+  still air, worst overrun 2.066446 deg under wind), settled sway 0.022223 m against the
+  0.10-0.30 band, `crownDrop` 0.00667548 m against 2 mm. Wind off at 4 s still decays: release
+  peak 6.448067, last-second residual 0.022004 deg from the hold pose, crown tip 0.000672 m.
+- The `-visual` picture label `apple_t1e_photo_windoff` is byte-identical (`md5`) to
+  `apple_t1d_windoff` — frames, mp4 and still — so the picture variant reproduces on a rebuild
+  too and the apple picture has not moved.
+- Job 2 of the apple brief (the `TreeApple` scene and the game wiring) was already landed by
+  the level worker (`Assets/Scenes/TreeApple.unity`, `GameProcess.cs:500-519` -> `AppleTree`
+  from `treeSpecies`); do not re-brief it. Report `Trials/Runs/apple-t1e-report.md`.
+
