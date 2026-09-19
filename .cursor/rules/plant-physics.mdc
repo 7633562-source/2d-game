@@ -356,3 +356,41 @@ What the honest windows say:
 Report `Trials/Runs/apple-t1sw-report.md`; frames `Trials/Runs/shot_apple_t1sw_windoff_*.png`
 + `apple_t1sw_windoff_photo.png`; helpers `_t1sw-report.py`, `_t1sw-csv.py`, `_t1sw-detail.py`.
 
+## T1-oak — the same honest windows on the oak (19.09, build 8e9ed340)
+
+The oak half of T1-sway, instrumentation only, zero physics change and the
+bit-identity rerun proves it: `PlantTrialRecorder` now writes the same 11 added
+run keys as the apple (one tip segment chosen once at the first sample and
+followed — `tipSegmentIndex` 4 — a settled window t >= 4 s, a per-joint PINNED TIME
+fraction with `maxHingeOverrunDeg`, wind phases and the last-second residual), and
+`PlantTree` grew `windOffSeconds` with one gate in `ApplyWind()`
+(`windOffSeconds > 0f && Time.fixedTime >= windOffSeconds`), wired by
+`-treeWindUntil <s>` in `HeadlessTrial.BuildTreeScene`. `PlantTree` is a
+`MonoBehaviour`, not a `PlantBase`, so this is its own field — the apple's
+`PlantBase.windOffSeconds` is untouched. At 0 the gate is false on every step: the
+wind-off run and the wind-on run are step-identical (0.000000 deg over all 15
+joints) until the switch opens at the recorder's t = 3.990 s.
+
+Acceptance: `_t1oak-accept.py` PASS on all four pairs — oak `tree_t1oak_base_*`
+(pre-edit player, fp `ca4ed1b6`) vs `tree_t1oak_*` (fp `8e9ed340`) keeps every run
+key and moves no build key except the wind config, with 11 keys added; the apple
+controls (`apple_t1oak_*`) reproduce the accepted `apple_t1sw_*` values to the
+digit; the oak canon is bit-identical (hold 0.00102997 / drop 0; wind 34.17341 /
+0.2553246 / pinned 0.20 / trunk 16.0265 against limit 16.0).
+
+What the oak's honest numbers say (T3/T4 input): `swayAmpM` 1.287312 m is a
+transient — the stable-tip whole-run excursion is 1.473969 m (the re-picked tip
+UNDER-measured) and the settled window gives 0.179467 m, pk-pk the same, which is
+inside T3's [0.05H, 0.15H] band for H = 2.332039 m; pinning is 3 of 15 joints
+(J00 66.1 % of the samples, J08 85.2 %, J01 7.5 %) with the worst overrun only
+0.151758 deg, so the oak's stops are hard, not soft like the apple's; and with the
+sail OFF at 4 s the motion decays (mean |dAngle|/step 0.00311 -> 0.00070, peak
+bucket 0.06684 -> 0.00047) while the POSE does not come back — residual 32.72058
+deg, trunk 16.0264 deg, crown tip 1.368073 m from rest. The tree ends folded on the
+trunk stop because the 180 N·m/rad spring cannot lift the 259.7 N·m/rad weight
+gradient: T3's RETURN TEST fails on the oak today, by the rig and not by the
+measurement. Report `Trials/Runs/tree-t1oak-report.md`; pictures
+`Trials/Runs/tree_t1oak_windoff.mp4` + `tree_t1oak_windoff_photo.png` (whole
+isolated oak, nothing else in frame); helpers `_t1oak-accept.py`,
+`_t1oak-detail.py`, `_t1oak-csv.py`, `_t1oak-window.py`, `_t1oak-gate.py`.
+

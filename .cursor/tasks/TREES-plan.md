@@ -132,6 +132,29 @@ The bullet above is done for its first half, instrumentation only, one change:
   post on the SAME sources. Report `Trials/Runs/apple-t1sw-report.md`.
 
 
+### T1-oak — the same windows on the oak, job 1 closed for BOTH trees, 19.09 (build `8e9ed340`)
+
+`PlantTrialRecorder` now carries the apple's T1-sway block (same keys, same
+windows): `swayFixedTipAmpM`, `swaySettledAmpM`, `swaySettledPkPkM`,
+`worstJointPinnedTimeFraction`, `hingePinnedJointCount`, `maxHingeOverrunDeg`,
+`windOnMaxAbsJointAngle`, `windOffMaxAbsJointAngle`, `residualAbsJointAngleDeg`,
+`residualTrunkLeanDeg`, `residualTipDxM` (+ `windOffS`, `swaySettledWindowStartS`,
+`residualWindowS`, `tipSegmentIndex` in `build:`). `PlantTree.windOffSeconds`
+(default 0) gates `ApplyWind()` and `-treeWindUntil <s>` wires it; `PlantTree` is
+not a `PlantBase`, so it is a field of its own. Instrumentation only, proven by
+bit-identity against the pre-edit player `tree_t1oak_base_*` (fp `ca4ed1b6`):
+no run key moved on hold or wind 0.12, 11 keys added, and the apple controls
+(`apple_t1oak_*`) reproduce the accepted `apple_t1sw_*` to the digit.
+
+The oak readings (T3/T4 input): `swayAmpM` 1.287312 m is a transient — stable tip
+over the whole run 1.473969 m, settled (4-8 s) 0.179467 m, pk-pk the same, inside
+T3's [0.05H, 0.15H] for H = 2.332039 m; pinning is 3 of 15 (J00 66.1 %, J08 85.2 %,
+J01 7.5 %), worst overrun 0.151758 deg; wind off at 4 s → motion decays
+(mean |dAngle|/step 0.00311 → 0.00070) but the POSE stays: residual 32.72058 deg,
+trunk 16.0264 against its 16.0 stop, tip 1.368073 m. The 180 N·m/rad trunk spring
+cannot lift the 259.7 N·m/rad weight gradient, so T3's RETURN TEST fails on the oak
+today — by the rig, not by the measurement. Report `tree-t1oak-report.md`.
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,

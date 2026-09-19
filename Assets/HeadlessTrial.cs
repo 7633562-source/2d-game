@@ -46,6 +46,9 @@ using UnityEngine.Rendering;
 //   -treePerchSlot 0 — which slot (twigs first, same order as GetPerchSlots)
 //   -treePerchLoadUntil 4 — release the load at 4 s, so one run shows bend + return
 //   -treeWind 0 — no sail (check that branches hold the pose)
+//   -treeWindUntil 4 — the sail STOPS at 4 s on the oak too (T1-sway switch,
+//                      19.09): the wind-off run that proves the crown decays
+//                      back to rest (0 = wind for the whole trial)
 //   -apple 1 — apple tree (AppleTree : TreeBase : PlantBase; sway + fruit)
 //   -appleSeed 1 — local fork Random
 //   -appleWind 0 — no sail (hold); default 0.12 sways the crown
@@ -1343,6 +1346,9 @@ public class HeadlessTrial : MonoBehaviour
             plantTree.rig = TreeRig.Static;
         plantTree.seed = Mathf.RoundToInt(GetFloatArg("-treeSeed", 1f));
         plantTree.windScale = GetFloatArg("-treeWind", plantTree.windScale);
+        // T1-sway switch for the oak: 0 (default) keeps the sail on for the whole
+        // trial, so every older oak run is unchanged by it.
+        plantTree.windOffSeconds = GetFloatArg("-treeWindUntil", 0f);
         // Injected perch load: bend and return are measured with THIS, so a
         // broken bird layer can never make the tree look like it passes.
         plantTree.perchLoadKg = GetFloatArg("-treePerchLoad", 0f);

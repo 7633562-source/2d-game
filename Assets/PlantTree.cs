@@ -115,6 +115,10 @@ public class PlantTree : MonoBehaviour, IWoodSensorSource
     public float windPeriod = 4.5f;
     [Tooltip("Sail scale. 1 = formula as written.")]
     public float windScale = 0.12f;
+    [Tooltip("Simulated seconds after which the ½ρv² sail STOPS (0 = it runs for the whole " +
+        "trial, today's behaviour). Measurement switch for the wind-off decay run, the same " +
+        "one the apple got in T1-sway: the crown must come back to rest when the driver stops.")]
+    public float windOffSeconds = 0f;
 
     [Header("Bird wake")]
     [Tooltip("How far a flying bird still rustles a branch, m.")]
@@ -1949,6 +1953,11 @@ public class PlantTree : MonoBehaviour, IWoodSensorSource
     {
         if (rig != TreeRig.Sway) return;
         if (windScale <= 0f) return;
+        // T1-sway switch (19.09): the sail stops at windOffSeconds so ONE run can
+        // show both the bend and the decay. Gated on a run constant only — at 0
+        // the force is issued on exactly the steps it was before, which the
+        // bit-identity run against the pre-edit player proves.
+        if (windOffSeconds > 0f && Time.fixedTime >= windOffSeconds) return;
 
         float omega = windPeriod > 0.05f ? (2f * Mathf.PI / windPeriod) : 0f;
         // FixedUpdate and LateUpdate share WindClock (fixedTime). Time.time
