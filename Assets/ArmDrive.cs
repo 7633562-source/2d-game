@@ -345,6 +345,23 @@ public class ArmDrive : MonoBehaviour
     // was shoved 2.08 m along the slab, and a shove and a lift are told apart
     // only when both are read in the same window.
     public float PressWindowSeconds { get; private set; }
+    // The rise columns are measured against the LOWEST point the window has seen
+    // so far, not against the height on the down frame. The original definition
+    // (rise above the down frame) is a dead column on every fall this rig makes:
+    // the latch is |tilt| >= fallTiltDeg, which trips while the body is still
+    // going over, so the reference is taken at the standing shoulder height and
+    // every later sample is below it. Read off the stored CSVs of the 19.09
+    // series, `armPivotY` sits at -1.0203 m on the down frame (t 7.385 s) against
+    // a settled -1.81..-1.87 m, and the same definition on those CSVs gives exactly
+    // 0.0000 on 7 of 7 runs (p_arms55/58/60/63/70/80/81) press ON, i.e. the p_arms83/84
+    // A/B would have printed 0.0000 against 0.0000 and the falsifier would have
+    // fired on an artefact. As a climb out of the window's own minimum it does
+    // separate the arms: on the one single-build press pair (p_arms70 ON,
+    // p_arms71 OFF, build 7ebbad89, rows identical up to the down edge) it is
+    // +0.1269/+0.1262 m against +0.0871/+0.0835 m, while travel is 2.8042 m
+    // against 1.0589 m. Cycle 8's semantics is kept in the comment, not in a
+    // column: no stored run carries this key yet, so nothing is broken by fixing
+    // the definition before its first measurement.
     public float PressWindowShoulderRiseL { get; private set; }
     public float PressWindowShoulderRiseR { get; private set; }
     public float PressWindowPelvisRise { get; private set; }
@@ -408,9 +425,11 @@ public class ArmDrive : MonoBehaviour
     private float winSamples;
     private readonly float[] winContactHits = new float[2];
     private readonly float[] winPivotY = new float[2];
+    private readonly float[] winPivotLow = new float[2];
     private readonly float[] winRise = new float[2];
     private float winPelvisY;
     private float winPelvisX;
+    private float winPelvisLow;
     private readonly float[] outShoulder = new float[2];
     private readonly float[] outElbow = new float[2];
     private readonly float[] outSlew = new float[2];
@@ -1524,17 +1543,22 @@ public class ArmDrive : MonoBehaviour
         winContactHits[SideR] = 0f;
         winPivotY[SideL] = ShoulderPivotWorld(SideL).y;
         winPivotY[SideR] = ShoulderPivotWorld(SideR).y;
+        winPivotLow[SideL] = winPivotY[SideL];
+        winPivotLow[SideR] = winPivotY[SideR];
         winRise[SideL] = 0f;
         winRise[SideR] = 0f;
         winPelvisY = pelvisBody != null ? pelvisBody.position.y : 0f;
         winPelvisX = pelvisBody != null ? pelvisBody.position.x : 0f;
+        winPelvisLow = winPelvisY;
         PressWindowPelvisRise = 0f;
         PressWindowTravelX = 0f;
     }
 
     // Monotone maxima inside the window: a body that gets up and falls again
     // reports its largest excursion, which is what "gets up instead of lying"
-    // asks about.
+    // asks about. The rise is the climb out of the window's own LOWEST point --
+    // see the note on the properties for why the down frame cannot be the
+    // reference (it is 0.85 m above the settled body on this rig).
     private void SamplePressWindow(float dt)
     {
         if (!winStarted) BeginPressWindow();
@@ -1543,14 +1567,18 @@ public class ArmDrive : MonoBehaviour
         winSamples += 1f;
         for (int i = 0; i < 2; i++)
         {
-            float rise = ShoulderPivotWorld(i).y - winPivotY[i];
+            float pivot = ShoulderPivotWorld(i).y;
+            if (pivot < winPivotLow[i]) winPivotLow[i] = pivot;
+            float rise = pivot - winPivotLow[i];
             if (rise > winRise[i]) winRise[i] = rise;
             bool contact = i == SideL ? HandContactL : HandContactR;
             if (contact) winContactHits[i] += 1f;
         }
         if (pelvisBody != null)
         {
-            float pelvisRise = pelvisBody.position.y - winPelvisY;
+            float pelvisY = pelvisBody.position.y;
+            if (pelvisY < winPelvisLow) winPelvisLow = pelvisY;
+            float pelvisRise = pelvisY - winPelvisLow;
             if (pelvisRise > PressWindowPelvisRise) PressWindowPelvisRise = pelvisRise;
             float travel = Mathf.Abs(pelvisBody.position.x - winPelvisX);
             if (travel > PressWindowTravelX) PressWindowTravelX = travel;
