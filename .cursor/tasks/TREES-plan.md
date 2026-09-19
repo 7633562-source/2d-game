@@ -313,6 +313,40 @@ switch shape. **Zero source edits.** Eight labels (7 physics + 1 picture) on the
   `_t1f-detail.py`, `_t1f-dump.py`, `_t1f-photo.sh`.
 - **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
 
+### T1 re-verified on a FIFTH player, and the picture reproduces byte for byte — cycle `T1g` (apple worker), 19.09
+
+T1 had no open work again, so the cycle is T1's own acceptance test: a rerun in the accepted
+switch shape. **Zero source edits.** Seven physics labels + one picture on the player
+`0fd4f288…` (gitCommit `73e5f3bd`, built `17:07:50Z`, 632 files, gate **"OK at 20:07"** after
+a REBUILD — the previous player `d8937fac` at 20:04:52 was older than `Assets/ArmDrive.cs`
+at 20:06:58 — 0 `error CS`, no editor, no lock, plant sources clean against HEAD).
+
+- **11 of 11 bit-identical pairs** — run block AND build block AND 0 of 1600 `joints.csv`
+  rows: apple `apple_t1g_hold`/`_wind012`/`_windoff` == the accepted `apple_t1sw_hold`/
+  `_wind012` and `apple_t1c2_windoff`; the wind-off repeat == its own sibling; the same three
+  == the previous cycle's `apple_t1f_*`; oak `tree_t1g_*` == `tree_t1oak_*` and
+  `tree_t1f_wind012`. The apple canon now reproduces across **FIVE** players (`cb7e4ef6` ->
+  `4681f70b` -> `3c4dfc53` -> `fc6471dd` -> `0fd4f288`). Negative controls move as they must:
+  the PRE-T2 `apple_t1_hold` pair 23 run keys / 11 added, CSV from row 1; the STALE
+  `apple_t1sw_windoff` 12 keys, CSV from row 2 (third confirmation). Rigs unchanged
+  (`b242a8ddd29b0b28` apple / `dcc15b908146504e` oak), `jointColumnCount` 15. The T2 frame
+  fix still stands: born-behind 4/15 -> 0/15, `springSatFraction` 0.06620833 -> 0 on every
+  joint, no joint at its cap in any today's-shape run.
+  `tree-const-assert.py` FIRES on the same discrete sets as the close-out (apple 3 keys:
+  `hingePinnedFraction` 0.06666667, `hingePinnedJointCount` 2, `springSatFraction` 0).
+- Picture `apple_t1g_photo_windoff` (41 frames, 5 fps, 1080p) is **byte-identical by `md5`,
+  frames included, to the three previous cycles' pictures** (mp4 865 646 B
+  `d10ec27dd1a265eba217397e748d24a6`, still 725 666 B
+  `347e44cefeb516f93d60adf2504ab3c3`); one whole apple tree, nothing else in frame.
+- The apple's three unmet acceptance numbers are unchanged and belong to T4/T5: pinned
+  0.06666667 (J08 0.674 deg outside its own SOFT stop in still air, overrun 2.066446 deg
+  under wind), settled sway 0.022223 m against 0.10-0.30, `crownDrop` 0.00667548 m against
+  2 mm. Lean 1.166476 (under 4), base slide 0. Wind off at 4 s: release peak 6.448067 past
+  the wind-on 6.335289, residual 0.022004 deg, crown tip back within 0.000672 m.
+- Report `Trials/Runs/apple-t1g-report.md`; helpers `_t1g-state.py`, `_t1g-runs.sh`,
+  `_t1g-accept.py` (+`apple-t1g-accept-output.txt`), `_t1g-photo.sh`.
+- **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,

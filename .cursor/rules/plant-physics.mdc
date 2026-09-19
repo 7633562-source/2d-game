@@ -491,3 +491,33 @@ have since rebuilt: fp `3c4dfc53…`, gitCommit `8ce38675`, built `2026-09-19T14
   the level worker (`Assets/Scenes/TreeApple.unity`, `GameProcess.cs:500-519` -> `AppleTree`
   from `treeSpecies`); do not re-brief it. Report `Trials/Runs/apple-t1e-report.md`.
 
+## T1 re-verified on a FIFTH player, picture byte-identical — cycle `T1g` (apple worker), 19.09
+
+T1 still had no open work, so the cycle is its own acceptance test: a rerun in the accepted
+switch shape, **zero source edits**, seven physics labels + one picture. The gate REBUILT
+first (the player on disk `d8937fac` at 20:04:52 was older than `Assets/ArmDrive.cs` at
+20:06:58 — another lane's edit) and reported **"OK at 20:07"**, fp `0fd4f288…`, gitCommit
+`73e5f3bd`, 632 files, buildGuid `4b2e49edc20440369eff014048c0452a`, no editor, no lock,
+plant sources clean against HEAD.
+
+- **11 of 11 positive pairs bit-identical** — run block AND build block AND **0 of 1600
+  `joints.csv` rows**: `apple_t1g_hold`/`_wind012`/`_windoff` == the accepted
+  `apple_t1sw_hold`/`_wind012`/`apple_t1c2_windoff`, the wind-off repeat == its own sibling,
+  the same three == the previous cycle's `apple_t1f_*`, `tree_t1g_*` == `tree_t1oak_*`. The
+  apple canon now reproduces across **FIVE** players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53`
+  -> `fc6471dd` -> `0fd4f288`). Rigs unchanged (`b242a8ddd29b0b28` / `dcc15b908146504e`),
+  `jointColumnCount` 15, no joint at its cap in any today's-shape run, born-behind 0/15
+  (4/15 on the PRE-T2 pair). Negative controls move as they must: PRE-T2 `apple_t1_hold` 23
+  run keys / 11 added and CSV from row 1; STALE `apple_t1sw_windoff` 12 keys and CSV from
+  row 2. `tree-const-assert.py` FIRES on the same discrete sets (apple 3: `hingePinnedFraction`
+  0.06666667, `hingePinnedJointCount` 2, `springSatFraction` 0), so the signal is live.
+- **The picture reproduces byte for byte**: `apple_t1g_photo_windoff` (41 frames, 5 fps, 1080p)
+  has the SAME `md5` as `apple_t1f/t1e/t1d_*` — mp4 `d10ec27dd1a265eba217397e748d24a6`
+  (865 646 B), still `347e44cefeb516f93d60adf2504ab3c3` (725 666 B), and the sampled frames
+  (`00`,`01`,`02`,`40`) hash-identical too. One whole apple tree, nothing else in frame.
+- The three unmet acceptance numbers stay with T4/T5: pinned 0.06666667, settled sway
+  0.022223 m against 0.10-0.30, `crownDrop` 0.00667548 m against 2 mm. Lean 1.166476, base
+  slide 0, wind off at 4 s -> residual 0.022004 deg and the crown tip back within 0.000672 m.
+  Report `Trials/Runs/apple-t1g-report.md`.
+- **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
+
