@@ -629,11 +629,29 @@ public class ArmDrive : MonoBehaviour
         float elbowBase = balance != null ? balance.elbowBaseAngle : -20f;
         // Elbow: flex on the forward swing, release on the back swing. Both
         // sides ride their own phase, so the two elbows counter each other.
+        //
+        // The sign, measured (19.09, arms cycle 7, `Tools/arm-elbow-shared-check.py`):
+        // this line used to carry `-(mid + amp*phase)`, which flexes the elbow on
+        // the BACK swing - the opposite of the sentence above and of this file's
+        // own convention (negative = flexion = limb forward, phase +1 = that arm
+        // is BACK). It reads off the records as a slope of -16.000 deg per unit
+        // phase against the shoulder line's +34.000 (R2 1.000 on both, p_arms15),
+        // and it made the elbow ride the thigh it is meant to oppose: measured
+        // elbowL-hipR +0.702 / elbowR-hipL +0.840 on p_arms81 (walk 0.1-7.3 s)
+        // where the shoulders of the same window read -0.553 / -0.745. The mean
+        // is unchanged (elbowBase - walkElbowMid), only the swing's sign is.
+        //
+        // NOTE: the elbow PAIR's correlation is not set here and cannot be set by
+        // a sign: both elbow targets are +-phaseNow, so corr(tgtElbL, tgtElbR)
+        // equals corr(tgtShL, tgtShR) exactly (p_arms15: -0.843 / -0.843), and a
+        // common sign flip on the two drives is invisible to it. What separates
+        // the two elbows is corr(armPhaseL, armPhaseR) - the hips' own
+        // correlation, which the walk worker's gait owns.
         for (int i = 0; i < 2; i++)
         {
             float phaseNow = i == SideL ? ArmPhaseL : ArmPhaseR;
             outShoulder[i] = shoulderBase + walkShoulderSwing * phaseNow;
-            outElbow[i] = elbowBase - (walkElbowMid + walkElbowAmp * phaseNow);
+            outElbow[i] = elbowBase - walkElbowMid + walkElbowAmp * phaseNow;
             outSlew[i] = walkDriveSlewPerSecond;
         }
     }
