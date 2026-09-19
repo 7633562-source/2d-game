@@ -12,3 +12,14 @@ Tools/gen-level-textures.py (run it from the project root; it also writes the .m
 LevelArt reads Resources/Level/ground_fill, ground_cap, sky and sign_finish as Sprites
 (spriteMode Single, mesh Full Rect, wrap Repeat). The drawing itself is not physics:
 no collider, friction or size depends on these files.
+
+Verification 19.09.2026 (ART-0 re-run, editor closed, bash only):
+  "F:/6000.5.8f1/Editor/Unity.exe" -batchmode -projectPath "E:/Games/2D Game/My project" \
+    -executeMethod ArtImportCheck.VerifyArt -logFile %LOCALAPPDATA%/Temp/grok-burn/art-import-check.log -quit
+  -> exit 0, ART-IMPORT-CHECK end failures=0. All four keys load through
+  Resources.Load<Sprite> (ground_fill 1024x256 ppu 128 = 8x2 m, ground_cap 128x14 ppu 100 =
+  1.28x0.14 m, sky 512x128 ppu 32 = 16x4 m, sign_finish 64x320 ppu 100 = 0.64x3.2 m), and the
+  Art/ keys skin fabric denim dirt grass bark leaf load as readable 512x512 textures.
+  Tiled draw mode really repeats: ground_cap colourDiffAtOneTile 0.0030, ground_fill 0.0000.
+  Wrap check on the committed bytes: every material tile's cut is within 1.81x its own grain,
+  so no tile shows a visible step at the repeat.
