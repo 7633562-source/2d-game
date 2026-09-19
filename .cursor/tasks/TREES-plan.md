@@ -104,6 +104,34 @@ CORRECTED (I reject this part of the review):
   `Assets/TreeBase.cs` still sits in every plant build, so the apple is not bit-identical
   to the committed `apple_t1_*` (53 keys moved, re-measured 19.09).
 
+### T1-sway — job 1 CLOSED, 19.09 (build `3f93bfc4`)
+
+The bullet above is done for its first half, instrumentation only, one change:
+
+- `PlantBase.windOffSeconds` (+ the gate in `TreeBase.FixedUpdate`, `-appleWindUntil <s>`):
+  the run can switch the sail OFF mid-trial. At 0 the wind is issued on exactly the same
+  steps as before — proven by bit-identity, not asserted.
+- New run-block keys (all additions; no key renamed, no key redefined): `swayFixedTipAmpM`,
+  `swaySettledAmpM`, `swaySettledPkPkM`, `worstJointPinnedTimeFraction`,
+  `hingePinnedJointCount`, `maxHingeOverrunDeg`, `windOnMaxAbsJointAngle`,
+  `windOffMaxAbsJointAngle`, `residualAbsJointAngleDeg`, `residualTrunkLeanDeg`,
+  `residualTipDxM`. The tip SEGMENT is chosen once and followed; the settled window is
+  t >= 4 s; the residual window is the last second. Windows + tip index live in `build:`.
+- Verification: `apple_t1sw_*` vs `apple_t1sw_base_*` (pre-edit player, same sources) —
+  28 of 28 physics run keys bit-identical on hold AND wind 0.12; oak `tree_t1sw_*`
+  reproduces the accepted canon (0.00103 / 34.17341 / 0.2553246 / pinned 0.20). Only
+  `wallPerSim` + `sourceFingerprint` move.
+- What the honest windows say (T2/T4/T5 input): `swayAmpM` 0.1465 m at wind 0.12 was a
+  STARTUP TRANSIENT — the settled sway is `swaySettledAmpM` 0.0222 m (pk-pk 0.0396), below
+  the acceptance band 0.10-0.30 m; the pinned joint is J08, 68.3 % of the hold samples,
+  0.674 deg OUTSIDE its own stop, with `maxHingeOverrunDeg` up to 2.066 deg under wind;
+  wind off at 4 s → the residual is 0.0220 deg from the no-wind hold pose and the crown tip
+  returns within 0.0007 m, with the motion envelope falling 10x in one second.
+- The uncommitted `CentreJointStopsOnBind()` is still in the working tree (the apple is
+  still not bit-identical to the committed `apple_t1_*`), so T1-sway compares baseline vs
+  post on the SAME sources. Report `Trials/Runs/apple-t1sw-report.md`.
+
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,

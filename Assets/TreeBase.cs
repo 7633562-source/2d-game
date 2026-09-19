@@ -169,7 +169,13 @@ public abstract class TreeBase : PlantBase, IWoodSensorSource
             if (springs[i] != null) springs[i].Apply();
         for (int i = 0; i < frictions.Length; i++)
             if (frictions[i] != null) frictions[i].Apply();
-        if (windScale > 0f)
+        // Wind is a driver, and a driver can be switched OFF mid-run: with
+        // windOffSeconds = 0 (the default, and every trial until 19.09) this is
+        // exactly the old `if (windScale > 0f) ApplyWind()` — no force added, no
+        // step changed. With it set, the run shows the crown decay back to rest
+        // after the sail stops, which is what the "settles under 0.5 deg"
+        // acceptance needs a measurement for (T1-sway).
+        if (windScale > 0f && (windOffSeconds <= 0f || Time.fixedTime < windOffSeconds))
             ApplyWind();
     }
 

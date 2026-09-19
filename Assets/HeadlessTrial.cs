@@ -49,6 +49,8 @@ using UnityEngine.Rendering;
 //   -apple 1 — apple tree (AppleTree : TreeBase : PlantBase; sway + fruit)
 //   -appleSeed 1 — local fork Random
 //   -appleWind 0 — no sail (hold); default 0.12 sways the crown
+//   -appleWindUntil 4 — the sail STOPS at 4 s: the wind-off run that proves the
+//                       crown decays back to rest (0 = wind for the whole trial)
 //   -appleHeight 2.5 — force crown height, m (overrides the seed-derived 2–5 m)
 //   -bird 1 — run a bird instead of a human (human flags are not read)
 //   -birdMode stand|fly|walk|glide|sit|attack -takeoffDelay 0 — stance with no takeoff
@@ -1360,6 +1362,9 @@ public class HeadlessTrial : MonoBehaviour
             appleTree.appleHeightM = forcedHeight;
         appleTree.windScale = GetFloatArg("-appleWind", appleTree.windScale);
         appleTree.windSpeed = GetFloatArg("-appleWindSpeed", appleTree.windSpeed);
+        // The wind-off decay run: 0 (default) keeps the sail on for the whole
+        // trial, so every older apple run is unchanged by this switch.
+        appleTree.windOffSeconds = GetFloatArg("-appleWindUntil", 0f);
         appleTree.Build();
     }
 

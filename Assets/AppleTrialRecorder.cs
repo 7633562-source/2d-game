@@ -20,6 +20,21 @@ using UnityEngine;
 //
 // Same key names as before this cycle for everything that existed; the keys
 // that are build constants moved into `build:` and no key was renamed.
+//
+// T1-sway (19.09): the audit of the two flagged numbers. `hingePinnedFraction`
+// is a MAXIMUM INSTANTANEOUS fraction (a joint 0.2 deg off its stop for one
+// step counts, and it is nonzero on a tree standing still), and `swayAmpM`
+// followed whichever segment was highest at each step, so the measured tip
+// could change identity and swallow the startup transient. Both keys stay
+// exactly as they were; the windows added here measure the same geometry so the
+// numbers mean what they look like:
+//   - one tip segment, chosen once at the first sample and followed (a stable
+//     identity), over the whole run and over a SETTLED window (t >= 4 s);
+//   - pinning as a TIME fraction per joint, plus the worst overshoot past a
+//     stop (the stops are soft, so "past the limit" is a real measurement);
+//   - a wind-off run (`-appleWindUntil <s>`): the sail stops mid-run and the
+//     residual over the LAST SECOND of the run is the decay evidence.
+// Window definitions are constants and live in `build:`, never in the run block.
 public class AppleTrialRecorder
 {
     private struct Sensor
@@ -54,6 +69,30 @@ public class AppleTrialRecorder
     private float swayAmpM;
     private float stumpSpawnX;
     private readonly float[] orderMaxAngle = new float[4];
+
+    // ---- T1-sway windows (19.09) -------------------------------------------
+    // Measurement-window definitions. Constants: they go into `build:`.
+    private const float SettleWindowStartS = 4f;
+    private const float ResidualWindowS = 1f;
+    private const float PinEpsDeg = 0.2f;   // same eps as hingePinnedFraction
+    private int tipIndex = -1;
+    private float tipStartX;
+    private bool settledTipStarted;
+    private float settledTipStartX;
+    private float swayFixedTipAmpM;
+    private float swaySettledAmpM;
+    private float swaySettledMinX = float.MaxValue;
+    private float swaySettledMaxX = float.MinValue;
+    private int[] pinnedSamples = System.Array.Empty<int>();
+    private int pinnedJointCount;
+    private float maxHingeOverrunDeg;
+    private float windOnMaxAbsJoint;
+    private float windOffMaxAbsJoint;
+    private float residualAbsJoint;
+    private float residualTrunkLeanDeg;
+    private float residualTipDxM;
+    private readonly float windOffS;
+    private readonly float residualFromS;
 
     // Build constants, read once when the recorder is wired (before the first
     // step): they describe the rig, so they belong in `build:`.
@@ -118,7 +157,14 @@ public class AppleTrialRecorder
             windGust = tree.windGust;
             windPeriod = tree.windPeriod;
             meanHoldTorque = holdTorques > 0 ? (float)(sumHoldTorque / holdTorques) : 0f;
+            // The wind-off schedule and the pin counters are rig/run facts read
+            // once, before the first step.
+            windOffS = tree.windOffSeconds;
+            pinnedSamples = new int[sensors.Count];
         }
+        residualFromS = info != null && info.Duration > ResidualWindowS
+            ? info.Duration - ResidualWindowS
+            : -1f;
         trace = new TreeJointTrace(tree, Time.fixedDeltaTime);
     }
 
@@ -153,6 +199,50 @@ public class AppleTrialRecorder
         if (samples == 0) startCrownTipX = crownTip.x;
         float amp = Mathf.Abs(crownTip.x - startCrownTipX);
         if (amp > swayAmpM) swayAmpM = amp;
+        // T1-sway: the same excursion, but against ONE tip segment chosen once
+        // (a stable identity) — whole run, then the settled window.
+        if (samples == 0)
+        {
+            tipIndex = CrownTipIndex();
+            tipStartX = TipX(tipIndex);
+        }
+        float fixedTipX = TipX(tipIndex);
+        float fixedAmp = Mathf.Abs(fixedTipX - tipStartX);
+        if (fixedAmp > swayFixedTipAmpM) swayFixedTipAmpM = fixedAmp;
+        if (time >= SettleWindowStartS)
+        {
+            if (!settledTipStarted)
+            {
+                settledTipStarted = true;
+                settledTipStartX = fixedTipX;
+            }
+            float settledAmp = Mathf.Abs(fixedTipX - settledTipStartX);
+            if (settledAmp > swaySettledAmpM) swaySettledAmpM = settledAmp;
+            if (fixedTipX < swaySettledMinX) swaySettledMinX = fixedTipX;
+            if (fixedTipX > swaySettledMaxX) swaySettledMaxX = fixedTipX;
+        }
+        // Pinning as a TIME fraction per joint, plus the overshoot past the
+        // stop itself (the stops are soft, so being past one is measurable).
+        SampleHingePinning();
+        // Wind phases: windOffS <= 0 means the sail never stops, so the whole
+        // run is the wind-on phase and the wind-off phase stays empty.
+        if (windOffS > 0f && time >= windOffS)
+        {
+            if (abs > windOffMaxAbsJoint) windOffMaxAbsJoint = abs;
+        }
+        else if (abs > windOnMaxAbsJoint)
+        {
+            windOnMaxAbsJoint = abs;
+        }
+        // Residual over the LAST second of the run: with the sail stopped at
+        // windOffS this is the decay evidence; on a wind-on run it is the
+        // steady state, labelled by windOffS in `build:`.
+        if (residualFromS > 0f && time >= residualFromS)
+        {
+            if (abs > residualAbsJoint) residualAbsJoint = abs;
+            if (trunkLean > residualTrunkLeanDeg) residualTrunkLeanDeg = trunkLean;
+            if (fixedAmp > residualTipDxM) residualTipDxM = fixedAmp;
+        }
         SampleOrderMaxAngles(orderMaxAngle);
         if (!settled && time >= 2f)
         {
@@ -215,6 +305,20 @@ public class AppleTrialRecorder
         AppendNum(json, "crownComDxM", trace.CrownComDxM);
         for (int o = 0; o < orderMaxAngle.Length; o++)
             AppendNum(json, "treeOrder" + o + "MaxAngleDeg", orderMaxAngle[o]);
+        // T1-sway windows (19.09). Added keys only — hingePinnedFraction and
+        // swayAmpM above keep their old definitions for the record.
+        AppendNum(json, "swayFixedTipAmpM", swayFixedTipAmpM);
+        AppendNum(json, "swaySettledAmpM", swaySettledAmpM);
+        AppendNum(json, "swaySettledPkPkM", swaySettledMaxX > swaySettledMinX
+            ? swaySettledMaxX - swaySettledMinX : 0f);
+        AppendNum(json, "worstJointPinnedTimeFraction", WorstJointPinnedTimeFraction());
+        json.Append(",\"hingePinnedJointCount\":").Append(pinnedJointCount.ToString(CultureInfo.InvariantCulture));
+        AppendNum(json, "maxHingeOverrunDeg", maxHingeOverrunDeg);
+        AppendNum(json, "windOnMaxAbsJointAngle", windOnMaxAbsJoint);
+        AppendNum(json, "windOffMaxAbsJointAngle", windOffMaxAbsJoint);
+        AppendNum(json, "residualAbsJointAngleDeg", residualAbsJoint);
+        AppendNum(json, "residualTrunkLeanDeg", residualTrunkLeanDeg);
+        AppendNum(json, "residualTipDxM", residualTipDxM);
         AppendBuild(json);
     }
 
@@ -258,6 +362,12 @@ public class AppleTrialRecorder
         AppendNum(b, "treeWindScale", windScale);
         AppendNum(b, "treeWindGust", windGust);
         AppendNum(b, "treeWindPeriod", windPeriod);
+        // T1-sway: measurement-window definitions are constants, so they live in
+        // `build:` and never wear a metric's name in the run block.
+        AppendNum(b, "windOffS", windOffS);
+        AppendNum(b, "swaySettledWindowStartS", SettleWindowStartS);
+        AppendNum(b, "residualWindowS", ResidualWindowS);
+        b.Append(",\"tipSegmentIndex\":").Append(tipIndex.ToString(CultureInfo.InvariantCulture));
         // Hold torques are build-time feedforward, not a measurement: computed
         // here from the springs the wood carries, never through GetHoldStats.
         AppendNum(b, "meanAbsHoldTorque", meanHoldTorque);
@@ -368,6 +478,70 @@ public class AppleTrialRecorder
             if (tip.y > bestY) { bestY = tip.y; best = tip; }
         }
         return best;
+    }
+
+    // ---- T1-sway sensor math (Unity primitives only) ----------------------
+
+    // The tip SEGMENT, chosen once at the first sample by the same rule
+    // CrownTip() uses (highest tip point). CrownTip() re-picks every step, so a
+    // run can measure two different segments; this index cannot move.
+    private int CrownTipIndex()
+    {
+        int best = -1;
+        float bestY = float.MinValue;
+        for (int i = 0; i < wood.Count; i++)
+        {
+            HumanSegment seg = wood[i].segment;
+            if (seg == null) continue;
+            float rad = seg.transform.eulerAngles.z * Mathf.Deg2Rad;
+            float tipY = seg.transform.position.y + Mathf.Cos(rad) * (seg.size.y * 0.5f);
+            if (tipY > bestY) { bestY = tipY; best = i; }
+        }
+        return best;
+    }
+
+    private float TipX(int index)
+    {
+        if (index < 0 || index >= wood.Count) return tree.transform.position.x;
+        HumanSegment seg = wood[index].segment;
+        if (seg == null) return tree.transform.position.x;
+        float rad = seg.transform.eulerAngles.z * Mathf.Deg2Rad;
+        return seg.transform.position.x - Mathf.Sin(rad) * (seg.size.y * 0.5f);
+    }
+
+    // Pinning per step, counted per joint: the same 0.2 deg band
+    // hingePinnedFraction uses, but accumulated over samples so the report can
+    // say "this hinge sat on its stop for X % of the run" instead of "at one
+    // step, Y of 15 hinges were near a limit". The overrun is the distance PAST
+    // the stop — the stops are soft, so it is usually nonzero.
+    private void SampleHingePinning()
+    {
+        for (int i = 0; i < sensors.Count; i++)
+        {
+            HingeJoint2D joint = sensors[i].joint;
+            if (joint == null) continue;
+            JointAngleLimits2D lim = joint.limits;
+            float angle = joint.jointAngle;
+            float over = Mathf.Max(lim.min - angle, angle - lim.max);
+            if (over > maxHingeOverrunDeg) maxHingeOverrunDeg = over;
+            if (Mathf.Abs(angle - lim.min) <= PinEpsDeg || Mathf.Abs(angle - lim.max) <= PinEpsDeg)
+            {
+                if (i < pinnedSamples.Length)
+                {
+                    if (pinnedSamples[i] == 0) pinnedJointCount++;
+                    pinnedSamples[i]++;
+                }
+            }
+        }
+    }
+
+    private float WorstJointPinnedTimeFraction()
+    {
+        if (samples <= 0 || pinnedSamples.Length == 0) return 0f;
+        int worst = 0;
+        for (int i = 0; i < pinnedSamples.Length; i++)
+            if (pinnedSamples[i] > worst) worst = pinnedSamples[i];
+        return (float)worst / samples;
     }
 
     // ---- per-order build snapshot ------------------------------------------

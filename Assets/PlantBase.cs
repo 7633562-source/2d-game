@@ -15,6 +15,10 @@ public abstract class PlantBase : MonoBehaviour
     public float windGust = 1.1f;
     [Tooltip("Gust period, s.")]
     public float windPeriod = 4.5f;
+    [Tooltip("Simulated seconds after which the wind force STOPS (0 = it runs for the " +
+        "whole trial, today's behaviour). Measurement switch for the wind-off decay run: " +
+        "the crown must come back to rest when the driver stops.")]
+    public float windOffSeconds = 0f;
 
     public static float RootY(float groundY = -2f)
     {

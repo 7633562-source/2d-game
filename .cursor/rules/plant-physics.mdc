@@ -1,6 +1,6 @@
 ---
 description: Recursive tree physics — segments, spring, no muscles
-globs: Assets/PlantTree.cs, Assets/TreeSpring.cs, Assets/TreeDriver.cs, Assets/PlantFlower.cs, Assets/FlowerKinds.cs
+globs: Assets/PlantTree.cs, Assets/PlantBase.cs, Assets/TreeBase.cs, Assets/AppleTree.cs, Assets/TreeSpring.cs, Assets/TreeDriver.cs, Assets/PlantFlower.cs, Assets/FlowerKinds.cs, Assets/AppleTrialRecorder.cs, Assets/TreeJointTrace.cs
 alwaysApply: false
 ---
 
@@ -312,3 +312,47 @@ CSV, not from a TreeBase helper).
 Still uncommitted and untouched: `CentreJointStopsOnBind()` in the same file. With it in
 the player the apple is NOT bit-identical to the committed `apple_t1_*` (53 keys moved,
 re-measured this cycle), so no fresh apple number is accepted yet.
+
+## T1-sway — the two numbers that did not mean what they looked like (19.09, build 3f93bfc4)
+
+Instrumentation only, zero physics change, and the last open item of T1 is closed: the
+apple's sway and pinning numbers are now measured over windows that mean something, and
+there is a run in which the WIND IS SWITCHED OFF.
+
+- `PlantBase.windOffSeconds` (0 = old behaviour) + a gate in `TreeBase.FixedUpdate`;
+  `-appleWindUntil <s>` in `HeadlessTrial.BuildAppleScene` sets it. With the switch at 0 the
+  wind force is issued on exactly the steps it was before — proven, not asserted.
+- `AppleTrialRecorder` keeps every old key and adds: `swayFixedTipAmpM`, `swaySettledAmpM`,
+  `swaySettledPkPkM` (one tip segment, chosen once at the first sample and followed; the
+  settled window is t >= 4 s), `worstJointPinnedTimeFraction`, `hingePinnedJointCount`,
+  `maxHingeOverrunDeg`, `windOnMaxAbsJointAngle`, `windOffMaxAbsJointAngle`,
+  `residualAbsJointAngleDeg`, `residualTrunkLeanDeg`, `residualTipDxM` (last second of the
+  run). The window definitions and the chosen tip index live in `build:`, never in the run
+  block. `tree-const-assert.py` declares `windOffMaxAbsJointAngle` 0 on a run with no
+  `-appleWindUntil`.
+
+Measured (`apple_t1sw_*` fp `3f93bfc4…` vs `apple_t1sw_base_*` fp `94f41860…`, same
+sources, one player each side): 28 of 28 physics run-block keys bit-identical on hold AND
+on wind 0.12; the oak (`tree_t1sw_*`) reproduces its accepted canon (0.00103 / 34.17341 /
+crownDrop 0.2553246 / pinned 0.20). Only `wallPerSim` and `sourceFingerprint` move.
+
+What the honest windows say:
+
+- `swayAmpM` 0.1465 m at wind 0.12 was a STARTUP TRANSIENT: the settled window (4-8 s)
+  gives `swaySettledAmpM` 0.0222 m, peak-to-peak 0.0396 m. The stable tip id reproduces
+  `swayAmpM` exactly here (0.1465347), so the contamination the audit feared is the window,
+  not a swapped segment. The apple's steady sway is 2.2 cm — below the 0.10-0.30 m the
+  acceptance wants, and that is a T4/T5 input, not a T1 one.
+- Pinning is JOINT J08 (one order-1 limb): `worstJointPinnedTimeFraction` 0.683 in the hold,
+  0.296 at wind 0.12, 0.559 with the wind off at 4 s — it sits 0.674 deg OUTSIDE its own stop
+  in still air. `maxHingeOverrunDeg` reaches 2.066 deg under wind: the stops are soft. So
+  `hingePinnedFraction` 0.0667 really is 1 joint of 15, and "pinned = 0" is not met.
+- Wind off at 4 s (`apple_t1sw_windoff`): the deviation peaks at 6.4481 deg in the release
+  window (0.1 deg past the wind-on peak 6.3525), then decays to 5.6541-5.6933 deg over the
+  last second, against 5.6605-5.6713 for the no-wind hold run — residual **0.0220 deg**,
+  crown tip back within **0.0007 m**. Mean |dAngle|/step falls 10x (0.00077 → 0.00004) while
+  the wind-on run keeps 0.0002-0.0009. The crown decays back to rest when the driver stops.
+
+Report `Trials/Runs/apple-t1sw-report.md`; frames `Trials/Runs/shot_apple_t1sw_windoff_*.png`
++ `apple_t1sw_windoff_photo.png`; helpers `_t1sw-report.py`, `_t1sw-csv.py`, `_t1sw-detail.py`.
+
