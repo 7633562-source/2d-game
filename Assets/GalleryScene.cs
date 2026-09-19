@@ -549,51 +549,98 @@ public class GalleryScene : MonoBehaviour
         RowBounds["creatures"] = new Bounds(new Vector3(x + 3.3f, 1.2f, 0f), new Vector3(10f, 3.4f, 0f));
     }
 
-    // The fire's own picture (ART-0 gap 2). One painted sprite: the flame core
-    // Campfire draws in front of its 24 pooled tongue discs, which stay
-    // procedural on purpose (Tools/gen-fire-textures.py, three blind reviews
-    // ranked the all-painted fire last). Key, box and tint are read from
-    // Campfire itself, so the catalogue cannot drift from what the game shows.
-    // Static on purpose: a live Campfire ticks a Perlin flicker every frame and
-    // this scene's captures have to repeat frame for frame.
+    // The fire's own picture (ART-0). The row draws the ASSEMBLED fire the yard
+    // draws - three log boxes, the ember disc, the 24 tongue discs of the pool and
+    // the painted core - straight from Campfire.FrozenStack(): the pool's own
+    // geometry, the pool's own sorting bands and the pool's own pose function, so
+    // the catalogue cannot drift from the yard (Tools/art0-fire-stack-check.py
+    // holds that contract).
+    //
+    // The sizing device is the yard's: the logs go through HumanSegment.ApplyPicture
+    // (the flat translucent box the fire is built from), the ember, the tongues and
+    // the core are the 1 m soft disc / the 1 m core sprite scaled to their box, as
+    // Campfire.MakeDisc does it. The fire has no collider and no Rigidbody2D, so no
+    // physics number is involved; the collider-equals-rectangle contract is what the
+    // other rows demonstrate.
+    //
+    // Frozen on purpose: a live Campfire ticks a Perlin flicker every frame and this
+    // scene's captures have to repeat frame for frame. Not drawn for the same
+    // reason: the three ParticleSystems (sparks, smoke, embers) and the night glow.
     private void BuildFireRow(Transform root)
     {
         float x = 99f;
-        RowTitle(root, "FIRE  (Campfire - the painted flame core)", x);
+        RowTitle(root, "FIRE  (Campfire - the assembled fire)", x);
 
-        Texture2D core = ArtLibrary.Albedo(Campfire.CoreArtKey);
-        float h = Campfire.CoreBoxHeight;
+        GameObject stack = new GameObject("CampfireStack");
+        stack.transform.SetParent(root, false);
+        stack.transform.position = new Vector3(x, groundTopY, 0f);
 
-        if (core == null)
+        Sprite coreSprite = Campfire.CoreSprite();
+        Campfire.FirePiece[] pieces = Campfire.FrozenStack();
+        int drawn = 0;
+        int lit = 0;
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            Campfire.FirePiece piece = pieces[i];
+            if (piece.kind == Campfire.FirePieceKind.Core && coreSprite == null)
+                continue;
+
+            GameObject go = new GameObject(piece.name);
+            go.transform.SetParent(stack.transform, false);
+            go.transform.localPosition = piece.local;
+            go.transform.localRotation = Quaternion.Euler(0f, 0f, piece.tilt);
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            if (piece.kind == Campfire.FirePieceKind.Log)
+            {
+                HumanSegment.ApplyPicture(sr, piece.size, HumanVisualShape.Box, null, piece.color, piece.order);
+            }
+            else
+            {
+                sr.sprite = piece.kind == Campfire.FirePieceKind.Core ? coreSprite : Campfire.SoftSprite();
+                sr.drawMode = SpriteDrawMode.Simple;
+                go.transform.localScale = new Vector3(piece.size.x, piece.size.y, 1f);
+                sr.color = piece.color;
+                sr.sortingOrder = piece.order;
+            }
+
+            SpriteLighting.ApplyUnlit(sr);
+            sr.enabled = piece.on;
+            drawn++;
+            if (piece.on)
+                lit++;
+        }
+
+        // The label goes ABOVE the flame, clear of it: the assembled fire stands
+        // 0.75 m tall (measured on the still: the tongue tips at 0.744 m), a centred
+        // label at the ground line ran over the logs, the embers and the flame, and
+        // the same label 1.05 m up still touched the highest tongue by 1 px. 1.45 m
+        // puts its ink at 1.15-1.24 m, a gap of 0.32 m, and it is inside the row's lens.
+        GameObject labelHost = new GameObject("FireLabel");
+        labelHost.transform.SetParent(stack.transform, false);
+        labelHost.transform.localPosition = new Vector3(0f, 1.45f, 0f);
+        ItemLabel(labelHost.transform, "campfire (assembled)  logs + ember + "
+            + Campfire.TongueCount + " tongue discs + core "
+            + Campfire.CoreBoxWidth.ToString("0.00") + " x " + Campfire.CoreBoxHeight.ToString("0.00") + " m");
+
+        if (coreSprite == null)
         {
             MissingTile(root, "campfire flame core", "Art/Campfire/core.png",
-                new Vector2(1.4f, 1.6f), new Vector2(x, 0.8f));
-            Add(root, "campfire flame core", "Art/Campfire/core.png", false,
-                "ArtLibrary.Albedo(\"" + Campfire.CoreArtKey + "\") null");
+                new Vector2(1.4f, 1.6f), new Vector2(x + 1.4f, 0.8f));
+            Add(root, "campfire (assembled)", "logs + ember + " + Campfire.TongueCount + " discs, NO core", false,
+                "ArtLibrary.Albedo(\"" + Campfire.CoreArtKey + "\") null - the painted core is missing, "
+                + "the pool and the ember are procedural by design");
         }
         else
         {
-            GameObject go = new GameObject("CampfireFlameCore");
-            go.transform.SetParent(root, false);
-            go.transform.position = new Vector3(x, groundTopY + h * 0.5f, 0f);
-
-            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = Sprite.Create(core, new Rect(0f, 0f, core.width, core.height),
-                new Vector2(0.5f, 0.5f), core.width, 0, SpriteMeshType.FullRect);
-            sr.sprite.name = "CampfireCoreGallery";
-            sr.drawMode = SpriteDrawMode.Sliced;
-            sr.size = new Vector2(Campfire.CoreBoxWidth, h);
-            sr.color = Campfire.CoreTint;
-            sr.sortingOrder = SortingObject;
-            SpriteLighting.ApplyUnlit(sr);
-
-            ItemLabel(go.transform, "campfire core  "
-                + Campfire.CoreBoxWidth.ToString("0.00") + " x " + h.ToString("0.00") + " m  "
-                + core.width + "x" + core.height + " px");
-            Add(root, "campfire flame core", "Art/Campfire/core.png", true,
-                "painted core, shipping tint " + Campfire.CoreTint.r.ToString("0.00") + ","
-                + Campfire.CoreTint.g.ToString("0.00") + "," + Campfire.CoreTint.b.ToString("0.00")
-                + " - the 24 tongue discs stay procedural");
+            Add(root, "campfire (assembled)", "Art/Campfire/core.png + Campfire.SoftSprite() x "
+                + (Campfire.TongueCount + 1), true,
+                "the fire as the yard draws it: " + drawn + " pieces (" + lit + " lit), bands "
+                + Campfire.LogOrder + "/" + Campfire.EmberOrder + "/" + Campfire.FireOrder
+                + ", pose frozen at " + Campfire.FrozenStackTime.ToString("0.00") + " s, tint "
+                + Campfire.CoreTint.r.ToString("0.00") + "," + Campfire.CoreTint.g.ToString("0.00") + ","
+                + Campfire.CoreTint.b.ToString("0.00") + " - sparks/smoke/embers and the night glow are "
+                + "time-driven and stay out of the catalogue");
         }
 
         ScaleBarAt(root, x - 1.5f, "fire");

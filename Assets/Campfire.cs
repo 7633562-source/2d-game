@@ -14,14 +14,27 @@ public class Campfire : MonoBehaviour
     public const float CullX = 18f;
     public const float LabX = 0f;
 
-    private const int LogOrder = 12;
+    // The fire's own sorting bands. LogOrder / EmberOrder / FireOrder are public
+    // because the gallery's FIRE row draws the assembled fire at these bands
+    // (Campfire.FrozenStack), so the catalogue cannot drift from the yard.
+    public const int LogOrder = 12;
     private const int GlowOrder = 16;
-    private const int EmberOrder = 18;
+    public const int EmberOrder = 18;
     private const int SmokeOrder = 20;
-    private const int FireOrder = 22;
+    public const int FireOrder = 22;
     private const int SparkOrder = 24;
-    private const int TongueCount = 24;
+    public const int TongueCount = 24;
     private const float SmokeWind = 0.28f;
+
+    // The pieces Build() and BuildLogs() stand on the ground, in metres from the
+    // fire's own root (the feet of the logs). Public so the gallery draws them at
+    // the yard's own heights instead of retyping them.
+    public const float EmberBoxWidth = 0.18f;
+    public const float EmberBoxHeight = 0.24f;
+    public const float EmberCenterY = 0.18f;
+    public const float CoreCenterY = 0.36f;
+    public static readonly Color EmberTint = new Color(1f, 0.38f, 0.08f, 1f);
+    public static readonly Color LogWood = new Color(0.50f, 0.25f, 0f, 0.5f);
 
     [Header("Light")]
     public float baseIntensity = 0.032f;
@@ -98,6 +111,133 @@ public class Campfire : MonoBehaviour
     private static readonly Color TongueOrange = new Color(1.00f, 0.50f, 0.08f, 1f);
     private static readonly Color TongueRed = new Color(0.92f, 0.16f, 0.03f, 1f);
 
+    // ─── the assembled fire as a frozen picture (ART-0) ────────────────────
+    // The gallery's FIRE row draws the fire the yard shows: the three log boxes,
+    // the ember disc, the 24 tongue discs of the pool and the painted core, in the
+    // pool's own sorting bands and at the heights Build() places them. The live
+    // flicker is Perlin noise on Time.time, so a live fire would not repeat frame
+    // for frame; this stack is frozen at FrozenStackTime with the flicker pair at
+    // its mean. Nothing here ticks, and nothing here is a body: the fire has no
+    // collider and no Rigidbody2D, so this moves no physics number.
+    //
+    // The pool's geometry and its pose live once, in PoolRow and TonguePicture,
+    // and the logs' in LogRow. TickTongues, BuildTongues and BuildLogs call the
+    // same three, and Tools/art0-fire-stack-check.py reads this file and fails if
+    // a literal of any of them moves - a catalogue that drifts from the fire is
+    // worse than no catalogue.
+    public const float FrozenStackTime = 0.70f;
+    public const float FrozenStackFlicker = 0.50f;
+
+    public enum FirePieceKind
+    {
+        Log = 0,
+        Disc = 1,
+        Core = 2
+    }
+
+    public struct FirePiece
+    {
+        public string name;
+        public FirePieceKind kind;
+        public Vector3 local;
+        public float tilt;
+        public Vector2 size;
+        public Color color;
+        public int order;
+        public bool on;
+    }
+
+    private static FirePiece[] frozenStack;
+
+    // Bottom to top: the three logs, the ember, the 24 tongues, the painted core.
+    public static FirePiece[] FrozenStack()
+    {
+        if (frozenStack != null)
+            return frozenStack;
+
+        FirePiece[] pieces = new FirePiece[3 + 1 + TongueCount + 1];
+        int k = 0;
+
+        for (int i = 0; i < 3; i++)
+        {
+            LogRow(i, out string logName, out Vector2 logSize, out Vector3 logLocal, out float logTilt);
+            LogPiece(pieces, ref k, logName, logSize, logLocal, logTilt);
+        }
+
+        DiscPiece(pieces, ref k, FirePieceKind.Disc, "Ember",
+            new Vector2(EmberBoxWidth, EmberBoxHeight), new Vector3(0f, EmberCenterY, 0f), 0f,
+            EmberTint, EmberOrder);
+
+        for (int i = 0; i < TongueCount; i++)
+        {
+            float w;
+            float h;
+            int order;
+            float heat;
+            float life;
+            float phase;
+            float lean;
+            float x0;
+            float rise;
+            PoolRow(i, out w, out h, out order, out heat, out life, out phase, out lean, out x0, out rise);
+
+            // The age the pool is born with (BuildTongues), advanced by
+            // FrozenStackTime and wrapped the way TickTongues wraps it.
+            float age = life * (i / (float)TongueCount) + FrozenStackTime;
+            if (age >= life)
+                age -= life;
+
+            TonguePicture(age / life, FrozenStackTime, FrozenStackFlicker, FrozenStackFlicker,
+                phase, lean, x0, rise, w, h, heat,
+                out Vector3 local, out float tilt, out float scaleX, out float scaleY,
+                out Color color, out bool on);
+
+            pieces[k].name = "Tongue_" + i;
+            pieces[k].kind = FirePieceKind.Disc;
+            pieces[k].local = local;
+            pieces[k].tilt = tilt;
+            pieces[k].size = new Vector2(scaleX, scaleY);
+            pieces[k].color = color;
+            pieces[k].order = order;
+            pieces[k].on = on;
+            k++;
+        }
+
+        DiscPiece(pieces, ref k, FirePieceKind.Core, "FlameCore",
+            new Vector2(CoreBoxWidth, CoreBoxHeight), new Vector3(0f, CoreCenterY, 0f), 0f,
+            CoreTint, FireOrder + 4);
+
+        frozenStack = pieces;
+        return pieces;
+    }
+
+    private static void LogPiece(FirePiece[] into, ref int k, string name, Vector2 size, Vector3 local, float tilt)
+    {
+        into[k].name = name;
+        into[k].kind = FirePieceKind.Log;
+        into[k].size = size;
+        into[k].local = local;
+        into[k].tilt = tilt;
+        into[k].color = LogWood;
+        into[k].order = LogOrder;
+        into[k].on = true;
+        k++;
+    }
+
+    private static void DiscPiece(FirePiece[] into, ref int k, FirePieceKind kind, string name,
+        Vector2 size, Vector3 local, float tilt, Color color, int order)
+    {
+        into[k].name = name;
+        into[k].kind = kind;
+        into[k].size = size;
+        into[k].local = local;
+        into[k].tilt = tilt;
+        into[k].color = color;
+        into[k].order = order;
+        into[k].on = true;
+        k++;
+    }
+
     public static Campfire EnsureOnYard()
     {
         return SpawnAt(YardX, LevelTest1.SurfaceAt(YardX));
@@ -131,14 +271,14 @@ public class Campfire : MonoBehaviour
 
         BuildLogs();
 
-        emberW = 0.18f;
-        emberH = 0.24f;
+        emberW = EmberBoxWidth;
+        emberH = EmberBoxHeight;
         ember = MakeDisc(
             "Ember",
             new Vector2(emberW, emberH),
-            new Vector3(0f, 0.18f, 0f),
+            new Vector3(0f, EmberCenterY, 0f),
             0f,
-            new Color(1f, 0.38f, 0.08f, 1f),
+            EmberTint,
             EmberOrder);
 
         flameW = CoreBoxWidth;
@@ -146,7 +286,7 @@ public class Campfire : MonoBehaviour
         SpriteRenderer flame = MakeDisc(
             "FlameCore",
             new Vector2(flameW, flameH),
-            new Vector3(0f, 0.36f, 0f),
+            new Vector3(0f, CoreCenterY, 0f),
             0f,
             CoreTint,
             FireOrder + 4,
@@ -273,32 +413,51 @@ public class Campfire : MonoBehaviour
             tongueAge[i] = age;
 
             float u = age / life;
-            float phase = tonguePhase[i];
-            float flicker = 0.80f + n * 0.26f + n2 * 0.10f * Mathf.Sin(t * 13.5f + phase);
-            float fade = u < 0.08f
-                ? u / 0.08f
-                : (u > 0.48f ? 1f - (u - 0.48f) / 0.52f : 1f);
-            if (fade < 0f)
-                fade = 0f;
+            TonguePicture(u, t, n, n2, tonguePhase[i], tongueLean[i], tongueX0[i], tongueRise[i],
+                tongueW[i], tongueH[i], tongueHeat[i],
+                out Vector3 local, out float tilt, out float scaleX, out float scaleY,
+                out Color rgb, out bool on);
 
-            float y = 0.16f + u * tongueRise[i];
-            float x = tongueX0[i]
-                + Mathf.Sin(t * 8.4f + phase) * 0.024f * (0.35f + u);
-            xf.localPosition = new Vector3(x, y, 0f);
-            xf.localRotation = Quaternion.Euler(
-                0f,
-                0f,
-                tongueLean[i] * (0.50f + 0.50f * Mathf.Sin(t * 6.1f + phase)));
-
-            float sx = flicker * (1.12f - u * 0.78f);
-            float sy = flicker * (1.06f - u * 0.28f);
-            xf.localScale = new Vector3(tongueW[i] * sx, tongueH[i] * sy, 1f);
-
-            Color rgb = FlameColor(u, tongueHeat[i]);
-            rgb.a = fade * (0.55f + (1f - u) * 0.45f);
+            xf.localPosition = local;
+            xf.localRotation = Quaternion.Euler(0f, 0f, tilt);
+            xf.localScale = new Vector3(scaleX, scaleY, 1f);
             sr.color = rgb;
-            sr.enabled = rgb.a > 0.03f;
+            sr.enabled = on;
         }
+    }
+
+    // One tongue's picture at age fraction u, time t and flicker pair (n, n2):
+    // where it stands, how it leans, how big it is drawn, its colour by age and
+    // whether it is lit at all. TickTongues writes these onto the live pool every
+    // frame. FrozenStack reads the same function for the catalogue's static fire,
+    // so the catalogue and the yard cannot drift apart.
+    private static void TonguePicture(
+        float u, float t, float n, float n2,
+        float phase, float lean, float x0, float rise, float w, float h, float heat,
+        out Vector3 local, out float tilt, out float scaleX, out float scaleY,
+        out Color color, out bool on)
+    {
+        float flicker = 0.80f + n * 0.26f + n2 * 0.10f * Mathf.Sin(t * 13.5f + phase);
+        float fade = u < 0.08f
+            ? u / 0.08f
+            : (u > 0.48f ? 1f - (u - 0.48f) / 0.52f : 1f);
+        if (fade < 0f)
+            fade = 0f;
+
+        float y = 0.16f + u * rise;
+        float x = x0 + Mathf.Sin(t * 8.4f + phase) * 0.024f * (0.35f + u);
+        local = new Vector3(x, y, 0f);
+        tilt = lean * (0.50f + 0.50f * Mathf.Sin(t * 6.1f + phase));
+
+        float sx = flicker * (1.12f - u * 0.78f);
+        float sy = flicker * (1.06f - u * 0.28f);
+        scaleX = w * sx;
+        scaleY = h * sy;
+
+        Color rgb = FlameColor(u, heat);
+        rgb.a = fade * (0.55f + (1f - u) * 0.45f);
+        color = rgb;
+        on = rgb.a > 0.03f;
     }
 
     private static Color FlameColor(float u, float heat)
@@ -331,34 +490,21 @@ public class Campfire : MonoBehaviour
 
         for (int i = 0; i < TongueCount; i++)
         {
-            int band = i % 3;
             float w;
             float h;
             int order;
-            if (band == 0)
-            {
-                w = 0.055f;
-                h = 0.46f;
-                order = FireOrder + 3;
-            }
-            else if (band == 1)
-            {
-                w = 0.080f;
-                h = 0.38f;
-                order = FireOrder + 2;
-            }
-            else
-            {
-                w = 0.110f;
-                h = 0.30f;
-                order = FireOrder + 1;
-            }
+            float heat;
+            float life;
+            float phase;
+            float lean;
+            float x0;
+            float rise;
+            PoolRow(i, out w, out h, out order, out heat, out life, out phase, out lean, out x0, out rise);
 
-            float spread = ((i / 3) - 3.5f) * 0.028f;
             SpriteRenderer sr = MakeDisc(
                 "Tongue_" + i,
                 new Vector2(w, h),
-                new Vector3(spread, 0.18f, 0f),
+                new Vector3(x0, 0.18f, 0f),
                 0f,
                 new Color(1f, 0.80f, 0.25f, 0f),
                 order);
@@ -368,14 +514,49 @@ public class Campfire : MonoBehaviour
             tongueSr[i] = sr;
             tongueW[i] = w;
             tongueH[i] = h;
-            tongueHeat[i] = band == 0 ? 1f : (band == 1 ? 0.62f : 0.28f);
-            tongueLife[i] = 0.38f + (i % 7) * 0.07f;
-            tongueAge[i] = tongueLife[i] * (i / (float)TongueCount);
-            tonguePhase[i] = i * 1.618f;
-            tongueLean[i] = -24f + (i % 9) * 6.0f;
-            tongueX0[i] = spread;
-            tongueRise[i] = 0.30f + band * 0.07f + (i % 5) * 0.03f;
+            tongueHeat[i] = heat;
+            tongueLife[i] = life;
+            tongueAge[i] = life * (i / (float)TongueCount);
+            tonguePhase[i] = phase;
+            tongueLean[i] = lean;
+            tongueX0[i] = x0;
+            tongueRise[i] = rise;
         }
+    }
+
+    // The pool's geometry, one row per tongue: the band's box, its sorting order,
+    // its heat, and the life / phase / lean / drift the pose reads. BuildTongues
+    // builds the 24 renderers from these rows and FrozenStack reads the same rows,
+    // so there is one description of a tongue in the project, not two.
+    private static void PoolRow(int i, out float w, out float h, out int order, out float heat,
+        out float life, out float phase, out float lean, out float x0, out float rise)
+    {
+        int band = i % 3;
+        if (band == 0)
+        {
+            w = 0.055f;
+            h = 0.46f;
+            order = FireOrder + 3;
+        }
+        else if (band == 1)
+        {
+            w = 0.080f;
+            h = 0.38f;
+            order = FireOrder + 2;
+        }
+        else
+        {
+            w = 0.110f;
+            h = 0.30f;
+            order = FireOrder + 1;
+        }
+
+        heat = band == 0 ? 1f : (band == 1 ? 0.62f : 0.28f);
+        life = 0.38f + (i % 7) * 0.07f;
+        phase = i * 1.618f;
+        lean = -24f + (i % 9) * 6.0f;
+        x0 = ((i / 3) - 3.5f) * 0.028f;
+        rise = 0.30f + band * 0.07f + (i % 5) * 0.03f;
     }
 
     private void BuildParticles()
@@ -660,10 +841,43 @@ public class Campfire : MonoBehaviour
 
     private void BuildLogs()
     {
-        Color wood = new Color(0.50f, 0.25f, 0f, 0.5f);
-        MakeBox("LogA", new Vector2(0.62f, 0.14f), new Vector3(-0.04f, 0.07f, 0f), -18f, wood, LogOrder);
-        MakeBox("LogB", new Vector2(0.54f, 0.13f), new Vector3(0.07f, 0.065f, 0f), 16f, wood, LogOrder);
-        MakeBox("LogC", new Vector2(0.30f, 0.12f), new Vector3(0.00f, 0.16f, 0f), 7f, wood, LogOrder);
+        for (int i = 0; i < 3; i++)
+        {
+            string name;
+            Vector2 size;
+            Vector3 local;
+            float tilt;
+            LogRow(i, out name, out size, out local, out tilt);
+            MakeBox(name, size, local, tilt, LogWood, LogOrder);
+        }
+    }
+
+    // The three logs, one row each: the box, where the yard stands it and its
+    // tilt. BuildLogs builds the renderers from these rows and FrozenStack reads
+    // them, so the catalogue cannot show a different pile from the yard.
+    private static void LogRow(int i, out string name, out Vector2 size, out Vector3 local, out float tilt)
+    {
+        if (i == 0)
+        {
+            name = "LogA";
+            size = new Vector2(0.62f, 0.14f);
+            local = new Vector3(-0.04f, 0.07f, 0f);
+            tilt = -18f;
+        }
+        else if (i == 1)
+        {
+            name = "LogB";
+            size = new Vector2(0.54f, 0.13f);
+            local = new Vector3(0.07f, 0.065f, 0f);
+            tilt = 16f;
+        }
+        else
+        {
+            name = "LogC";
+            size = new Vector2(0.30f, 0.12f);
+            local = new Vector3(0.00f, 0.16f, 0f);
+            tilt = 7f;
+        }
     }
 
     private SpriteRenderer MakeBox(string name, Vector2 size, Vector3 local, float tilt, Color color, int sortingOrder)
@@ -702,7 +916,7 @@ public class Campfire : MonoBehaviour
 
     // The painted flame core, or null when the art is not in the build: 1 m wide
     // sprite like SoftSprite, so localScale stays the only sizing device.
-    private static Sprite CoreSprite()
+    public static Sprite CoreSprite()
     {
         if (PaintedCoreChecked)
             return PaintedCore;
@@ -718,7 +932,7 @@ public class Campfire : MonoBehaviour
         return PaintedCore;
     }
 
-    private static Sprite SoftSprite()
+    public static Sprite SoftSprite()
     {
         if (SoftDiscSprite != null)
             return SoftDiscSprite;

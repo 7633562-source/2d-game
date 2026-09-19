@@ -888,4 +888,54 @@ look; the sign at native size only in the LEVEL row; `leaf`'s 0.5 m tiling rhyth
 for the pixel art. **Closed by this pass: the cap/soil style mismatch** - it was the empty top of the
 cap canvas, measured 44 % -> 22 % and judged blind on real frames.
 
+## Fifteenth pass 19.09 (artist) - the gallery's FIRE row shows the assembled fire
+
+The next item on this file's own list, and the one that had been waiting longest: the row drew the
+painted core alone, on the ground line, and the yard draws three log boxes, an ember disc, 24 pooled
+tongue discs and the core, at heights measured from the fire's own root. It now draws exactly that,
+from `Campfire.FrozenStack()` - the pool's geometry, its sorting bands and its pose function, so the
+catalogue cannot drift from the fire it catalogues.
+
+To make that possible and safe, the geometry and the pose were **moved**, not copied:
+`BuildTongues` and `TickTongues` now call `PoolRow` and `TonguePicture`, `BuildLogs` calls `LogRow`,
+and the frozen stack calls the same three. `Tools/art0-fire-stack-check.py` is the guard: the
+multiset of float literals of the whole file differs from the previous version by exactly the two
+new frozen-stack constants (0.70f, 0.50f), nothing removed - so the move changed no band, no heat, no
+life, no lean, no flicker weight, no log box, and `FrozenStack` retypes no literal at all.
+
+The first build was rejected on its own still: the label ran over the logs, the ember and the flame
+and was clipped by the frame's right edge (diff box reaching x = 1919). Third iteration measured
+instead of judged - `Tools/art0-fire-label-gap.py` reports a 1 px (0.003 m) gap at 1.05 m and a
+109 px (0.321 m) gap at 1.45 m, with no label ink on any frame edge; the blind read of that pair
+(seed 7, map read after the pick) chose the 1.45 m one, which is what shipped (`art0firestack3`,
+buildGuid `6e2836b71a1640a7aa2804c15f5b218c`). A second blind read, of the ground-line label against
+the 1.05 m one, is kept in `Trials/Runs/art0stack-label-blind-pick.txt` **as a rejected read**: its
+crop window excluded the ground-line label, so the panel whose label was out of frame looked like a
+panel without one. Third lesson of this lane, same family as the first two: the frame decides, and a
+window is only as good as its window.
+
+Evidence: 8 stills + `art0firestack3.mp4` (165 frames, 16.5 s, 1080p) from one build
+(`PREVIEW_BUILD_OK scenes=12 errors=0`, 0 capture failures, real=29 missing=11 unchanged). Against
+the previous build: `human`, `level`, `materials`, `tree` pixel-identical, `fire` 67 887 px (the
+stack + label), `photo`/`placeholder` 380 px (the label through the whole-strip lens), `apple`
+235 px - the plant lane's berry placement, proved non-deterministic across two builds of the same
+source (895 px between `art0firestack` and `art0firestack2`, which differ only in the label's
+height). Both gates re-run after the last edit: `art0-import-gate.sh` unity exit=0, 0 failures, the
+four `Level/*` through `Load<Sprite>` and the seven `Art/*` 512x512 readable, both tiles REPEAT;
+`art1-gate.sh` `ART-1A-CHECK end failures=0`. Report `Trials/Runs/art-0-fire-stack-1909-report.md`.
+
+**Physics.** Two compiled files (`Campfire.cs`, `GalleryScene.cs`) and four offline tools under
+`Tools/`. Rule zero by construction, and the construction is quoted in the report: the trial player
+is SampleScene only (`Assets/Editor/HeadlessBuild.cs:15`) and SampleScene contains **0** occurrences
+of `Campfire` - the yard plants it at runtime (`LevelGenerator.cs:165`) and the fire lab through
+`GameProcess.CreateCampfire` ("Scene Campfire only"), while `GalleryScene` exists only in the
+gallery scene, which is in the preview player. The fire has no collider and no `Rigidbody2D`.
+`Build/Headless` was neither rebuilt nor re-run.
+
+**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the
+wide-slab fill's look; the sign at native size only in the LEVEL row; `leaf`'s 0.5 m tiling rhythm;
+`filterMode Point` for the pixel art; sparks/smoke/embers and the night glow in the FIRE row (all
+time-driven - they would make a catalogue frame unrepeatable). **Closed by this pass: the FIRE row
+showing the core alone.**
+
 
