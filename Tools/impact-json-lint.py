@@ -29,14 +29,22 @@ What it checks
 5. WRITER - every recorder that declares a CSV header chain AND a per-frame row chain
              has the two agreeing. The check in (2) sees `ImpactRecorder.cs` alone,
              because it locates the row by the method name `AppendRow`; the record every
-             walk/arm/dog trial is read from is written by `TrialRecorder.cs` (186
-             columns, the row in a chained statement), so a column appended to one side
+             walk/arm/dog trial is read from is written by `TrialRecorder.cs` (200
+             columns on 20.09, append-only - it was 186 when this check was written;
+             the row is a chained statement), so a column appended to one side
              of THAT pair was unchecked. Fatal.
 6. RECORDS- every stored `Trials/Runs/*.csv` splits into the same number of fields on
              every row as its header does, using the delimiter the header itself uses
              (';' for TrialRecorder, ',' for the capture stream). A comma-only reader
              sees one field per row on the ';' files and reports nothing. Fatal, minus
              the LEGACY_CSV_SHAPE files.
+7. RECORDS- no stored `Trials/Runs/*.csv` cell is NaN/Infinity. `json.load` parses
+             those tokens although JSON forbids them and `float()` converts the CSV
+             cell, so a column can be 87 % NaN and every reader downstream computes
+             with it in silence - the state the 18.09 WALK-1 tap was found in. The
+             writer still has deliberate NaN writes (`TrialRecorder` A4 pelvis columns
+             without a pelvis rigid body, A3 IK columns without a support state), so
+             the gate has to see them. Fatal, minus the LEGACY_NONFINITE files.
 
 Exit: 0 = OK, 1 = defect (fatal lines printed), 2 = the source could not be read.
 """
@@ -71,6 +79,33 @@ LEGACY_UNPARSEABLE = {
 LEGACY_CSV_SHAPE = {
     "walk_soft_dbg.csv": "28.08 debug record, 36-field header over 35-field rows, revision gone",
 }
+
+# Stored CSVs whose cells include NaN/Infinity for a reason that is history, not a live
+# writer. Same contract as the two lists above: anything NOT in this list fails the gate.
+# The 18.09 WALK-1 command tap is the record: `reqAnkleR` 6978, `reqAnkleL` 6927 and
+# `copCmdL` 6917 of its 8001 rows are `NaN`, i.e. the column reads as a number to every
+# reader and is unusable in all of them. The writer revision behind it was replaced by
+# the per-frame tap the current TrialRecorder carries, so it cannot be re-derived.
+LEGACY_NONFINITE = {
+    "walk1_tap.csv": "18.09 WALK-1 command tap, 127 columns, reqAnkle*/copCmd* NaN on ~87 % of the rows, revision gone",
+    "walk1_tap2.csv": "18.09 WALK-1 command tap, 127 columns, reqAnkle*/copCmd* NaN on ~87 % of the rows, revision gone",
+    "walk1_tap3.csv": "18.09 WALK-1 command tap, 127 columns, reqAnkle*/copCmd* NaN on ~87 % of the rows, revision gone",
+    "walk1_tap4.csv": "18.09 WALK-1 command tap, 127 columns, reqAnkle*/copCmd* NaN on ~87 % of the rows, revision gone",
+}
+
+# A number no reader can use. The lookarounds keep legitimate text out: `Infinity` in a
+# label or `nan` inside a word are not fields, and only a whole cell counts.
+NONFINITE = re.compile(r"(?i)(?<![a-z])(nan|[-+]?inf(?:inity)?)(?![a-z])")
+
+# Every token that pattern can match contains an `n` or an `N` (`nan`, `inf`, `Infinity`),
+# so the scan is gated on that character first: a data row is digits and separators, so it
+# pays one substring test at memchr speed instead of 14 M regex calls (measured on a 108 MB
+# sample: the regex alone is 3.3 s over 96 k rows, the gate makes it free).
+def has_nonfinite(line):
+    """True when a CSV line carries a NaN/Infinity field. See NONFINITE for the gate."""
+    if "n" not in line and "N" not in line:
+        return False
+    return NONFINITE.search(line) is not None
 
 HELPER_KEYS = re.compile(r'\b(?:Num|BoolField|Str|AppendNum|AppendBool)\(\s*json\s*,\s*"([^"]+)"')
 
@@ -297,6 +332,7 @@ def scan_csv_records(problems):
         return
     names = sorted(os.listdir(RUNS))
     files = scanned = semicolon = ragged = 0
+    nonfinite_files = 0
     for name in names:
         if not name.lower().endswith(".csv"):
             continue
@@ -321,15 +357,30 @@ def scan_csv_records(problems):
                 files += 1
                 if delim == ";":
                     semicolon += 1
-                want = len(header.rstrip("\r\n").split(delim))
+                cols = header.rstrip("\r\n").split(delim)
+                want = len(cols)
                 bad = 0
                 first = []
+                nonfinite = []          # lines carrying a cell no reader can use
+                nonfinite_col = ""
                 # A writer that appends one frame at a time can be caught mid-line: a
                 # file whose last byte is not a newline has a final line that is not yet
                 # a record, and counting it would turn a live trial into a false alarm.
                 # A line is judged when the next one arrives; the last one only if the
                 # file is terminated.
                 prev, prev_no = None, 0
+                def note_nonfinite(lineno, text):
+                    """Record a judged line whose cells include NaN/Infinity; name the column."""
+                    nonlocal nonfinite_col
+                    nonfinite.append(lineno)
+                    if nonfinite_col:
+                        return
+                    for ci, cell in enumerate(text.rstrip("\r\n").split(delim)):
+                        if NONFINITE.search(cell):
+                            nonfinite_col = (cols[ci] if ci < len(cols)
+                                             else "col%d" % (ci + 1))
+                            return
+
                 for i, line in enumerate(fh, start=2):
                     if prev is not None and prev.strip():
                         scanned += 1
@@ -337,6 +388,8 @@ def scan_csv_records(problems):
                             bad += 1
                             if len(first) < 5:
                                 first.append(prev_no)
+                        if has_nonfinite(prev):
+                            note_nonfinite(prev_no, prev)
                     prev, prev_no = line, i
                 if prev is not None and complete and prev.strip():
                     scanned += 1
@@ -344,23 +397,42 @@ def scan_csv_records(problems):
                         bad += 1
                         if len(first) < 5:
                             first.append(prev_no)
+                    if has_nonfinite(prev):
+                        note_nonfinite(prev_no, prev)
         except OSError as exc:
             problems.append("RECORD  %s unreadable: %s" % (name, exc))
             continue
-        if not bad:
-            continue
-        ragged += 1
-        if name in LEGACY_CSV_SHAPE:
-            print("legacy : %s kept as history (%s)" % (name, LEGACY_CSV_SHAPE[name]))
-        else:
-            problems.append(
-                "RECORD  %s: the header declares %d %r-delimited fields and %d of the "
-                "rows do not (lines %s) - every field after the difference is read "
-                "from the wrong column"
-                % (name, want, delim, bad, ",".join(str(x) for x in first)))
+        if bad:
+            ragged += 1
+            if name in LEGACY_CSV_SHAPE:
+                print("legacy : %s kept as history (%s)" % (name, LEGACY_CSV_SHAPE[name]))
+            else:
+                problems.append(
+                    "RECORD  %s: the header declares %d %r-delimited fields and %d of the "
+                    "rows do not (lines %s) - every field after the difference is read "
+                    "from the wrong column"
+                    % (name, want, delim, bad, ", ".join(str(x) for x in first)))
+        # A non-finite number is a value every reader accepts and no reader can use:
+        # `json.load` parses NaN/Infinity (the JSON standard forbids both) and `float()`
+        # converts the CSV cell, so a column can be NaN on almost every row and no check
+        # in this file - nor any tool downstream - sees it. The 18.09 WALK-1 command tap
+        # was found in exactly that state (reqAnkleR/reqAnkleL/copCmdL, ~6 950 of 8001
+        # frames) and the current writer still has deliberate NaN writes: TrialRecorder
+        # publishes the A4 pelvis columns as NaN when the pelvis carries no rigid body,
+        # and the A3 IK columns when there is no support state.
+        if nonfinite_col:
+            nonfinite_files += 1
+            if name in LEGACY_NONFINITE:
+                print("legacy : %s kept as history (%s)" % (name, LEGACY_NONFINITE[name]))
+            else:
+                problems.append(
+                    "RECORD  %s: %d judged row(s) carry a non-finite number in column %r "
+                    "(first at line %d) - json.load and float() both accept it, so every "
+                    "reader computes with NaN and reports nothing"
+                    % (name, len(nonfinite), nonfinite_col, nonfinite[0]))
     print("csv records: %d files (%d ';'-delimited, the rest ','), %d rows checked, "
-          "%d file(s) with a row/header difference"
-          % (files, semicolon, scanned, ragged))
+          "%d file(s) with a row/header difference, %d file(s) with a non-finite field"
+          % (files, semicolon, scanned, ragged, nonfinite_files))
 
 
 def writer_keys():

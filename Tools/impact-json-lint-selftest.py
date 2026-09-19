@@ -9,11 +9,16 @@ the lint four times:
      a numeric value (the opening quote is never closed): must be BROKEN and must name
      the line and the key;
   3. one field separator removed from the per-frame row chain of `TrialRecorder.cs`
-     - the 186-column record every walk/arm/dog trial is read from: must be BROKEN and
+     - the append-only record every walk/arm/dog trial is read from (200 columns on
+     20.09): must be BROKEN and
      must name `TrialRecorder.cs`. This is the class the lint used to see only in
      `ImpactRecorder.cs`.
   4. a stored CSV whose rows are short of its header (`a;b;c` / `1;2`): must be BROKEN
      and must name the record. A comma-only reader cannot see this on a ';' record.
+  5. a stored CSV with a NaN cell in one column: must be BROKEN and must name the record
+     and the column. `json.load` and `float()` both accept the token, so without this
+     check a column can be NaN on every row and no reader complains - the state the
+     18.09 WALK-1 command tap was found in.
 
 Run it whenever the lint changes:  python Tools/impact-json-lint-selftest.py
 """
@@ -107,6 +112,17 @@ def main():
     rc5, out5 = run(lint)
     show("a CSV caught mid-write (unterminated last line)", rc5, out5)
 
+    # A non-finite cell is a number every reader accepts and none can use: the shape is
+    # right, the value is not. The 18.09 WALK-1 tap carried NaN on ~87 % of its rows and
+    # no check in the lint said a word.
+    os.remove(partial)
+    nan = os.path.join(SANDBOX, "Trials", "Runs", "selftest_nan.csv")
+    with open(nan, "w", encoding="utf-8", newline="") as fh:
+        fh.write("a;reqAnkleR;c\n1;NaN;3\n1;2;3\n")
+
+    rc6, out6 = run(lint)
+    show("a stored CSV with a NaN cell", rc6, out6)
+
     shutil.rmtree(SANDBOX, ignore_errors=True)
 
     clean_ok = rc == 0
@@ -114,10 +130,13 @@ def main():
     caught_row = rc3 == 1 and "WRITER" in out3 and "TrialRecorder.cs" in out3
     caught_csv = rc4 == 1 and "RECORD" in out4 and "selftest_ragged.csv" in out4
     partial_ok = rc5 == 0
+    caught_nan = (rc6 == 1 and "RECORD" in out6 and "selftest_nan.csv" in out6
+                  and "reqAnkleR" in out6)
     print("\nclean writer accepted: %s   JSON defect caught: %s   TrialRecorder row "
-          "drift caught: %s   ragged CSV caught: %s   mid-write CSV tolerated: %s"
-          % (clean_ok, caught_json, caught_row, caught_csv, partial_ok))
-    if clean_ok and caught_json and caught_row and caught_csv and partial_ok:
+          "drift caught: %s   ragged CSV caught: %s   mid-write CSV tolerated: %s   "
+          "NaN cell caught: %s"
+          % (clean_ok, caught_json, caught_row, caught_csv, partial_ok, caught_nan))
+    if clean_ok and caught_json and caught_row and caught_csv and partial_ok and caught_nan:
         print("SELFTEST OK")
         return 0
     print("SELFTEST FAILED")
