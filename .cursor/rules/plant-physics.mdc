@@ -250,3 +250,65 @@ A plant must read as grown, not as a symmetric geometric figure, and it stays se
 - budget: Rigidbody2D and HingeJoint2D only on the structural skeleton (about 15-24
   dynamic segments per tree); twigs, foliage, fruit, bark and root flair are
   picture-only children.
+
+## T1 for the apple re-verified, and a pending edit in the tree (18.09 20:05)
+
+T1 on the apple is committed (`d4a2f6dc`) and re-verified from the artifacts on disk:
+23 of 23 shared run-block keys bit-identical to the pre-T1 block on BOTH runs
+(fp `8000f531` vs `f9d594f0`), the run block kept 19 keys and moved 18 into `build:`
+with none lost, and `<label>_joints.csv` is `t` + 15 joints x 10 columns (1600 rows).
+
+The rerun on today's player (fp `022dae75`) is the honest test of "bit-identical":
+- oak `tree_t1rerun_hold` / `tree_t1rerun_wind012` — BIT-IDENTICAL to the accepted T1
+  runs (23/23; hold 0.00103 deg, wind 34.17341 / crownDrop 0.2553246 / pinned 0.20), so
+  the oak canon is untouched by what follows;
+- apple `apple_t1rerun_hold` / `apple_t1rerun_wind012` — 22 of 23 keys MOVED. It is NOT
+  the instrument: `Assets/AppleTrialRecorder.cs` and `Assets/TreeJointTrace.cs` are
+  clean against T1, and the rig hash is unchanged (`b242a8ddd29b0b28`).
+
+What moved the apple is an UNCOMMITTED physics edit in `Assets/TreeBase.cs` —
+`CentreJointStopsOnBind()` (41 lines, 19:18), already inside that player. The build block
+proves it is in: the stops are now centred on the bind angle (J08 `[20.989, 30.989]`
+instead of +-5, J01 `[-12.337, -2.337]`, J12 `[6.620, 30.620]`). Measured effect, hold /
+wind 0.12: maxAbsJointAngle 26.2326 -> 5.674024 and 25.59885 -> 7.066446;
+hingePinnedFraction 0.40 -> 0.0667 (1 of 15) and 0.2667 -> 0.0667; springSatFraction
+0.06620833 -> 0; maxAbsAppliedTorqueNm 40 (the twig cap) -> 20.3669 / 20.5555;
+holdResidualNm 35.31 -> 18.88; swayAmpM 0.6708 -> 0.1030 and 0.6716 -> 0.1465;
+crownComDxM 0.0955 -> 0.0236. That is the fix the apple note above predicts, but it is
+NOT an accepted cycle: while it sits uncommitted no fresh apple number may be accepted
+(`Assets/TrialRecorder.cs` from another stream is dirty as well), and the plan's T2 is
+diagnosis only, so it needs its own brief.
+
+T1 gap found on the apple: `build.joints[].gravityGradient` is 0 on all 15 joints (the
+oak reports 259.65 / 44.97 / 6.22 / 0.50). The apple binds through `TreeBase.BindGravityHold`,
+which never writes the field, while `PlantTree.BindGravityHold` does. The only reader is
+PlantTree's own ordered-stem stiffness law (`orderedStem && orderStiffnessFactor > 0`),
+which the apple path does not run — so filling it on the apple is instrumentation, not
+physics, and it is one cycle's work. Until then T2's crown-gravity share cannot be read
+for the apple.
+
+## T1 gap closed on the apple (19.09, build cae2483a)
+
+The paragraph above is done: `TreeBase.BindGravityHold` now accumulates the joint's gravity
+gradient (`gradient += (com.y - jointWorld.y) * seg.rb.mass * g.y`) and writes
+`spring.gravityGradient = Mathf.Abs(gradient)` — the same expression PlantTree uses. No
+reader on the TreeBase path, so it is instrumentation, not a force.
+
+Measured on `apple_t1gap_hold` / `apple_t1gap_wind012` (fp `cae2483a…`, rig
+`b242a8ddd29b0b28`) against the pre-edit player `apple_t1g0_*` (fp `c0b27669…`): the run
+block is 28 of 30 keys bit-identical (only `wallPerSim` and `sourceFingerprint` move) and
+in `joints[]` `gravityGradient` is the ONLY field that moves — 0 → 305.7497 / 52.95278 /
+7.346342 / 0.6321625 by order. The oak still reproduces the accepted T1 canon on the new
+build (`tree_t1gap_*` vs `tree_t1_*`: build block 93/93 identical, `maxTrunkLeanDeg`
+16.04749, `maxAbsJointAngle` 34.17341, `crownDrop` 0.2553246). Report:
+`Trials/Runs/apple-t1gap-report.md`.
+
+Apple readings the field now gives (N·m/rad, hold): gradient 305.75 / 52.95 / 7.35 / 0.63
+for orders 0-3 against k 500 / 166.67 / 86.81 / 58.94 — T2's crown-gravity share is
+readable. The `hingePinnedFraction` 0.0667 is one joint, J08, at 31.0263 deg against its
+own limit maximum 30.9894 — 0.037 deg OUTSIDE its stop in still air (read from the trace
+CSV, not from a TreeBase helper).
+
+Still uncommitted and untouched: `CentreJointStopsOnBind()` in the same file. With it in
+the player the apple is NOT bit-identical to the committed `apple_t1_*` (53 keys moved,
+re-measured this cycle), so no fresh apple number is accepted yet.

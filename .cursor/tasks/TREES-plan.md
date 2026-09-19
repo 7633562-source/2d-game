@@ -52,6 +52,58 @@ CORRECTED (I reject this part of the review):
   before sizing anything from it. Note also `trunkJointAngleDeg` 16.03 against
   `trunkLimitDeg` 16.00 — the trunk sits on its stop, as the audit said.
 
+### T1 for the APPLE — 18.09, build 8000f531 (same instrumentation, verified)
+
+- `TreeJointTrace` now takes `IWoodSensorSource`, so ONE trace reads both trees:
+  `TreeBase` hands out the same `WoodSensor` (order / bindDeg / buildHeadingDeg)
+  and computes its own `RigHash` at build (fnv1a64, `b242a8ddd29b0b28` at seed 1).
+  `PlantTree.WoodSensor` moved out of `PlantTree` into `TreeJointTrace` — one
+  struct, one CSV layout, so one script set reads oak and apple.
+- `AppleTrialRecorder` is sensor-pure: it no longer calls `GetMaxAbsJointAngle`
+  / `GetTrunkLeanDeg` / `GetHingePinnedFraction` / `GetCrownY` / `GetCrownTip`
+  / `GetHoldStats`. The apple JSON splits into a run block (25 keys, measurements
+  only) and a `build:` block (42 keys + `joints[]`), and the apple run writes
+  `<label>_joints.csv` — 1600 rows, `t` + 10 columns x 15 joints. No key was
+  renamed; the constants that used to sit in the run block moved into `build:`
+  (`tree-report.py` reads both blocks now).
+- Acceptance met: `apple_t1_hold` / `apple_t1_wind012` (build 8000f531) against
+  the pre-T1 `apple_t1base_hold` / `apple_t1base_wind012` (build f9d594f0) —
+  **23 of 23 shared run-block keys bit-identical on BOTH runs**, and the oak
+  re-run `tree_t1b_hold` / `tree_t1b_wind012` is bit-identical to the accepted
+  `tree_t1_*` on both hold and wind. Instrumentation only: zero physics change.
+- First apple diagnosis from the trace (T2 input, not yet a brief): the apple
+  rig is NOT quiet. J00 (trunk) max|angle| 1.5094 against limit 1.50 — PINNED at
+  its own stop; J08 (order 1) 23.87 deg against limit 5 with 1589 of 1600 samples
+  at the cap; J12 (order 2) 31.87 deg against limit 12; J14 (twig) 28.56 against
+  28. `maxAbsAppliedTorqueNm` = 40 on the nose (the twig cap) and
+  `springSatFraction` 0.0662 — NONZERO here, unlike the oak (0), so on the apple
+  the saturation mechanism the review named IS live. `holdResidualNm` 35.31 N·m.
+- The two reported apple sway numbers are STILL untrustworthy (job order 1 of the
+  apple brief is not done): `hingePinnedFraction` remains a maximum instantaneous
+  fraction (0.40 hold / 0.27 wind) and `swayAmpM` is still 0.67 m with and without
+  wind — a startup transient, with the measured crown COM drift only 0.096 m
+  (`crownComDxM`). T1 did not add a settled window or a wind-off run: the plan
+  allows one change per cycle and forbids new signals outside T4/T5. The CSV and
+  `joints[]` now make both computable offline.
+
+- **T1 GAP CLOSED 19.09** (build `cae2483a`): the apple's
+  `build.joints[].gravityGradient` is no longer 0 on all 15 joints.
+  `TreeBase.BindGravityHold` never wrote the field (PlantTree's did); it does now, and the
+  only reader in the tree is PlantTree's ordered-stem law, which the apple path never runs
+  — instrumentation only, no force. Labels `apple_t1gap_hold` / `apple_t1gap_wind012` and
+  `tree_t1gap_hold` / `tree_t1gap_wind012` (fp `cae2483a…`). Apple against the pre-edit
+  player `apple_t1g0_*` (fp `c0b27669…`): run block 28 of 30 keys bit-identical
+  (`wallPerSim` + `sourceFingerprint` only) and the only fields that move anywhere in the
+  file are the 19 gradient values (0 → 305.7497 / 52.95278 / 7.346342 / 0.6321625 by
+  order). Oak against the accepted `tree_t1_*`: build block 93/93 identical, run block 27
+  of 29 (same two meta keys) — the canon is untouched. Report
+  `Trials/Runs/apple-t1gap-report.md`.
+- Still open from T1: the apple brief's job 1 (settled window, stable tip identity,
+  wind-off decay) is NOT done, so `hingePinnedFraction` and `swayAmpM` remain numbers that
+  do not mean what they look like; and the uncommitted `CentreJointStopsOnBind()` in
+  `Assets/TreeBase.cs` still sits in every plant build, so the apple is not bit-identical
+  to the committed `apple_t1_*` (53 keys moved, re-measured 19.09).
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,

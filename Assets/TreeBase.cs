@@ -384,6 +384,13 @@ public abstract class TreeBase : PlantBase, IWoodSensorSource
 
             Vector2 jointWorld = n.segment.transform.TransformPoint(new Vector2(0f, -n.segment.size.y * 0.5f));
             float moment = 0f;
+            // Gravity gradient of this joint, N.m/rad: how much the weight of the
+            // subtree below it pushes it over per radian. PlantTree.BindGravityHold
+            // (:12671-12685) computes it and its ordered-stem law reads it; this
+            // TreeBase path never wrote it, so the apple reported 0 on all 15
+            // joints (T1 trace gap). No reader on this path — the field is
+            // instrumentation here, not a force.
+            float gradient = 0f;
             for (int j = 0; j < nodes.Count; j++)
             {
                 if (!IsDescendantOrSelf(j, i)) continue;
@@ -391,7 +398,9 @@ public abstract class TreeBase : PlantBase, IWoodSensorSource
                 if (seg == null || seg.rb == null) continue;
                 Vector2 com = seg.transform.position;
                 moment += (com.x - jointWorld.x) * seg.rb.mass * g.y;
+                gradient += (com.y - jointWorld.y) * seg.rb.mass * g.y;
             }
+            spring.gravityGradient = Mathf.Abs(gradient);
             spring.holdTorque = -moment;
             spring.maxTorque = Mathf.Max(spring.maxTorque, Mathf.Abs(moment) * 0.5f + 16f);
             spring.restAngle = n.segment.joint.jointAngle;
