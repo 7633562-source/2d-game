@@ -155,6 +155,86 @@ trunk 16.0264 against its 16.0 stop, tip 1.368073 m. The 180 N·m/rad trunk spri
 cannot lift the 259.7 N·m/rad weight gradient, so T3's RETURN TEST fails on the oak
 today — by the rig, not by the measurement. Report `tree-t1oak-report.md`.
 
+### T1 close-out + the T2 frame fix STOOD AND COMMITTED — 19.09, commit `c9129bc1`
+
+Zero source edits this cycle; seven runs on the player `cb7e4ef6` (gitCommit `9a43a74e`):
+`tree_t1c2_hold/_wind012/_windoff`, `apple_t1c2_hold/_wind012/_windoff` and one repeat.
+
+- **Bit-identity:** the oak canon `tree_t1oak_*` is BIT-IDENTICAL on hold, wind 0.12 and
+  wind off (run block and build block; 0 of 1600 `joints.csv` rows differ), and so is the
+  apple's post-edit pair `apple_t1sw_hold/_wind012` (0 differing rows). Against the PRE-T2
+  `apple_t1_*` pair the apple moves 23 run keys, 11 added, 0 lost — the intended physics
+  change, so that pair is the "before", not a target.
+- **The T2 frame fix met every stand criterion on the fresh runs:** born-behind 4/15
+  (J01, J05, J08, J12) -> **0/15**; `springSatFraction` 0.06620833 -> **0** on every joint
+  (per-joint CSV: J08 at its 40 N·m cap in 0.993125 of 1600 rows -> 0.000000); oak pair
+  bit-identical; `sourceFingerprint` == `Build/Headless/build-manifest.json`; rigs unchanged
+  (oak `dcc15b908146504e`, apple `b242a8ddd29b0b28`). Committed as `c9129bc1` — ONE file,
+  `Assets/TreeBase.cs`, 41 insertions; nothing else staged (the rest of the dirty tree is
+  the art/level/walk streams).
+- **Open, found this cycle:** `apple_t1sw_windoff` does NOT reproduce — it diverges from its
+  own sibling `apple_t1sw_wind012` (same fp, same player) at **row 2, t = 0.01 s**, 1599 of
+  1600 rows, so that artifact was produced by a player its fingerprint does not name. Today's
+  wind-off runs are byte-identical to each other and their first 800 rows equal the accepted
+  wind-on label; wind-off evidence is now `apple_t1c2_windoff` (release peak 6.448067 deg,
+  0.11 deg past the wind-on peak 6.335289; residual 0.022004 deg, crown tip 0.000672 m).
+  The oak's wind-off label is fine (bit-identical to today's rerun). The apple's wind-off
+  gate opens exactly at t = 4.004949 (first differing row against its own wind-on sibling).
+- `tree-const-assert.py` fires on the apple pair for three DISCRETE counts
+  (`springSatFraction` 0, `hingePinnedFraction` 0.06666667, `hingePinnedJointCount` 2). The
+  CSV explains them: the same two joints (J08, J01) are the only ones that ever enter the
+  0.2 deg band in either run. The oak's same keys differ between its runs, so the signal is
+  live; J08's 0.674 deg overrun in still air is the SOFT stop, which is T4's.
+- Report `Trials/Runs/apple-t1c2-report.md`; helpers `_t1c2-read.py`, `_t1c2-accept.py`
+  (output `apple-t1c2-accept-output.txt`), `_t1c2-firstdiff.py`, `_t1c2-pinned.py`,
+  `_t1c2-joints.py`.
+
+### T1 re-verified on a NEW player, and `-visual` is not a neutral flag — 19.09 (cycle `T1`)
+
+Zero source edits, eleven runs, the accepted labels re-run on the player that the other four
+streams have since rebuilt: fp `4681f70b…`, gitCommit `ac2299ea`, built 15:11, gate "OK at 15:12",
+every `.cs` older than the DLL, no editor, no lock. The accepted baselines were made on
+`cb7e4ef6` (gitCommit `9a43a74e`).
+
+- **T1 reproduces bit for bit.** Run block AND build block AND all 1600 CSV rows: oak
+  `tree_t1d_hold/_wind012/_windoff` == `tree_t1oak_*`; apple `apple_t1d_nv_hold/_wind012/_windoff`
+  == `apple_t1sw_hold/_wind012` and `apple_t1c2_windoff`; a repeat of the wind-off run is
+  bit-identical to its sibling. The negative controls move as they must: the PRE-T2
+  `apple_t1_hold` pair moves 23 run keys (11 added), and the STALE `apple_t1sw_windoff` moves 12
+  — that artifact was made by a player its fingerprint does not name, confirmed a second time.
+- **FOUND: `-visual` changes the recorded trajectory, deterministically, on BOTH rigs.** The apple
+  diverges from row 2 (t = 0.01 s) with 1599 of 1600 rows differing and 1.725 N·m in
+  `J00_springTorque` at that row; the oak diverges from row 2 with 1231 rows (5.95e-03 deg) but
+  CONVERGES back (last-row delta 0.000e+00, it ends on its trunk stop) while the apple does not
+  (7.7e-04 deg, J08 never leaves its soft stop). It is the harness, not a regression: the
+  `-visual` apple run on the OLD player (`apple_t1c2_photo_hold`) is bit-identical to today's
+  `-visual` run (`apple_t1d_hold`) and the no-`-visual` runs match the accepted pair, so both
+  variants are deterministic and the flag simply chooses which. Therefore the apple's recorded
+  physics depends on the shape of the run: **compare labels only within the same switch shape; a
+  physics label must not carry `-visual`** — which is why the accepted apple pair is the
+  `-visual`-free `apple_t1sw_*`/`apple_t1c2_*` and the picture labels are
+  `apple_t1c2_photo_*`/`apple_t1d_*`. The oak's labels all carry `-visual` (tree-probe.sh always
+  passes it) and are consistent with each other.
+- T2's frame fix still stands on the new player: born-behind 4/15 (J01, J05, J08, J12) on the
+  PRE-T2 pair, **0/15** on every today's-shape run; J08 sat at its 40 N·m cap in 0.993125 of 1600
+  rows before the fix and in **0.000000** after, on every joint. Rigs unchanged
+  (`dcc15b908146504e` / `b242a8ddd29b0b28`), `jointColumnCount` 15.
+- Three acceptance numbers the apple still misses, unchanged and not instrumentation work:
+  `hingePinnedFraction` 0.06666667 (2 of 15 — J08 0.674 deg outside its own stop in still air,
+  overrun up to 2.066446 deg under wind: SOFT stops, T4); settled crown sway 0.02222349 m at wind
+  0.12 is BELOW the 0.10-0.30 band (T5); `crownDrop` 0.00667548 m in the hold is above the 2 mm
+  target — and the T2 frame fix RAISED it from 0.00265265 (pre-T2), because centring the stop band
+  on the bind angle moved the joint that carries the crown by ~4 mm. New T2/T4 input, not a win.
+- Wind off at 4 s (today, no `-visual`): release peak 6.448067 against the wind-on peak 6.335289
+  (an overshoot, not a return), last-second residual 5.693279 against the no-wind hold's 5.671275
+  = **0.022004 deg**, crown tip 0.1035979 against 0.1029263 = **0.000672 m**. T1-sway's reading
+  stands to the last digit on the new player.
+- Picture `Trials/Runs/apple_t1d_windoff.mp4` (865 646 bytes, 82 frames, 5 fps, 1080p) +
+  `apple_t1d_windoff_photo.png`; one apple tree, whole and centred, nothing else in frame.
+- Report `Trials/Runs/apple-t1d-report.md`; helpers `_t1d-accept.py`
+  (output `apple-t1d-accept-output.txt`), `_t1d-visual.py`, `_t1d-firstdiff.py`.
+- **Next: T2 (diagnosis), not started here.**
+
 ## Task order (one change per cycle; distance/lean targets are NOT the acceptance here)
 T1 - INSTRUMENTATION ONLY, zero physics change.
   Per-joint per-step CSV (row per FixedUpdate; per joint: jointAngle, limitMin, limitMax, springTorque,

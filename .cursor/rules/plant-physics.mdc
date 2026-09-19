@@ -274,10 +274,24 @@ wind 0.12: maxAbsJointAngle 26.2326 -> 5.674024 and 25.59885 -> 7.066446;
 hingePinnedFraction 0.40 -> 0.0667 (1 of 15) and 0.2667 -> 0.0667; springSatFraction
 0.06620833 -> 0; maxAbsAppliedTorqueNm 40 (the twig cap) -> 20.3669 / 20.5555;
 holdResidualNm 35.31 -> 18.88; swayAmpM 0.6708 -> 0.1030 and 0.6716 -> 0.1465;
-crownComDxM 0.0955 -> 0.0236. That is the fix the apple note above predicts, but it is
-NOT an accepted cycle: while it sits uncommitted no fresh apple number may be accepted
-(`Assets/TrialRecorder.cs` from another stream is dirty as well), and the plan's T2 is
-diagnosis only, so it needs its own brief.
+crownComDxM 0.0955 -> 0.0236.
+
+## T2 frame fix — the brief arrived and the change is now the authorized one (19.09)
+
+The T2 brief (STATUS 18.09 19:16, option 1 "fix the FRAME") is what that pending edit
+is: the hinge stop and the angle it is compared against must share one origin. The
+frames already agree — `TreeJointTrace.cs:234`/`:235` read `limits` and `jointAngle`
+off the SAME hinge, and `TreeBase.cs:416` binds the spring to that same `jointAngle`
+(bind angle) — so what was wrong is the interval's ZERO: `TreeBase.cs:224-225` wrote
+`±BendLimitForOrder(...)` about 0, the oak's own recipe (`PlantTree.cs:2658-2672`)
+centres on the limb's angle to its parent. `CentreJointStopsOnBind()`
+(`TreeBase.cs:437-453`, call `:159`) does exactly that, same width, same stiffness, same
+`maxTorque`, no new switch. Read-only check of the artifacts on disk: born-behind
+4/15 -> 0/15 in hold AND wind, `springSatFraction` 0.0662 -> 0, `maxAbsJointAngle`
+26.2326 -> 5.674024, trunk 1.50936 -> 1.166936 (inside its 1.5 deg stop), pinned
+0.40 -> 0.0667 (J08 only, 0.03-0.04 deg past its own SOFT stop); oak 29/29 run-block
+keys unmoved (it runs on `PlantTree`, the edit is in `TreeBase`); Roslyn 0 `error CS`.
+`Trials/Runs/apple-t2frame-report.md`. **STANDED AND COMMITTED 19.09 (`c9129bc1`)** — see the T1 close-out section; the change is no longer a working-tree edit.
 
 T1 gap found on the apple: `build.joints[].gravityGradient` is 0 on all 15 joints (the
 oak reports 259.65 / 44.97 / 6.22 / 0.50). The apple binds through `TreeBase.BindGravityHold`,
@@ -309,9 +323,14 @@ readable. The `hingePinnedFraction` 0.0667 is one joint, J08, at 31.0263 deg aga
 own limit maximum 30.9894 — 0.037 deg OUTSIDE its stop in still air (read from the trace
 CSV, not from a TreeBase helper).
 
-Still uncommitted and untouched: `CentreJointStopsOnBind()` in the same file. With it in
-the player the apple is NOT bit-identical to the committed `apple_t1_*` (53 keys moved,
-re-measured this cycle), so no fresh apple number is accepted yet.
+COMMITTED 19.09 as `c9129bc1` — see the T1 close-out section above (`CentreJointStopsOnBind()`
+in `Assets/TreeBase.cs`, ONE file, 41 insertions): the accept stand was run on the player
+`cb7e4ef6` (gitCommit `9a43a74e`) with the labels `tree_t1c2_*` / `apple_t1c2_*`, the oak canon
+`tree_t1oak_*` and the apple's post-edit pair `apple_t1sw_hold/_wind012` are bit-identical to
+them (run block, build block, and 0 of 1600 `joints.csv` rows), born-behind 4/15 -> 0/15 and
+`springSatFraction` 0.06620833 -> 0 on every joint. With it in the player the apple is
+deliberately NOT bit-identical to the pre-edit `apple_t1_*` pair (23 of 30 run-block keys
+moved): that pair is the "before" of the T2 comparison, not a target.
 
 ## T1-sway — the two numbers that did not mean what they looked like (19.09, build 3f93bfc4)
 
@@ -393,4 +412,29 @@ measurement. Report `Trials/Runs/tree-t1oak-report.md`; pictures
 `Trials/Runs/tree_t1oak_windoff.mp4` + `tree_t1oak_windoff_photo.png` (whole
 isolated oak, nothing else in frame); helpers `_t1oak-accept.py`,
 `_t1oak-detail.py`, `_t1oak-csv.py`, `_t1oak-window.py`, `_t1oak-gate.py`.
+
+## `-visual` is not a neutral flag (measured 19.09, cycle `T1`)
+
+The plant harness has TWO deterministic runs per switch set, and `-visual` chooses which: the
+recorded trajectory diverges at row 2 (t = 0.01 s) of 1600 — the apple in 1599 rows (1.725 N·m in
+`J00_springTorque` at that row, still 7.7e-04 deg apart at the last row because J08 never leaves
+its soft stop) and the oak in 1231 rows (5.95e-03 deg, but it CONVERGES back to a 0.000e+00
+last-row delta because it ends pinned on its trunk stop). It is the harness and not a regression:
+on the OLD player the `-visual` apple label `apple_t1c2_photo_hold` is bit-identical to today's
+`-visual` label `apple_t1d_hold`, and the `-visual`-free runs are bit-identical to the accepted
+`apple_t1sw_*`/`apple_t1c2_*` pair, so both variants reproduce across a full rebuild.
+
+- **Compare labels only within the same switch shape.** A physics label must NOT carry `-visual`
+  (the apple canon is `apple_t1sw_*`/`apple_t1c2_*`/`apple_t1d_nv_*`); a picture label
+  (`apple_t1c2_photo_*`, `apple_t1d_*`) must never be quoted as the canon, and a number taken
+  from one shape is not evidence about the other.
+- The oak's labels all carry `-visual` because `tree-probe.sh` always passes it. That is
+  consistent, and today's oak pair is bit-identical to the accepted `tree_t1oak_*`, so the oak
+  canon is sound — but a future oak run made WITHOUT `-visual` is a different trajectory.
+
+T1 stands on the rebuilt player: fp `4681f70b` (gitCommit `ac2299ea`, gate "OK at 15:12"), 11
+runs, zero source edits, both rigs bit-identical in the accepted shape, both negative controls
+moving as they must, born-behind 0/15 and no joint at its cap. Report
+`Trials/Runs/apple-t1d-report.md`; helpers `_t1d-accept.py`, `_t1d-visual.py`,
+`_t1d-firstdiff.py`.
 
