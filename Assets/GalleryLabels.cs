@@ -112,7 +112,10 @@ public static class GalleryLabels
         return bar;
     }
 
-    private static void AddPlate(
+    // A flat plate of any size: the galleries' captions and the impact video's HUD both
+    // need one behind their text. Public, and it hands back the renderer so a caller that
+    // changes the lens later can resize its own plate.
+    public static SpriteRenderer AddPlate(
         Transform parent,
         string name,
         Vector2 size,
@@ -132,5 +135,6 @@ public static class GalleryLabels
         sr.size = size;
         sr.sortingOrder = sortingOrder;
         SpriteLighting.ApplyUnlit(sr);
+        return sr;
     }
 }

@@ -149,6 +149,20 @@ public class ImpactRecorder
     public string CsvPath => System.IO.Path.Combine(outputFolder, label + "-impacts.csv");
     public string JsonPath => System.IO.Path.Combine(outputFolder, label + "-impacts.json");
 
+    // ─── THE FRAME'S CAPTION (see ImpactCaption.cs) ───
+    // The banner is composed here, where the numbers are, and read by the caption every
+    // step; `BannerAgeSeconds` is how long ago the throw it describes landed (-1 before
+    // the first one). Both are picture state: no code below reads them back, so a run
+    // with the caption disabled would still measure the same thing.
+    public string Banner { get; private set; } = string.Empty;
+    public float BannerAgeSeconds { get; private set; } = -1f;
+    public Vector2 BannerContactPoint { get; private set; }
+
+    private ImpactCaption caption;
+    private bool captionTried;
+    private int lastBannerWindow = -1;
+    private int closeLoggedWindow = -1;
+
     // ─── ONE FRAME ───
     // Called once per fixed step, where the stand calls recorder.Sample().
     public void Sample(float time)
@@ -274,6 +288,139 @@ public class ImpactRecorder
         }
 
         PushHistory(comAX);
+        UpdateCaption(time);
+    }
+
+    // ─── the caption on the frame ───
+    // Built once, on the first step, so the harness has finished putting its camera in
+    // place; refreshed every step after that. Read-only with respect to the simulation.
+    private void UpdateCaption(float time)
+    {
+        if (!captionTried)
+        {
+            captionTried = true;
+            caption = ImpactCaption.Create(HeaderText(), "label=" + label);
+        }
+        if (caption == null) return;
+
+        int latest = -1;
+        for (int i = windows.Count - 1; i >= 0; i--)
+        {
+            if (windows[i].contacted) { latest = i; break; }
+        }
+
+        if (latest < 0)
+        {
+            Banner = string.Empty;
+            BannerAgeSeconds = -1f;
+            caption.Update(string.Empty, -1f, Vector2.zero);
+            return;
+        }
+
+        ThrowWindow window = windows[latest];
+        BannerAgeSeconds = time - window.contactTime;
+        BannerContactPoint = window.contactPoint;
+        Banner = BannerText(latest, window);
+
+        if (lastBannerWindow != latest)
+        {
+            lastBannerWindow = latest;
+            Debug.Log("IMPACT-BANNER " + Banner.Replace('\n', ' '));
+        }
+        if (closeLoggedWindow != latest && BannerAgeSeconds > windowSeconds)
+        {
+            // The window has closed: this is the throw's final text, the same numbers the
+            // JSON carries, so the log and the frame can be checked against each other.
+            closeLoggedWindow = latest;
+            Debug.Log("IMPACT-BANNER-FINAL " + Banner.Replace('\n', ' '));
+        }
+
+        caption.Update(Banner, BannerAgeSeconds, BannerContactPoint);
+    }
+
+    // The parameters of the run, fixed for its whole length.
+    private string HeaderText()
+    {
+        StringBuilder sb = new StringBuilder(220);
+        int planned = thrower != null ? thrower.PlannedCount : 0;
+        sb.Append("BALANCE-ARENA-1  |  ").Append(label).Append("  |  seed ")
+            .Append(thrower != null ? thrower.seed.ToString(CultureInfo.InvariantCulture) : "n/a")
+            .Append("  |  ").Append(planned.ToString(CultureInfo.InvariantCulture)).Append(" throw(s)");
+        sb.Append('\n');
+        sb.Append(thrower != null ? thrower.shapeText : "n/a");
+        sb.Append(' ').Append(Fmt(thrower != null ? thrower.sizeMeters : 0f)).Append(" m  |  ")
+            .Append(Fmt(thrower != null ? thrower.massKg : 0f)).Append(" kg  |  ")
+            .Append(Fmt(thrower != null ? thrower.speedMps : 0f)).Append(" m/s  |  aim ")
+            .Append(thrower != null ? thrower.aimPart : "n/a")
+            .Append("  |  side ").Append(thrower != null ? thrower.sideText : "n/a");
+        sb.Append('\n');
+        sb.Append("step ").Append(Fmt(fixedDelta * 1000f)).Append(" ms  |  build ")
+            .Append(ShortId(buildGuid)).Append("  |  source ").Append(ShortId(sourceFingerprint));
+        return sb.ToString();
+    }
+
+    // The live text of one throw: what was thrown, what it hit, what it delivered to the
+    // body, and what the body did about it.
+    private string BannerText(int index, ThrowWindow window)
+    {
+        StringBuilder sb = new StringBuilder(260);
+        sb.Append("THROW ").Append((index + 1).ToString(CultureInfo.InvariantCulture))
+            .Append('/').Append(windows.Count.ToString(CultureInfo.InvariantCulture))
+            .Append("  |  ").Append(thrower != null ? thrower.shapeText : "n/a")
+            .Append(' ').Append(Fmt(thrower != null ? thrower.sizeMeters : 0f)).Append(" m  |  ")
+            .Append(Fmt(thrower != null ? thrower.massKg : 0f)).Append(" kg  |  ")
+            .Append(Fmt(thrower != null ? thrower.speedMps : 0f)).Append(" m/s  |  aim ")
+            .Append(thrower != null ? thrower.aimPart : "n/a");
+        sb.Append('\n');
+        sb.Append("hit ").Append(window.contactPart.ToLowerInvariant())
+            .Append(" @ ").Append(Fmt3(window.contactTime)).Append(" s  |  reference impulse ")
+            .Append(Fmt(window.referenceImpulseNs)).Append(" N*s  |  closing ")
+            .Append(Fmt(window.closingSpeedMps)).Append(" m/s");
+        sb.Append('\n');
+        float percent = window.referenceImpulseNs > 0f
+            ? 100f * window.deliveredImpulseNs / window.referenceImpulseNs
+            : 0f;
+        sb.Append("delivered ").Append(Fmt(window.deliveredImpulseNs)).Append(" N*s (")
+            .Append(percent.ToString("0", CultureInfo.InvariantCulture)).Append("%)  |  CoM ")
+            .Append(Fmt(window.peakComExcursionM)).Append(" m  |  min margin ")
+            .Append(Signed(window.minSupportMarginM)).Append(" m  |  steps ")
+            .Append(Mathf.Max(0, window.lastSteps - window.stepsAtContact)
+                .ToString(CultureInfo.InvariantCulture));
+        sb.Append('\n');
+        sb.Append(OutcomeText(window));
+        return sb.ToString();
+    }
+
+    private string OutcomeText(ThrowWindow window)
+    {
+        if (window.alreadyDownAtContact)
+            return "already down when it arrived";
+        if (window.criterionFallTime > 0f)
+            return "down " + Fmt3(window.criterionFallTime - window.contactTime) + " s after contact";
+        if (window.fell)
+            return "down (criterion latched)";
+        return "still standing +" + Fmt3(Mathf.Max(0f, BannerAgeSeconds)) + " s";
+    }
+
+    private static string Fmt(float value)
+    {
+        return value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private static string Fmt3(float value)
+    {
+        return value.ToString("0.000", CultureInfo.InvariantCulture);
+    }
+
+    private static string Signed(float value)
+    {
+        return value.ToString("+0.000;-0.000", CultureInfo.InvariantCulture);
+    }
+
+    private static string ShortId(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return "n/a";
+        return id.Length > 12 ? id.Substring(0, 12) : id;
     }
 
     private void Accumulate(ThrowWindow window, float time, Vector2 comPosition, float comAX,
