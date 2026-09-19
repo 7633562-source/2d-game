@@ -20,5 +20,26 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/TreePine.unity
     guid: 51f31dab59555b9fb946c021e0155ecc
+  - enabled: 1
+    path: Assets/Scenes/TreeBush.unity
+    guid: 484751cc02f958128d13c85d5fb3aee1
+  - enabled: 1
+    path: Assets/Scenes/TreeCedar.unity
+    guid: fba2507737995789944cac88c3ae94f8
+  - enabled: 1
+    path: Assets/Scenes/TreeHazel.unity
+    guid: 1d9131be70d85309b9e688bed30f5531
+  - enabled: 1
+    path: Assets/Scenes/TreeLilac.unity
+    guid: 7d5440d97fed5b8783f1f3b3fb6f498f
+  - enabled: 1
+    path: Assets/Scenes/TreePlum.unity
+    guid: 618bac60736557cd9a8ff9f976aa2d68
+  - enabled: 1
+    path: Assets/Scenes/TreePoplar.unity
+    guid: 3c4b411c09605972803ddeefc532af60
+  - enabled: 1
+    path: Assets/Scenes/TreeWillow.unity
+    guid: 9ab8a58191325bc0aeae122abe6c9865
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 3590b91b4603b465dbb4216d601bff33, type: 3}

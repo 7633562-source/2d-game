@@ -7,9 +7,9 @@ SpeciesScene component that owns the camera and keeps the WHOLE tree in frame.
 This tool clones that scene for the remaining species and only rewrites the three
 fields that name the species, so nothing else can drift:
 
-    GameProcess.treeSpecies   apple -> oak|pine
-    SpeciesScene.speciesName  apple -> oak|pine
-    SpeciesScene.label        treeapple -> treeoak|treepine
+    GameProcess.treeSpecies   apple -> oak|pine|willow|bush|poplar|lilac|hazel|cedar|plum
+    SpeciesScene.speciesName  apple -> <same>
+    SpeciesScene.label        treeapple -> tree<species>
 
 It also writes a .meta with a fixed guid (so the build-settings entry and the
 imported asset agree from the first import) and registers the scene in
@@ -34,12 +34,29 @@ PROJECT = Path(__file__).resolve().parent.parent
 SCENES = PROJECT / "Assets" / "Scenes"
 TEMPLATE = SCENES / "TreeApple.unity"
 BUILD_SETTINGS = PROJECT / "ProjectSettings" / "EditorBuildSettings.asset"
+PLANT_TREE = PROJECT / "Assets" / "PlantTree.cs"
 
 # species -> (scene file, speciesName, label)
+#
+# Oak and pine were the accepted pair (cycle 19.09, buildGuid 2c54685e). The seven
+# added here are the rest of PlantTree.ParseKind's table, so every kind the rig can
+# build now has its own one-species scene. Order is the enum order, one scene per
+# kind, never two kinds in one scene.
 SPECIES = {
     "oak": ("TreeOak.unity", "oak", "treeoak"),
     "pine": ("TreePine.unity", "pine", "treepine"),
+    "willow": ("TreeWillow.unity", "willow", "treewillow"),
+    "bush": ("TreeBush.unity", "bush", "treebush"),
+    "poplar": ("TreePoplar.unity", "poplar", "treepoplar"),
+    "lilac": ("TreeLilac.unity", "lilac", "treelilac"),
+    "hazel": ("TreeHazel.unity", "hazel", "treehazel"),
+    "cedar": ("TreeCedar.unity", "cedar", "treecedar"),
+    "plum": ("TreePlum.unity", "plum", "treeplum"),
 }
+
+# Species whose scene must already exist and stay byte-identical to what this tool
+# writes - the accepted pair. A drift here means a hand edit somewhere else.
+ACCEPTED = ("oak", "pine")
 
 META_TEMPLATE = """fileFormatVersion: 2
 guid: {guid}
@@ -54,6 +71,17 @@ DefaultImporter:
 def stable_guid(name: str) -> str:
     """Deterministic 32-hex guid, so re-running the tool never re-imports."""
     return uuid.uuid5(uuid.NAMESPACE_URL, "hermes-2dgame/" + name).hex
+
+
+def parse_kind_names(cs_path: Path) -> set[str]:
+    """The string literals PlantTree.ParseKind accepts, read from the switch itself."""
+    text = cs_path.read_text(encoding="utf-8", errors="replace")
+    start = text.find("TreeKind ParseKind(")
+    if start < 0:
+        raise SystemExit("FAIL ParseKind not found in " + str(cs_path))
+    end = text.find("\n    }", start)
+    body = text[start:end if end > 0 else len(text)]
+    return {m.group(1) for m in re.finditer(r'case\s+"([^"]+)"\s*:', body)}
 
 
 def render(template: str, species: str, label: str) -> str:
@@ -133,6 +161,16 @@ def main() -> int:
 
     added = register(seen_guids, args.check)
     print("BUILD-SETTINGS added:", added if added else "none (already registered)")
+
+    # Coverage: every kind PlantTree.ParseKind can build must have its own scene.
+    # Read from the rig's own switch, so a new kind cannot be added silently.
+    parse_kinds = parse_kind_names(PLANT_TREE)
+    covered = set(SPECIES) | {"apple"}
+    missing = sorted(parse_kinds - covered - {"auto"})
+    if missing:
+        problems.append("no scene for species " + ", ".join(missing) + " (PlantTree.ParseKind)")
+    print("COVERAGE parseKind=%d scenes=%d missing=%s"
+          % (len(parse_kinds), len(SPECIES) + 1, missing if missing else "none"))
     settings = BUILD_SETTINGS.read_text(encoding="utf-8")
     for path, guid in sorted(seen_guids.items()):
         if path not in settings or guid not in settings:

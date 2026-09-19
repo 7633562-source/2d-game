@@ -53,6 +53,22 @@ public class SpeciesScene : MonoBehaviour
         public float statsFromSeconds;
         public int width;
         public int height;
+        // Where the tree's box comes from: the rig grows hundreds of parts, so a
+        // box that leaves the ordered 2-5 m band must name the part that made it
+        // (cedar measured 33.5 m on the first run of this cycle).
+        public int rendererCount;
+        public int partsOverFiveMeters;
+        public string biggestPartPath;
+        public float biggestPartMetersX;
+        public float biggestPartMetersY;
+        public float biggestPartScale;
+        // Colliders are sized in local units and scaled by the same transform, so a
+        // blown-up crown node is a collision defect, not only a picture one.
+        public int colliderCount;
+        public string biggestColliderPath;
+        public float biggestColliderMetersX;
+        public float biggestColliderMetersY;
+        public int collidersOverFiveMeters;
     }
 
     [Header("Species")]
@@ -295,6 +311,50 @@ public class SpeciesScene : MonoBehaviour
         report.height = photoHeight;
         report.argv = string.Join(" ", Environment.GetCommandLineArgs());
 
+        // Read-only attribution pass: which part of the rig owns the box.
+        SpriteRenderer[] parts = framed.GetComponentsInChildren<SpriteRenderer>(true);
+        report.rendererCount = parts.Length;
+        float biggest = -1f;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            SpriteRenderer sr = parts[i];
+            if (sr == null || sr.sprite == null)
+                continue;
+            Bounds box = sr.bounds;
+            float area = Mathf.Abs(box.size.x * box.size.y);
+            if (Mathf.Max(box.size.x, box.size.y) > 5f)
+                report.partsOverFiveMeters++;
+            if (area <= biggest)
+                continue;
+            biggest = area;
+            report.biggestPartPath = PathOf(sr.transform);
+            report.biggestPartMetersX = box.size.x;
+            report.biggestPartMetersY = box.size.y;
+            report.biggestPartScale = Mathf.Max(Mathf.Abs(sr.transform.lossyScale.x),
+                Mathf.Abs(sr.transform.lossyScale.y));
+        }
+
+        // Same pass for the collision side.
+        Collider2D[] colliders = framed.GetComponentsInChildren<Collider2D>(true);
+        report.colliderCount = colliders.Length;
+        float biggestCollider = -1f;
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider2D col = colliders[i];
+            if (col == null)
+                continue;
+            Bounds box = col.bounds;
+            float area = Mathf.Abs(box.size.x * box.size.y);
+            if (Mathf.Max(box.size.x, box.size.y) > 5f)
+                report.collidersOverFiveMeters++;
+            if (area <= biggestCollider)
+                continue;
+            biggestCollider = area;
+            report.biggestColliderPath = PathOf(col.transform);
+            report.biggestColliderMetersX = box.size.x;
+            report.biggestColliderMetersY = box.size.y;
+        }
+
         string jsonPath = Path.Combine(folder, label + "-tree.json");
         File.WriteAllText(jsonPath, JsonUtility.ToJson(report, true));
 
@@ -306,6 +366,15 @@ public class SpeciesScene : MonoBehaviour
             label, path, treeCount, bounds.size.y, bounds.size.x, cam.orthographicSize, fits,
             min.x, min.y, max.x, max.y, painted, report.fitFractionOverRun, warmupFrames,
             dressOutsideMeters, jsonPath));
+        Debug.Log(string.Format(CultureInfo.InvariantCulture,
+            "SPECIES-PARTS label={0} renderers={1} over5m={2} biggest={3} box={4:0.00}x{5:0.00}m scale={6:0.000} "
+            + "colliders={7} colOver5m={8} biggestCollider={9} colliderBox={10:0.00}x{11:0.00}m",
+            label, report.rendererCount, report.partsOverFiveMeters,
+            report.biggestPartPath ?? "none", report.biggestPartMetersX,
+            report.biggestPartMetersY, report.biggestPartScale,
+            report.colliderCount, report.collidersOverFiveMeters,
+            report.biggestColliderPath ?? "none", report.biggestColliderMetersX,
+            report.biggestColliderMetersY));
 
         int code = (wrote && fits && treeCount == 1 && painted > 0.02f) ? 0 : 1;
         if (code != 0)
@@ -344,6 +413,18 @@ public class SpeciesScene : MonoBehaviour
     private static string DefaultOutputFolder()
     {
         return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Trials", "Runs"));
+    }
+
+    // "Wood_1_2/Visual" style path, so the part can be found in the rig's log.
+    private static string PathOf(Transform t)
+    {
+        string path = t.name;
+        while (t.parent != null)
+        {
+            t = t.parent;
+            path = t.name + "/" + path;
+        }
+        return path;
     }
 
     private static string GetString(string name, string fallback)

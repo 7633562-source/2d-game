@@ -33,9 +33,9 @@ Trial proof: `Trials/Runs/<label>.json` → `applied`.
 | level | Test1 yard: campfire at x=32.5 (24 tongues + ParticleSystem sparks/smoke/embers; no sprite smoke boxes); lab scene `Campfire`; gate Static trees + World flock 6 / hens 10 / dogs 3; `treeCount` 0 | no new card |
 | level | **BALANCE-ARENA-1 DONE 19.09** (level worker; fp `1d86f80e`, buildGuid `5794f0ef`): `Assets/Scenes/BalanceArena.unity` exists (Main Camera + `ImpactArena` host, runtime world like `WalkArena`) and runs in a player (`GalleryPreview.exe -scene BalanceArena` -> its own `impact_play-impacts.json`). One real `Rigidbody2D` per throw (`Assets/ImpactThrower.cs`), per-throw record (`Assets/ImpactRecorder.cs`), harness hooks `-impact 1` + `-impactMass/-impactShape/-impactSpeed/-impactAim/-impactSide/-impactAt/-impactCount/-impactSpacing/-impactSeed/-shotInterval`. Acceptance: `-impactCount 0` (40 s) is the stand **to the last digit** (pelvisDrop 0.0148, rmsShoulder 2.6542, rmsElbow 7.5647, armSwingFraction 0.0, 0 physics diffs vs `burn_stance`); same-seed pair `imp_s1a`/`imp_s1b` bit-identical (CSVs byte-identical); in-plane asserted (`outOfPlaneCount 0`). First throws: 32 N·s at the torso -> down in **0.605 s**, CoM travels 1.98 m, **0 steps taken**; 72 N·s at the head -> 0.565 s; 180 N·s at a leg -> peak fzTotal 4442 N (6.4x weight). **L1: latency = 5 ms (one frame) -> FAILS the card's 40-150 ms**: the joint PD answers the measured joint state with zero proprioceptive delay (raw frames in the report); the reflex delay belongs to the `BalanceController*` stream. Video 1080p: `Trials/Runs/impact_imp_v1_circle_0_25_m_4_kg_8_m_s_1080p.mp4` (24.05 s) + `impact_three_throws.mp4` (54.15 s) + stills. **LABELS 19.09** (level worker; fp `bfcb3a69`, buildGuid `9f9782ea`, runs `imp_v1L`/`imp_v2L`/`imp_v3L`/`imp_v5`): `Assets/ImpactCaption.cs` (new) draws the parameters and the live per-throw banner on the frame - what was thrown, what it hit and when, reference vs delivered impulse, CoM excursion, min support margin, steps after the impact, outcome - plus a cross on the contact point for 1 s. The recorder composes the text it measures and builds the caption itself, so both entry points (the scene and the headless harness) get it and `HeadlessTrial.cs` was not touched; `GalleryLabels.AddPlate` is now public. Rule zero re-verified on this build: `imp_quiet_cap2` (`-nographics`, the card's protocol) is **bit-for-bit** `imp_quiet40` - 719 shared keys, every difference is label/buildGUID/time/fingerprint/`wallPerSim` - so `pelvisDrop 0.0148`, `rmsShoulder 2.6542`, `rmsElbow 7.5647`, `armSwingFraction 0.0`, `sensorTick 8002`, `maxAbsPelvisAccY 14.2838` all unchanged. The banner's final line equals the published rows to the last digit (30.228/1.984/-0.925/0.605 s; 57.567; 171.834/1.28/-0.887/0.480 s) and all eight `throws[0]` columns are identical to `imp_v1`/`imp_v2`/`imp_v3`. Labelled video: `impact_three_throws_labelled.mp4` (54.15 s, 1080p) + `impact_imp_v1L/v2L/v3L_..._1080p.mp4`; the unlabelled cut is kept as `impact_three_throws_pre-labels.mp4`. Report `Trials/Runs/impact-labels-report.md`. Note: only `-nographics` reproduces bit-for-bit, so each video is one take. | `.cursor/tasks/BALANCE-ARENA-1.md` |
 | level | ARENA check 19.09 (Hermes; fingerprint `b63dda80`, buildGuid `36aa1bba`; runs `arena_chk1`/`arena_chk1b`/`arena_chk_video`, seed 7, 180 s): runs, writes JSON + CSV, appends to the append-only `arena-param-log.csv` (331 rows); interval 0.5 s assert OK; alive cap 60 never crossed (361 spawns, 301 culled); `ArenaHuman` x `ArenaHuman` off, x ground on (58 overlapping bodies, no push); determinism 361/361 identical genomes and distances; inheritance 185/331 children from the top quartile (chance 0.25), zero-mutation-delta children 0/166, no gene's spread at 0; the shared `FallCriterion` discriminates (7/331 upright at 15 s; before it `fallen` was 61/61). **HEAD NUMBER FIXED 19.09** (level worker; buildGuid `19547550`, fp `4914add9`, runs `arena_num1`/`arena_num2`, seed 7): the digit is now sized from the HEAD's own collider box (measured 0.230 m) and the requested `ArenaRunner.numberHeight` 0.34 m acts as a ceiling - drawn **0.127 m = 0.55x the head** (correction's ceiling 0.60), anchored `MiddleCenter` INSIDE the skull, and read back from the rendered mesh (`measured` 24/24, `insideHead` 24/24); 7 whole bodies with 31 px digits in one 1080p frame (`Trials/Runs/photo_arena_num1_00.png`, t=6 s). Rule zero: two runs differing only in `-arenaNumber` give 81/81 identical human rows. Report `Trials/Runs/arena-number-report.md`. The genome is still the 13 C1 genes - the wide 155-gene box is a spec only (`arena-wide-genome.md`). Elite copies 65..81 drift 0.346 m from their reference at the same age (path 1.46 m) while the back-to-back pair 57/58 is exactly 0.000 m. `arena-report.py` crashed on an unbound `video` (fixed 19.09) | `.cursor/tasks/ARENA-1-param-sweep.md` |
-| level | **SPECIES SCENES 19.09** (level worker; buildGuid `2c54685e`): `Assets/Scenes/TreeOak.unity` + `TreePine.unity` are clones of the accepted `TreeApple.unity` whose ONLY difference is the three fields that name the species (`Tools/species-scenes.py` writes them, `--check` re-verifies, both also in the preview player's scene list). Each scene holds exactly one tree - oak/pine run `PlantTree 1 / AppleTree 0`, every other spawn counter 0 - and each still is 1920x1080 with the whole tree in frame (`Trials/Runs/treeoak_photo.png`, `treepine_photo.png`; the control `treeapple_ctl_photo.png` reproduces the 11:02 apple numbers to the digit: height 3.256089, ortho 1.790849). The framing law `ortho = 1.1 * max(h/2, w/2/aspect)` matches all three measured boxes to 1.5e-5 m and gives 1.100 for a 2 m tree, 2.750 for a 5 m one. Measured transient: oak and pine each have ONE frame outside the frame (t = 0.020 s, 1.47 m / 0.92 m out) on the frame after the real art lands; `missFramesAfterOneSecond` 0 in all three. Remaining species: willow, bush, poplar, lilac, hazel, cedar, plum. Report `Trials/Runs/tree-species-report.md` | `Tools/species-scenes.py` |
+| level | **SPECIES SCENES 19.09** (level worker; buildGuid `2c54685e`): `Assets/Scenes/TreeOak.unity` + `TreePine.unity` are clones of the accepted `TreeApple.unity` whose ONLY difference is the three fields that name the species (`Tools/species-scenes.py` writes them, `--check` re-verifies, both also in the preview player's scene list). Each scene holds exactly one tree - oak/pine run `PlantTree 1 / AppleTree 0`, every other spawn counter 0 - and each still is 1920x1080 with the whole tree in frame (`Trials/Runs/treeoak_photo.png`, `treepine_photo.png`; the control `treeapple_ctl_photo.png` reproduces the 11:02 apple numbers to the digit: height 3.256089, ortho 1.790849). The framing law `ortho = 1.1 * max(h/2, w/2/aspect)` matches all three measured boxes to 1.5e-5 m and gives 1.100 for a 2 m tree, 2.750 for a 5 m one. Measured transient: oak and pine each have ONE frame outside the frame (t = 0.020 s, 1.47 m / 0.92 m out) on the frame after the real art lands; `missFramesAfterOneSecond` 0 in all three. **SPECIES SET COMPLETE 19.09** (level worker; fp `54b94b65`, one build): the remaining seven (willow, bush, poplar, lilac, hazel, cedar, plum) are in as the same clones, so all nine `PlantTree.ParseKind` kinds have a scene and `Tools/species-scenes.py` now fails if a parsable kind has none (`COVERAGE parseKind=10 scenes=10 missing=none`); ten runs (apple control + nine) each report `treeCount 1` (apple `AppleTree 1/PlantTree 0`, the rest `PlantTree 1/AppleTree 0`), `fits true`, `missFramesAfterOneSecond 0`, and the framing law holds on all ten to 9.8e-5 m. Findings: the **cedar's drawn box is 33.5 x 34.7 m** because 189 of its 746 parts are over 5 m (biggest leaf fan 19.40 x 16.06 m on a lossy scale of 1338) while its 12 colliders stay <= 0.48 m - a picture-only rig defect for the plant lane. Gallery re-shot on the same build (`gallery3`, 7/7 fits, 28 real/13 missing, pan 165 f = 16.5 s, real-vs-placeholder PSNR 39.33 dB). Report `Trials/Runs/tree-species-all-report.md` | `Tools/species-scenes.py`, `Tools/species-run-all.sh` |
 | bird | BIRD-12: inter-bird contact is torso+head (`BirdCore`); limbs/perch `BirdLimb`. Walk = `walkThrust` on the body. Opt 02.09 flock 50 still the 200 Hz edge; no `GetContacts` | `BIRD-12-core-contact.md`; `opt_bird_code_02.md` |
-| plant | TREES T1 DONE 18.09 (oak build f9d594f0, apple 8000f531, instrumentation only): `<label>_joints.csv` per-step per-joint trace, run block = measurements only vs `build:` = constants + rig hash, `tree-const-assert.py` flags constants hiding in a run block; oak bit-identical to pre-T1 (17/17 keys). **T1 apple gap closed 19.09** (build cae2483a): `TreeBase.BindGravityHold` fills `gravityGradient`, so the apple no longer reports 0 on all 15 joints — apple `apple_t1gap_*` vs the pre-edit player `apple_t1g0_*` moves 28/30 run keys nowhere but `wallPerSim`+`sourceFingerprint`, and only the 19 gradient fields move anywhere; oak `tree_t1gap_*` vs accepted `tree_t1_*` build 93/93. Report `Trials/Runs/apple-t1gap-report.md`. **T1-sway 19.09** (build `3f93bfc4`, instrumentation only): the apple's two doubted numbers are now honest — one tip segment chosen once and followed, a settled window (t>=4 s), a per-joint PINNED TIME fraction with the overshoot past the stop, and a WIND-OFF run (`PlantBase.windOffSeconds` + `TreeBase.FixedUpdate` gate + `-appleWindUntil <s>`, 0 = old behaviour). 28 of 28 physics run keys bit-identical to the pre-edit player on hold AND wind 0.12 (`apple_t1sw_*` vs `apple_t1sw_base_*`), oak reproduces the canon. Findings: `swayAmpM` 0.1465 m was a startup transient (settled sway 0.0222 m, below the 0.10-0.30 band); the pinned joint is J08, 68.3 % of the hold samples, 0.674 deg OUTSIDE its own stop, overrun up to 2.066 deg under wind (soft stops); wind off at 4 s -> residual 0.0220 deg from the hold pose, crown tip back within 0.0007 m. Next: T2 diagnosis. Report `Trials/Runs/apple-t1sw-report.md`. **T1-oak 19.09** (build `8e9ed340`, instrumentation only): the same honest windows are now on the OAK (`PlantTrialRecorder` + `PlantTree.windOffSeconds`/`ApplyWind` gate + `-treeWindUntil <s>`, 11 added run keys, 4 added build keys, nothing renamed). `_t1oak-accept.py`: oak base vs post PASS on hold AND wind 0.12 (no run key moved, build block only moves the wind config), apple controls reproduce the accepted T1-sway values to the digit, oak canon bit-identical (0.00103 / 34.17341 / 0.2553246 / pinned 0.20). Gate proof `_t1oak-gate.py`: wind-off vs wind-on identical to 0.000000 deg until the switch opens at t=3.990 s, then they separate. Findings: `swayAmpM` 1.287312 is a transient (stable-tip whole run 1.473969, settled 4-8 s 0.179467 m, inside T3's [0.05H,0.15H] for H=2.332039 m); pinning is 3 of 15 joints (J00 66.1 %, J08 85.2 %, J01 7.5 %), overrun 0.151758 deg; wind off at 4 s -> the motion decays (mean |dAngle|/step 0.00311 -> 0.00070) but the POSE does not return: residual 32.72058 deg, tip 1.368073 m — the trunk sits on its +-16 deg stop and the 180 N.m/rad spring cannot lift the 259.7 N.m/rad weight gradient (T3/T4 input; T3's RETURN TEST fails on the oak today). Report `Trials/Runs/tree-t1oak-report.md`. | `.cursor/tasks/TREES-plan.md`; `plant-physics.mdc` |
+| plant | TREES T1 DONE 18.09 (oak build f9d594f0, apple 8000f531, instrumentation only): `<label>_joints.csv` per-step per-joint trace, run block = measurements only vs `build:` = constants + rig hash, `tree-const-assert.py` flags constants hiding in a run block; oak bit-identical to pre-T1 (17/17 keys). **T1 apple gap closed 19.09** (build cae2483a): `TreeBase.BindGravityHold` fills `gravityGradient`, so the apple no longer reports 0 on all 15 joints — apple `apple_t1gap_*` vs the pre-edit player `apple_t1g0_*` moves 28/30 run keys nowhere but `wallPerSim`+`sourceFingerprint`, and only the 19 gradient fields move anywhere; oak `tree_t1gap_*` vs accepted `tree_t1_*` build 93/93. Report `Trials/Runs/apple-t1gap-report.md`. **T1-sway 19.09** (build `3f93bfc4`, instrumentation only): the apple's two doubted numbers are now honest — one tip segment chosen once and followed, a settled window (t>=4 s), a per-joint PINNED TIME fraction with the overshoot past the stop, and a WIND-OFF run (`PlantBase.windOffSeconds` + `TreeBase.FixedUpdate` gate + `-appleWindUntil <s>`, 0 = old behaviour). 28 of 28 physics run keys bit-identical to the pre-edit player on hold AND wind 0.12 (`apple_t1sw_*` vs `apple_t1sw_base_*`), oak reproduces the canon. Findings: `swayAmpM` 0.1465 m was a startup transient (settled sway 0.0222 m, below the 0.10-0.30 band); the pinned joint is J08, 68.3 % of the hold samples, 0.674 deg OUTSIDE its own stop, overrun up to 2.066 deg under wind (soft stops); wind off at 4 s -> residual 0.0220 deg from the hold pose, crown tip back within 0.0007 m. Next: T2 diagnosis. Report `Trials/Runs/apple-t1sw-report.md`. **T1-oak 19.09** (build `8e9ed340`, instrumentation only): the same honest windows are now on the OAK (`PlantTrialRecorder` + `PlantTree.windOffSeconds`/`ApplyWind` gate + `-treeWindUntil <s>`, 11 added run keys, 4 added build keys, nothing renamed). `_t1oak-accept.py`: oak base vs post PASS on hold AND wind 0.12 (no run key moved, build block only moves the wind config), apple controls reproduce the accepted T1-sway values to the digit, oak canon bit-identical (0.00103 / 34.17341 / 0.2553246 / pinned 0.20). Gate proof `_t1oak-gate.py`: wind-off vs wind-on identical to 0.000000 deg until the switch opens at t=3.990 s, then they separate. Findings: `swayAmpM` 1.287312 is a transient (stable-tip whole run 1.473969, settled 4-8 s 0.179467 m, inside T3's [0.05H,0.15H] for H=2.332039 m); pinning is 3 of 15 joints (J00 66.1 %, J08 85.2 %, J01 7.5 %), overrun 0.151758 deg; wind off at 4 s -> the motion decays (mean |dAngle|/step 0.00311 -> 0.00070) but the POSE does not return: residual 32.72058 deg, tip 1.368073 m — the trunk sits on its +-16 deg stop and the 180 N.m/rad spring cannot lift the 259.7 N.m/rad weight gradient (T3/T4 input; T3's RETURN TEST fails on the oak today). Report `Trials/Runs/tree-t1oak-report.md`. **T1 close-out + THE T2 FRAME FIX STOOD AND COMMITTED 19.09** (Hermes; commit `c9129bc1`, ONE file `Assets/TreeBase.cs`; player `cb7e4ef6`, gitCommit `9a43a74e`; runs `tree_t1c2_hold/_wind012/_windoff`, `apple_t1c2_hold/_wind012/_windoff` + a repeat): the oak canon `tree_t1oak_*` and the apple's post-edit pair `apple_t1sw_hold/_wind012` are BIT-IDENTICAL to the fresh reruns (run block and build block, and 0 of 1600 `joints.csv` rows differ on each pair), while the pre-T2 `apple_t1_*` pair correctly moves 23 run keys (that pair is the "before", not a target). Stand criteria all met: born-behind 4/15 -> 0/15, `springSatFraction` 0.06620833 -> 0 on every joint (per-joint CSV, J08 0.993125 of 1600 rows -> 0.000000), fingerprint == manifest, rigs unchanged (`dcc15b908146504e` / `b242a8ddd29b0b28`). FOUND this cycle: `apple_t1sw_windoff` does NOT reproduce — it diverges from its own sibling wind-on run (same fp, same player) at row 2, t = 0.01 s, 1599 of 1600 rows — so wind-off evidence is now `apple_t1c2_windoff` (release peak 6.448067 deg, 0.11 deg past the wind-on peak 6.335289; residual 0.022004 deg from the hold pose, crown tip 0.000672 m); the oak's wind-off label is fine. `tree-const-assert.py` fires on the apple pair for three DISCRETE counts (J08 and J01 are the only joints that ever enter the 0.2 deg band, in either run). Report `Trials/Runs/apple-t1c2-report.md`. | `.cursor/tasks/TREES-plan.md`; `plant-physics.mdc` |
 | artist | bark/leaf placeholder; physics sizes stay | `.cursor/tasks/ART-TREE.md` |
 | artist | dog parts in `Art/Dog` (chest…paw); sizes unchanged | `.cursor/tasks/ART-DOG.md` |
 | artist | ART-DOG **box look is live**: `DogArt.BoxLook` draws the dog the way `HumanSegment` draws the human — one flat translucent rectangle per bone (head, neck, chest, pelvis, 5 tail, 4 × upper/lower/paw), one dark joint marker, far side dimmed; `-dogCoatLook` rolls back to the plates, `-dogBoxAlpha <f>` tunes the fill (0.5, the human's `Human.cs` alpha; was 0.65 in an earlier pass), `visualSideOffset` 0 like the human with `-dogSideOffset <f>` for the A/B (`HipBridge` / `ShoulderBridge` cover the two joints whose anchor sits off the box edge). `Art/Dog/Palette.cs`, `Dog.cs`. Frames: `Trials/Runs/dog_art1*.png` | `.cursor/agents/artist.md` |
@@ -93,6 +93,26 @@ Hard rules for the walk scope:
 Acceptance: 40 s no fall, `walkSwap` ≥ 6, `comTravelX` > 3 m, single support
 above 20 % of the walk phase, swing foot grounded fraction < 0.35, left/right
 step length within 15 %, stance still RMS ≤ 0.0055 and `pf23v2` +23 N·s holds.
+
+**Cycles 6f + 1 acceptance MEASURED 19.09 13:06 (Hermes orchestrator; build fp `bfcb3a69`
+613 files, guid `9f9782ea`; runs `c6f_walk` / `c6f_stance` / `squat_c1` / `c1_stance_reg`,
+no rebuild - the 12:51 build already carried both edits; reports
+`Trials/Runs/walk-cycle6f-accept.md`, `Trials/Runs/walk-cycle1-accept.md`).**
+Cycle 6f (swing-hip ask written in the plan's walking pelvis tilt instead of the live measured one)
+removed the trunk fold's own engine: `torsoTilt` at 7.1 s **-13.7 vs -56.7** in 6e, `rmsTorsoAngVel`
+55.6 vs 67.7, CoM at the fall **1.146 m vs 0.592** (`comVelX` 1.688 vs 0.750), `comTravelX` 2.804
+vs 2.167. A1-A4 still FAIL (2 swaps, fall **7.380 s** vs 7.145, no third placement); B bit-for-bit
+(221 numeric keys, only `wallSeconds`/`wallPerSim` differ); C passes (`ikSaturatedFraction` 0.0,
+`captureWalkStepCount` 2). The remaining defect is a **placement, not a fold**: the swing sole
+rides 0.018 -> 0.158 m UP, `fzL` 0 N from 6.94 s, `dcm` 1.440, `supportMargin` -0.266 while
+`comVelX` grows monotonically 0 -> 1.51 m/s; the first transfer does work (left single support
+0.305 s vs 0.100 s), the second never completes. Cycle 1's vertical channel is measured at last
+(`squat_c1`, the label the cycle-1 report asked for): the pose IS throttled (52.5 % of the
+5.0-7.5 s descent inside 0.90-1.15 W) but the protocol still ends in a fall (5.955 s) with peak
+`fzTotal` **3.38 W vs the <= 1.5 W bar** and `maxAbsPelvisAccY` 48.2 vs <= 6 - the 0.25 m fall bar
+and the load band stay in tension, exactly as that report's point 3 predicted; quiet stance
+`c1_stance_reg` bit-for-bit. Next: cycle 6g brief `F:/hermes-data/ds-walk-cycle6g.md` (attribute
+the missing third placement before any further edit).
 
 ## Closed — do not open
 
@@ -490,3 +510,123 @@ acceptance numbers are NOT measured yet and are not claimed.
 - Stand commands, details and the acceptance table: `Trials/Runs/dog_cycles.md`, section
   "Cycle 1 - INSTRUMENTS ONLY". Acceptance still open: `dog_art1` bit-identical
   (comTravelX 5.53443003, comSpeedX 0.230613619, 35 cycles), `dog_gu14` comTravelX 4.81013966.
+
+## Dog trial step clock - the run-protocol artifact is fixed, and the "regression" is a 4-step onset shift (dog worker, 19.09 ~13:45)
+
+The bisect of 12:45 (`dog-art1-bisect-report.md`) answered "no source file and no art file moved
+the physics - the loop's clock is nominal over an unrecorded number of executed steps". That loop
+is now step-driven: `HeadlessTrial.FixedUpdate` owns the dog trial's clock, its scheduled
+`Walk`/`LeapAttack`/push and the recorder sample, and the run ends on an exact step budget
+(`duration / fixedDeltaTime`), so `samples == executedSteps` (published in the JSON beside
+`samples`) and `simulatedSeconds == executedSteps * fixedDeltaTime`.
+
+Build `5da13d45` / guid `bf95ae39` (gate `TRIAL_BUILD_OK` 13:36). Two files: `HeadlessTrial.cs`
+(the dog loop + the new `FixedUpdate`), `DogTrialRecorder.cs` (`MarkExecutedSteps`,
+`executedSteps`). No control law, threshold, scenario flag or physics constant touched.
+
+- five identical runs `dog_det1..5` (25 s, `-dog 1 -dogWalk 1 -dogWalkTime 1 -fixedDelta 0.005`):
+  one csv md5 `cf35e1dda4`, comTravelX 2.60954762, comSpeedX 0.108731307, 21 cycles,
+  executedSteps 5001, simulatedSeconds 25.0049648.
+- `-visual` run `dog_det_vis1` = the same bytes: the dog has no render axis any more.
+- the first 5001 steps of the 40 s run `dog_gu14_cyc51` (8001 steps) are byte-identical to
+  `dog_det1`: the trace is a function of the step index, not of the run's length.
+- **the 18.09 "regression" is a 4-step walk-onset shift**: `-dogWalkTime 1.02` (step 204)
+  reproduces the accepted 5.5232029 / 0.230325714 / 35 cycles / `dogDownFraction 0.232153565`
+  (identical to `dog_art1`), `-dogWalkTime 1.005` (step 201) reproduces the "regressed"
+  -1.75025594 / 8 cycles / 0.743251324. The old loop fired the walk intent off the nominal clock,
+  so the onset step was a free parameter of the harness, not of the dog.
+- noise floor over 10 adjacent onsets (same build, 25 s): travel min -1.750256, max 5.523203,
+  mean 1.674107, stdev 2.011625, **range 7.273459 m** while the 5 km/h target is 34.7 m in 25 s.
+  A single-trajectory A/B on this dog resolves nothing below ~7 m: dog acceptance must name the
+  onset step or be an ensemble, and past single-trajectory verdicts need re-measuring.
+- cycle-1 instruments re-verified on the step clock (`dog-cycle1-check.py dog_det1 dog_gu14_cyc51`
+  -> RESULT OK, 39 columns, NaN 0): controller-vs-recorder trunkDrop gap max **0.3514 m**
+  (frame 1454) - the decisive column has a number; metresPerCycle 0.124264173 m vs nominal
+  0.279358923 m.
+- retired: the `dog_art1` triple and `dog_gu14` 4.81013966; the 40 s protocol on the step clock is
+  `dog_gu14_cyc51` 7.02897739 / 0.180230439 / 44 cycles / fell 4.52999353 s.
+- NEXT (harness, before any physics cycle): the same fix for the other six loops -
+  `RunImpactTrial` is the measured case (`balance-arena1-report.md`: only `-nographics`
+  reproducible). Then cycle 2 (cosmetic split) can use the new detector.
+- Runners/checkers: `Tools/dog-det-run.sh`, `.../scripts/dog-determinism-check.py`,
+  `.../scripts/dog-onset-ensemble.py`. Full numbers: `Trials/Runs/dog-stepclock-report.md`.
+
+## Build-trust audit - a stale player, two unswitched walker knobs, and the gate's blind stale test (orchestrator, 19.09 14:26)
+
+Step 1 of the cycle read `build-status.txt`: "OK at 14:10". That OK was honest for the top-level
+sources of that minute (newest top-level `.cs` was Campfire 13:53, player 13:55) but NOT for the
+tree - three changes landed after the gate's last tick and were never compiled:
+`Assets/Settings/URP-2D.asset` + `UniversalRenderPipelineGlobalSettings.asset` (14:09),
+`Assets/BalanceControllerCaptureWalk.cs` (14:18, the WALK CYCLE 6d step-time block),
+`Assets/Resources/Level/ground_cap.png` (14:22). The 13:55 player did not carry the 6d code, so a
+trial in that window would have measured the pre-6d walker while quoting a 6d source. Rebuilt
+14:26 (`TRIAL_BUILD_OK`): the player is now newer than every source under `Assets`. The art and
+settings edits are render-only - `LevelArt.UseTiledFill` / `StaticPlatform` touch
+`SpriteRenderer.drawMode` and the cap PNG is a cap strip; no collider and no physics path, so no
+reference number moves (verified by diff, not assumed).
+
+Two control knobs were live in the default path with no switch. Every other capture knob has one:
+
+- `captureComLandingScale = 0.37` is ON by default and its own Tooltip promises "0 = off: the
+  frozen plan target and the old fixed catch lead only (behaviour before this field, to the bit)" -
+  but `HeadlessTrial` had no `-captureComLanding`, so no run could set it to 0 or sweep it: the
+  number was unvalidated AND unreproducible, and the c6c_walk placement failure could not be A/B'd
+  against the path it replaced.
+- WALK CYCLE 6d (`CaptureStepDurationForSpeed`, the speed-adaptive step time) was unconditional.
+- FIX (behaviour-preserving, both defaults unchanged): a `captureStepSpeedAdapt = 1` gate in
+  `BalanceControllerCaptureWalk.cs` plus two args in `HeadlessTrial` - `-captureComLanding`
+  (0 = the pre-field path) and `-captureStepAdapt 0` (the constant T of every cycle before 6d).
+  The applied argv is already echoed into the trial JSON (`commandArgs`), so a run now names which
+  walker it ran. Only one rebuild was spent: the tree was already stale, so the two switches rode
+  the rebuild the stale player needed anyway.
+
+Gate fix - the stale test was blind to subdirectories. `newest=$(ls -t "$PROJ"/Assets/*.cs |
+head -1)` never looked inside `Assets/Editor`, so "status OK hides an edit" had a second door even
+when the gate did run. It now takes the newest `.cs` under all of `Assets`
+(`find ... -printf '%T@ %p\n' | sort -rn | head -1`), old `ls` kept as the fallback for a `find`
+without `-printf`. Proven by reproduction on a synthetic tree (top-level source older than the
+player, an `Assets/Editor` edit newer): the old expression prints OK, the new one prints STALE.
+`bash -n` clean.
+
+OPEN, recorded not edited: the cycle-1 vertical channel is switchless too.
+`BalanceController.CrouchLoadShapedLevel` gates both the fold and the rise on the measured load
+ratio (`crouchLoadFoldFloor 0.90` / `crouchLoadPushCeiling 1.15` / `crouchLoadFilterTau 0.02`) and
+nothing in `HeadlessTrial` can turn that shaping off - the only escape is `CrouchLoadRatio() < 0`
+when the meter cannot resolve. So the pre-cycle-1 crouch cannot be reproduced for an A/B either,
+and `-crouch` runs are silently the throttled ones. It is the same one-line wiring as above; it was
+left out deliberately because the rebuild was already running and a third file would have
+invalidated it. The cycle-1 owner should take it before the next `-crouch` / `-squatRise`
+measurement.
+
+## Walk A/B on the 14:26 build - the landing scale is the measured knob, 6d is an exact null (orchestrator, 19.09 14:35)
+
+The autopilot change detector fired: p_auto moved from 7.38 s / 2 swaps / 2.878 m to 7.24 s /
+3 swaps / 2.236 m. The 14:26 rebuild was the first player to carry the 14:18 walk-cycle 6d block
+and the two new control switches, so this is the first window in which they could be measured.
+Four probes on that one player, cb7e4ef6fb1f, 29 s each:
+
+- p_auto, defaults: fell 7.24 s, 3 swaps, travel 2.2362, single support in the 5-6 s window
+  5.30 percent, bothFeet 81.6 percent
+- -captureStepAdapt 0, run twice: bit identical to p_auto, 7.24 / 3 / 2.2362
+- -captureComLanding 0, run twice: 7.36 s, 3 swaps, travel 2.9708, single 5.01 percent
+- -captureStepT 0.30: 7.30 / 3 / 2.27; -captureStepT 0.20: 7.28 / 2 / 2.26 with single support
+  20.92 percent and bothFeet 36.2 percent
+
+What this settles:
+- the arg plumbing reaches the controller: both -captureStepT values change the run, and the step
+  duration is the field the 6d block writes, so the exact null of -captureStepAdapt 0 is a property
+  of the walk, not of the harness;
+- 6d never engages here. Its own rule returns captureStepDuration whenever the speed is at or below
+  CaptureDesiredSpeed, 0.55 m/s in this mode, and the captured walker runs at 0.077 m/s average.
+  The block is behaviourally dead on this failure, so it can neither be credited nor blamed for the
+  2.878 to 2.236 move;
+- the capture-placement scale is worth 0.73 m of travel by itself: 0.37 gives 2.2362 m, 0 gives
+  2.9708 m, reproducible twice each. It barely moves the fall, 7.24 against 7.36 s, so the default
+  is not the third-plant cause either - it is forward travel being eaten.
+
+OPEN for the walk owner: what changed between the 14:10 player ddb38bf88d, travel 3.088, and the
+14:26 player cb7e4ef6fb1f, travel 2.236, if 6d is inert. Same-build travel noise measured so far is
+0.08 m, 2.8042 against 2.878 on the 8400c build, so this move is about ten times that. Re-diff the
+14:18 and 14:25 edits to BalanceControllerWalk before the next cycle credits them. Every arm above
+is a single trajectory: the 0.37-to-0 pair is reproducible but must not be turned into a verdict -
+sweep 0 / 0.1 / 0.2 / 0.37.
