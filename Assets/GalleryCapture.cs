@@ -155,6 +155,7 @@ public class GalleryCapture : MonoBehaviour
         yield return Still("apple 2 m + 5 m", RowBoundsOr(gallery, "apple"), label + "_apple.png", fits, stillPause);
         yield return Still("materials", RowBoundsOr(gallery, "materials"), label + "_materials.png", fits, stillPause);
         yield return Still("ground / sky / sign", RowBoundsOr(gallery, "level"), label + "_level.png", fits, stillPause);
+        yield return Still("campfire flame core", RowBoundsOr(gallery, "fire"), label + "_fire.png", fits, stillPause);
 
         // The comparison toggle, on the same lens: the difference is the whole point.
         gallery.SetRealArt(false);

@@ -241,6 +241,7 @@ public class GalleryScene : MonoBehaviour
         BuildBerryRow(root);
         BuildHumanRow(root);
         BuildCreatureRow(root);
+        BuildFireRow(root);
         BuildMissingRow(root);
 
         ContentBounds = new Bounds(
@@ -548,23 +549,72 @@ public class GalleryScene : MonoBehaviour
         RowBounds["creatures"] = new Bounds(new Vector3(x + 3.3f, 1.2f, 0f), new Vector3(10f, 3.4f, 0f));
     }
 
-    private void BuildMissingRow(Transform root)
+    // The fire's own picture (ART-0 gap 2). One painted sprite: the flame core
+    // Campfire draws in front of its 24 pooled tongue discs, which stay
+    // procedural on purpose (Tools/gen-fire-textures.py, three blind reviews
+    // ranked the all-painted fire last). Key, box and tint are read from
+    // Campfire itself, so the catalogue cannot drift from what the game shows.
+    // Static on purpose: a live Campfire ticks a Perlin flicker every frame and
+    // this scene's captures have to repeat frame for frame.
+    private void BuildFireRow(Transform root)
     {
         float x = 99f;
-        RowTitle(root, "MISSING ART  (nothing in this scene is a silent placeholder)", x);
+        RowTitle(root, "FIRE  (Campfire - the painted flame core)", x);
 
-        MissingTile(root, "campfire flame", "procedural tongues, no texture", new Vector2(1.4f, 1.6f),
-            new Vector2(x, 0.8f));
-        Add(root, "campfire", "MISSING", false, "gap list ART-0 item 2 - procedural flame/embers");
+        Texture2D core = ArtLibrary.Albedo(Campfire.CoreArtKey);
+        float h = Campfire.CoreBoxHeight;
 
+        if (core == null)
+        {
+            MissingTile(root, "campfire flame core", "Art/Campfire/core.png",
+                new Vector2(1.4f, 1.6f), new Vector2(x, 0.8f));
+            Add(root, "campfire flame core", "Art/Campfire/core.png", false,
+                "ArtLibrary.Albedo(\"" + Campfire.CoreArtKey + "\") null");
+        }
+        else
+        {
+            GameObject go = new GameObject("CampfireFlameCore");
+            go.transform.SetParent(root, false);
+            go.transform.position = new Vector3(x, groundTopY + h * 0.5f, 0f);
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = Sprite.Create(core, new Rect(0f, 0f, core.width, core.height),
+                new Vector2(0.5f, 0.5f), core.width, 0, SpriteMeshType.FullRect);
+            sr.sprite.name = "CampfireCoreGallery";
+            sr.drawMode = SpriteDrawMode.Sliced;
+            sr.size = new Vector2(Campfire.CoreBoxWidth, h);
+            sr.color = Campfire.CoreTint;
+            sr.sortingOrder = SortingObject;
+            SpriteLighting.ApplyUnlit(sr);
+
+            ItemLabel(go.transform, "campfire core  "
+                + Campfire.CoreBoxWidth.ToString("0.00") + " x " + h.ToString("0.00") + " m  "
+                + core.width + "x" + core.height + " px");
+            Add(root, "campfire flame core", "Art/Campfire/core.png", true,
+                "painted core, shipping tint " + Campfire.CoreTint.r.ToString("0.00") + ","
+                + Campfire.CoreTint.g.ToString("0.00") + "," + Campfire.CoreTint.b.ToString("0.00")
+                + " - the 24 tongue discs stay procedural");
+        }
+
+        ScaleBarAt(root, x - 1.5f, "fire");
+        RowBounds["fire"] = new Bounds(new Vector3(x, 0.8f, 0f), new Vector3(3.2f, 3f, 0f));
+    }
+
+    private void BuildMissingRow(Transform root)
+    {
+        float x = 104f;
+        RowTitle(root, "MISSING ART", x);
+
+        // Campfire is no longer in this row: Art/Campfire/core.png landed in
+        // ART-0 gap 2 and the fire is drawn for real in BuildFireRow.
         MissingTile(root, "flower bed", "procedural, no texture", new Vector2(1.1f, 1.2f),
-            new Vector2(x + 1.7f, 0.6f));
+            new Vector2(x, 0.6f));
         MissingTile(root, "UI / HUD icons", "no art", new Vector2(1.1f, 1.2f),
-            new Vector2(x + 3.0f, 0.6f));
+            new Vector2(x + 1.3f, 0.6f));
         Add(root, "UI icons", "MISSING", false, "out of scope for the gallery (ART-0 item 5)");
 
-        ScaleBarAt(root, x - 1.6f, "missing");
-        RowBounds["missing"] = new Bounds(new Vector3(x + 1.5f, 0.8f, 0f), new Vector3(6f, 3f, 0f));
+        ScaleBarAt(root, x - 1.5f, "missing");
+        RowBounds["missing"] = new Bounds(new Vector3(x + 0.65f, 0.7f, 0f), new Vector3(4.2f, 2.6f, 0f));
     }
 
     // ─── primitives ───────────────────────────────────────────────────────

@@ -84,7 +84,14 @@ public class Campfire : MonoBehaviour
     // is one sprite drawn in front, so a silhouette has room: it gives the fire
     // the licked crown the disc cannot. A missing PNG keeps today's disc, and no
     // collider, joint, mass or Body is involved either way - this file has none.
-    private const string CoreArtKey = "Campfire/core";
+    //
+    // The gallery's fire row (GalleryScene.BuildFireRow) reads the same key, the
+    // same box and the same tint, so the catalogue cannot drift from the fire the
+    // game actually shows.
+    public const string CoreArtKey = "Campfire/core";
+    public const float CoreBoxWidth = 0.16f;
+    public const float CoreBoxHeight = 0.38f;
+    public static readonly Color CoreTint = new Color(1f, 0.94f, 0.72f, 1f);
 
     private static readonly Color TongueWhite = new Color(1.00f, 0.97f, 0.88f, 1f);
     private static readonly Color TongueYellow = new Color(1.00f, 0.86f, 0.28f, 1f);
@@ -134,14 +141,14 @@ public class Campfire : MonoBehaviour
             new Color(1f, 0.38f, 0.08f, 1f),
             EmberOrder);
 
-        flameW = 0.16f;
-        flameH = 0.38f;
+        flameW = CoreBoxWidth;
+        flameH = CoreBoxHeight;
         SpriteRenderer flame = MakeDisc(
             "FlameCore",
             new Vector2(flameW, flameH),
             new Vector3(0f, 0.36f, 0f),
             0f,
-            new Color(1f, 0.94f, 0.72f, 1f),
+            CoreTint,
             FireOrder + 4,
             CoreSprite());
         flameVisual = flame.transform;

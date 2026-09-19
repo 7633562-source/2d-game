@@ -279,10 +279,16 @@ five new flame assertions (Albedo resolves, `81x192 readable=True format=RGBA32`
 0,421, no tongue PNG, `Sprite.Create` succeeds -> `native=1x2,37m`). Inventory moved **66 real / 3
 MISSING -> 67 / 2**; still missing: `flower` (plant lane) and `UI icons` (out of scope).
 
-Not done on purpose: `GalleryScene.BuildMissingRow` still draws the campfire gap tile (the level
-lane's file) - after this change that row is stale, and the fix is one conditional
-(`Albedo("Campfire/core") != null` -> `Campfire.SpawnAt(x, groundTopY)` and record it as real). No
-Unity frame of the campfire exists yet either: the gallery has no campfire object and the fire lab is
-not in `GalleryPreviewBuild`'s scene list; the pictures in `Trials/Runs/art-0-flame-report.md` are the
-mirrored render (same moment, same camera, same tint ramp). Full numbers: that report.
+**CLOSED 19.09 (artist stream).** The stale row is gone: `GalleryScene.BuildFireRow` draws the painted
+core as a real sprite (Sliced, `size` = Campfire's own `CoreBoxWidth x CoreBoxHeight`, tint `CoreTint` -
+key, box and tint are read out of `Campfire.cs`, so the catalogue cannot drift from the fire the game
+draws), `BuildMissingRow` keeps only flower + UI icons, and `GalleryCapture` takes a `<label>_fire.png`
+still. The gallery inventory moved 28 real / 13 missing -> **29 / 11**, which now agrees with the gate
+inventory (67 / 2). A Unity frame of the fire exists: `Trials/Runs/gallery4_fire.png` (1920x1080,
+ortho 1.59) from the preview player, plus the whole-gallery still and the 16.5 s pan on the same build.
+The core is drawn **static** on purpose - a live `Campfire` ticks a Perlin flicker and would break the
+same-build capture control - so the row shows the shipped texture, not the assembled fire. The eye
+reads the lone core as a light spindle rather than a living fire, which is recorded as the next look
+item (a static stand-in of the assembled stack, or a repaint that carries more silhouette). Full
+numbers: `Trials/Runs/art-0-fire-gallery-report.md`.
 
