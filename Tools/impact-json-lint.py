@@ -302,6 +302,17 @@ def scan_csv_records(problems):
             continue
         path = os.path.join(RUNS, name)
         try:
+            with open(path, "rb") as raw:
+                raw.seek(0, os.SEEK_END)
+                size = raw.tell()
+                complete = True
+                if size > 0:
+                    raw.seek(size - 1)
+                    complete = raw.read(1) in (b"\n", b"\r")
+        except OSError as exc:
+            problems.append("RECORD  %s unreadable: %s" % (name, exc))
+            continue
+        try:
             with open(path, encoding="utf-8-sig", errors="replace") as fh:
                 header = fh.readline()
                 if not header.strip():
@@ -313,14 +324,26 @@ def scan_csv_records(problems):
                 want = len(header.rstrip("\r\n").split(delim))
                 bad = 0
                 first = []
+                # A writer that appends one frame at a time can be caught mid-line: a
+                # file whose last byte is not a newline has a final line that is not yet
+                # a record, and counting it would turn a live trial into a false alarm.
+                # A line is judged when the next one arrives; the last one only if the
+                # file is terminated.
+                prev, prev_no = None, 0
                 for i, line in enumerate(fh, start=2):
-                    if not line.strip():
-                        continue
+                    if prev is not None and prev.strip():
+                        scanned += 1
+                        if len(prev.rstrip("\r\n").split(delim)) != want:
+                            bad += 1
+                            if len(first) < 5:
+                                first.append(prev_no)
+                    prev, prev_no = line, i
+                if prev is not None and complete and prev.strip():
                     scanned += 1
-                    if len(line.rstrip("\r\n").split(delim)) != want:
+                    if len(prev.rstrip("\r\n").split(delim)) != want:
                         bad += 1
                         if len(first) < 5:
-                            first.append(i)
+                            first.append(prev_no)
         except OSError as exc:
             problems.append("RECORD  %s unreadable: %s" % (name, exc))
             continue

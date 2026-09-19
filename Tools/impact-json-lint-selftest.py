@@ -97,16 +97,27 @@ def main():
     rc4, out4 = run(lint)
     show("a stored CSV with a short row", rc4, out4)
 
+    # A live trial writes its frames one at a time: a file caught mid-line must not
+    # fail the gate, or every running trial raises a false alarm.
+    os.remove(ragged)
+    partial = os.path.join(SANDBOX, "Trials", "Runs", "selftest_partial.csv")
+    with open(partial, "w", encoding="utf-8", newline="") as fh:
+        fh.write("a;b;c\n1;2;3\n4;5")          # no trailing newline, last row unfinished
+
+    rc5, out5 = run(lint)
+    show("a CSV caught mid-write (unterminated last line)", rc5, out5)
+
     shutil.rmtree(SANDBOX, ignore_errors=True)
 
     clean_ok = rc == 0
     caught_json = rc2 == 1 and "WRITER" in out2 and "timeToFallSeconds" in out2
     caught_row = rc3 == 1 and "WRITER" in out3 and "TrialRecorder.cs" in out3
     caught_csv = rc4 == 1 and "RECORD" in out4 and "selftest_ragged.csv" in out4
+    partial_ok = rc5 == 0
     print("\nclean writer accepted: %s   JSON defect caught: %s   TrialRecorder row "
-          "drift caught: %s   ragged CSV caught: %s"
-          % (clean_ok, caught_json, caught_row, caught_csv))
-    if clean_ok and caught_json and caught_row and caught_csv:
+          "drift caught: %s   ragged CSV caught: %s   mid-write CSV tolerated: %s"
+          % (clean_ok, caught_json, caught_row, caught_csv, partial_ok))
+    if clean_ok and caught_json and caught_row and caught_csv and partial_ok:
         print("SELFTEST OK")
         return 0
     print("SELFTEST FAILED")
