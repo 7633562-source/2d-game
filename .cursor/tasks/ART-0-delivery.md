@@ -1011,10 +1011,93 @@ through `Albedo` -> `Tiled` -> `ArtParts.Dress` -> `SpriteRenderer`, `RealArtEna
 false, and `fire`/`human` are byte-identical across two players and three other lanes' `.cs` edits.
 `Build/Headless` was neither rebuilt nor re-run.
 
-**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the
-wide-slab fill's look; the sign at native size only in the LEVEL row; `filterMode Point` for the pixel
-art; sparks/smoke/embers and the night glow in the FIRE row (time-driven, so they would make a
-catalogue frame unrepeatable); the crowns' cut planes (plant lane). **Closed by this pass: `leaf`'s
-0.5 m tiling rhythm** - the material set is now free of the "one leaf fills the tile" defect.
+## Seventeenth pass 19.09 late (artist) - the five brief items re-proved, and the two tiles that still read a joint are closed
+
+Editor closed, bash only, HEAD `8461733e`. Both picture gates were re-run on today's bytes before
+anything was changed: `art0-import-gate.sh` -> `unity exit=0`, 0 `ART-IMPORT-CHECK FAIL`, the four
+`Level/*` through `Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100),
+the seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap ... 0,0083 -> REPEATS`,
+`TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`; `art1-gate.sh` -> `ART-1A-CHECK end failures=0`,
+`55 part keys checked=0 missing` + the 7 materials + the 4 level keys + the flame core, with `flower`
+and `UI icons` the only two labelled gaps. Offline: `art0-meta-audit.py` -> `problems=0`, 318 `.meta`
+files / 318 distinct guids; the materials are 1024x1024 originals -> 512x512 shipped, 17.41 MB -> 3.64
+MB. Nothing was added or moved; the five brief items are re-proved on today's bytes.
+
+**What was left open and is now measured.** The card's item 5 split the material set into
+skin/fabric (ramp correction), leaf (painted) and "bark, denim, dirt, grass - a cut no worse than
+their own grain by the numbers". That last clause was a ratio argument with no eye read behind it
+since every fix landed, so all seven shipped tiles were repeated as 2 x 2 blocks at NATIVE size
+(1024 px/m: a 512 tile covers 0.5 m; the oak close-up lens is 414 px/m, so native is the generous
+case) in a shuffled order, one image per block, `map.txt` opened after the pick
+(`Tools/art0-wrap-panels-17th.py`, `Trials/Runs/art-0-wrap-17th/`). The read named exactly two panels
+as showing a joint - the vertical + horizontal line through the middle - and the map says `skin` and
+`fabric`; `bark` ("единый непрерывный материал, видимых линий стыков нет"), `denim`, `dirt`, `grass`
+and `leaf` all came back as one continuous material. So `bark` is closed by a read, not by a ratio,
+and it was the last item item 5 was holding open.
+
+**Why the earlier fix could not close skin/fabric.** `level_tile` removes a brightness RAMP and these
+two have almost none left (skin 3.71 / 0.37 levels, fabric 0.01 / 0.01); what remains is DETAIL
+(skin X 3.62 / Y 5.34 against grain 4.01 / 4.54, fabric 4.90 / 5.11 against 2.72 / 2.98), and the
+generator's own threshold (`cut > 2x inner`) is what kept it out of reach. Full split for all seven
+tiles in `Trials/Runs/art-0-wrap-17th-report.md` section 4. The rule the numbers give: on a NOISY tile
+a coherent step of 1.4x the grain is invisible (bark 27.36 vs 19.03 - and the read agrees), on a
+SMOOTH tile even ~1.2x reads as a drawn line, because a line is coherent and noise is not (grass has
+88.7 % of its boundary pixels stepping more than 12 levels and reads seamless).
+
+**The change.** One line in `Tools/gen-level-textures.py`: `WRAP_BLEND = {"skin": 32, "fabric": 32}`
+(was empty since the leaf pass). The mirrored head band makes the junction step ~3 % of itself and
+approaches it linearly over 32 px = 3 cm of the 0.5 m tile; nothing is resampled or relocated and the
+band's own worst step stays below the step outside it (skin 23 vs 30 / 26 vs 31, fabric 13 vs 17 / 17
+vs 19). After: skin cut X 5.90 -> **0.71** (grain 4.01), Y 5.60 -> **0.48**; fabric X 4.91 -> **0.45**
+(grain 2.72), Y 4.96 -> **0.46**.
+
+**Acceptance = the pairwise blind read**, the form this lane trusts (absolute verdicts are unstable;
+recorded twice before). One image per material, HEAD bytes and this pass's bytes side by side, which
+side is which random and withheld until after the pick (`Tools/art0-wrap-pair-17th.py`,
+`Trials/Runs/art-0-wrap-17th-pair/`): `skin` HEAD=RIGHT/NEW=LEFT - "RIGHT ... резкая, хорошо
+различимая вертикальная линия стыка ... перепад яркости", "LEFT ... стык практически незаметен ...
+единое сплошное полотно" -> NEW; `fabric` HEAD=LEFT/NEW=RIGHT - "LEFT ... очень чёткий, резкий шов
+... складки резко обрываются", "RIGHT ... вертикальный шов практически невидим, складки плавно
+перетекают из одного блока в другой" -> NEW. The picks landed on OPPOSITE sides, so neither is a side
+bias. A first, absolute seven-panel re-read was kept as the unstable form it is: it rated the new
+`fabric` panel by the CONTENT of a 2 x 2 repeat ("стопроцентное повторение идентичных волн и складок в
+каждом квадранте"), which no texture can hide.
+
+**Determinism.** `python Tools/gen-level-textures.py skin fabric` rewrote exactly two files
+(`Tools/art0-byte-snapshot-17th.py before|after`): `skin.png` 417537 -> 413751 B (md5
+`36d51e73...` -> `a5f78f7e...`), `fabric.png` 342679 -> 340538 B (`52b47487...` -> `87706428...`).
+The other nine pictures and all eleven `.meta` files are byte-identical - the guids did not move.
+Both gates re-run after the last edit: `art0-import-gate.sh` unity exit=0, failures=0, `Art/skin` and
+`Art/fabric` `512x512 readable=True`; `art1-gate.sh` `failures=0` with `Art/skin (Tiled 0.5 m)` and
+`Art/fabric (Tiled 0.5 m)` OK.
+
+**The frame.** One build, one run, bash only (`art-gallery-capture.sh art0wrap17`):
+`PREVIEW_BUILD_OK ... scenes=12 errors=0`, 8 stills + 165-frame / 16.5 s 1080p pan, 0 capture
+failures, `real=29 missing=11 dressed=5567`, buildGuid `b73a4a9f44784f73af3dd705427723b7`. Against
+`art0leaffield` (`buildGuid b2c011858b104923bc82a57262ea59f8`, same 8 lenses): `fire`, `human` and
+`tree` **pixel-identical** (the three controls), `materials` 5157 px in one box x 281-634 y 480-630,
+`level` 942 px x 1264-1415 y 605-668, `photo`/`placeholder` 71 px each x 460-496 y 562-577 - and that
+arithmetic names the cells: the materials row is `GalleryScene.cs:70-74` at 1.35 m pitch from x = 20,
+1 x 1 m swatches `Tiled(key, 0.5f)`, so `skin` is 19.5-20.5 m and `fabric` 20.85-21.85 m = frame
+x 281-634 at that still's 150.94 px/m (and x 460-493 at the wide lenses' 15.89 px/m). Nothing else in
+any frame moved. `apple` 540 px is NOT this change (skin/fabric have one caller each, the swatch row,
+and that lens does not show the materials row): it is the plant lane's berry-placement wobble across
+two builds, already recorded in the 15th pass (895 px between two builds of the same source).
+
+**Physics.** No `.cs` under `Assets/` touched: `Tools/gen-level-textures.py` is outside `Assets/` and
+never compiled, and the two PNGs reach the screen only through `Albedo` -> `Tiled` -> `ArtParts.Dress`
+-> `SpriteRenderer` with `RealArtEnabled` false by default. `ArtLibrary.Skin` / `ArtLibrary.Fabric`
+have exactly one caller each (`GalleryScene.cs:70-74`, the material swatch row) plus the editor
+checks. `Build/Headless` was neither rebuilt nor re-run.
+
+**Still open.** `flower` and `UI icons` as labelled MISSING tiles; the wide-slab fill's look
+(`LevelArt.UseTiledFill()` + `ArtLibrary.Tiled` is the declared path); the sign at native size only in
+the LEVEL row; `filterMode Point` for the pixel art; sparks/smoke/embers and the night glow in the FIRE
+row; the crowns' cut planes (plant lane). One measurement could not be made from the frame and is
+recorded as such: `Tools/art0-bark-rhythm-probe.py` found no repeat signature at the 0.5 m tile in
+`art0leaffield_tree.png` (MAD 34.1 at 207.10 px against 32-35 over the whole 180..240 px control range)
+because that still's lower-middle region carries the crown's cut planes over the trunk - so the bark
+verdict rests on the panel read above, not on that frame.
+
 
 

@@ -927,7 +927,23 @@ MATERIALS = ["skin", "fabric", "denim", "dirt", "grass", "bark", "leaf"]
 # mirrored 32 px band across a painted composition would smear it. The band stays documented
 # here because it is what fixed the other materials' ramps, and because the leaf seam it was
 # written for is the reason the leaf is painted now.
-WRAP_BLEND = {}
+#
+# 17th pass (19.09 late): re-populated for `skin` and `fabric` only, on a BLIND read, not on the
+# metric. `Tools/art0-wrap-panels-17th.py` repeats each shipped 512 as a 2 x 2 at NATIVE size
+# (1024 px/m in the game: a 512 tile covers 0.5 m) in a shuffled order, `map.txt` opened after the
+# pick. The read named exactly two panels as showing a joint - the vertical + horizontal line
+# through the middle - and the map says they are `skin` and `fabric`. Everything else (bark,
+# denim, dirt, grass, leaf) came back "one continuous material".
+#
+# The reason the earlier fix did not close it: `level_tile` removes a RAMP, and these two now have
+# almost none (skin 3.71 / 0.37 levels, fabric 0.01 / 0.01) - what is left is a DETAIL mismatch
+# (skin X 3.62 / Y 5.34 against its own grain 4.01 / 4.54; fabric 4.90 / 5.11 against 2.72 / 2.98),
+# and on a SMOOTH surface a coherent step of one grain reads as a drawn line, which is why a noisy
+# tile of the same ratio (bark: cut 27.36 vs grain 19.03) does not. A mirrored head band makes the
+# junction step ~3 % of itself and approaches it linearly over 32 px = 3 cm of the 0.5 m tile, so
+# the coherent line has nothing to stand on. 32 px of 512 = 6.25 % per axis, the same band the
+# tenth pass measured on `leaf`.
+WRAP_BLEND = {"skin": 32, "fabric": 32}
 
 
 def write_meta(png_path, pixels_per_unit, readable, alpha, guid):
