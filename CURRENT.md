@@ -702,3 +702,47 @@ Evidence: two 24.05 s 1920x1080 takes with the new line drawn on the frame
 NOT this lane, still open: L1 latency is still keyed on the collision (5.000 ms in 12/12) - the
 honest divergence definition needs an active-reaction-off run, i.e. a mode in
 `Assets/BalanceController.cs`, the walk stream's file.
+
+## BALANCE-ARENA-1 verdict cycle: the throw record's `fell` is the criterion AND the controller (level worker, 19.09 ~17:00)
+
+The card asks the per-throw record for *"`fell` (the shared `FallCriterion` AND the controller's own
+state)"*, and the row carried the criterion alone - the grid audit's finding 5e. One change,
+`Assets/ImpactRecorder.cs` only: `BalanceController.GeometricFallState` (the `BodySupportGeometry`
+ladder - 0 supported / 1 critical = the capture point has left the hull / 2 fallen = the CoM itself
+has / 3 no support = flight) is now read once per fixed step and published per throw window as
+`ctrlStateAtContact`, `ctrlStatePeakAfterContact`, `ctrlCriticalAfterContactSeconds`,
+`ctrlFallenAfterContactSeconds`, `ctrlFell`, `ctrlCriticalFraction`, `ctrlFallenFraction`, and one
+word `fallVerdict` (`both | criterion-only | controller-only | neither`); `totals` gained
+`ctrlFallenCount` / `verdictMismatchCount`, the per-frame CSV gained `ctrlState` as column 31, and
+the frame's banner prints the second verdict next to the first. `NoSupport` is flight, never counted
+as a fall.
+
+Measured on build fp `78ea6d5f66e9e18e6dcb4a671693e933d57c52988244a284e3d6e1e1b25fa67c`, guid
+`38b4d9287ab9470f9b406d77e43b5e37` (gitCommit `78325dc8`, gitDirty true), 13 `-nographics` runs +
+2 `-visual` takes, all carrying that pair:
+
+1. **Rule zero**: `cv_quiet` (`-impactCount 0`, 40 s) vs the published `imp_quiet40` = 700 shared
+   keys, 11 differing, every one identity/clock; the card's four numbers unchanged (0.0148 / 2.6542 /
+   7.5647 / 0.0) with `sensorTick` 8002 and `maxAbsPelvisAccY` 14.2838.
+2. **Publication rule zero**: 14 published columns x 12 classes of the accepted `pb_grid_*` build
+   c49c83d3 vs this build's `cv_grid_*` - **0 columns moved**.
+3. **The new column**: the two verdicts agree on WHICH windows are falls in **12/12** (0 mismatches in
+   13 runs; 9 classes down, 3 stand under both), but the **controller's ladder fires first in 9 of 9
+   falling classes, by 160-380 ms (mean 262 ms)** - structural, because the criterion needs 0.25 m of
+   drop or 60 deg of tilt held 0.15 s. The gap grows as the blow weakens (160-170 ms at 300 N*s,
+   235-245 ms at 60 N*s, 380 ms at 10 N*s). A `controller-only` reading is geometry, not clairvoyance:
+   the blow shoves the CoM in the same frame, so the ladder flips 5-10 ms after the contact while
+   `clairvoyanceFlag` (a commanded-torque test) stays false. The ladder's three arms are separable in
+   the CSV: for rect 15 kg / 20 m/s, state 1 at +0.010 s, state 2 at +0.050 s, state 3 (flight)
+   at +0.145 s.
+4. Evidence: `impact_verdict_two_takes.mp4` (36.10 s, 722 f, 1080p) + two 24.05 s takes
+   `impact_cv_v1L_circle_0_25_m_0_5_kg_4_m_s_1080p.mp4` (stands) / `impact_cv_v2L_square_0_30_m_15_kg_4_m_s_1080p.mp4`
+   (down) + 7 stills including the frame at the **controller's** own fall time; the window-end still
+   reads `down 0.455 s after contact | controller 0 at contact, fallen +0.210 s -> both`, equal to the
+   `-nographics` row. Tools: `Tools/impact-verdict-grid.sh`, `impact-verdict-table.py`,
+   `impact-verdict-video.sh`, `impact-verdict-stills.py`. Report:
+   `Trials/Runs/impact-verdict-report.md`.
+
+NOT this lane, still open: L1 latency is keyed on the collision (5.000 ms in 12/12) and the honest
+divergence definition needs an active-reaction-off mode in `Assets/BalanceController.cs` (walk
+stream's file); `closingSpeedMps` still prints a wrong number on `grid_rect_15_4` (finding 5d).

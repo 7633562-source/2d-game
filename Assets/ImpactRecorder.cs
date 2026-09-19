@@ -11,7 +11,11 @@ using UnityEngine;
 // -impactCount 0 has the physics of the quiet stand.
 //
 // Sources are the project's own: the shared FallCriterion (Assets/FallCriterion.cs)
-// for `fell`, the geometric support ladder (BodySupportGeometry) against the
+// for `fell`, the CONTROLLER's own answer to the same question
+// (BalanceController.GeometricFallState, the BodySupportGeometry ladder against the
+// estimator's live support span - published per throw as well, because the card asks
+// for "the shared FallCriterion AND the controller's own state" and the two do not
+// agree on every window), the geometric support ladder (BodySupportGeometry) against the
 // estimator's live support span, the solver's own contact impulses for the vertical
 // load channel (fzTotal, read exactly like TrialRecorder's load meter), and
 // Muscle.activation * maxTorque * direction for the APPLIED joint torque.
@@ -156,6 +160,20 @@ public class ImpactRecorder
         public bool fell;
         public float criterionFallTime = -1f;
         public bool alreadyDownAtContact;
+        // ─── the CONTROLLER's own fall ladder (card: `fell` = criterion AND controller) ───
+        // Read from BalanceController.GeometricFallState: BodySupportGeometry against
+        // the estimator's live span, evaluated fresh every frame (0 supported, 1
+        // critical = the capture point has left the hull, 2 fallen = the CoM itself
+        // has, 3 no support = no foot is carrying the body, which is NOT a fall).
+        // `fell` above stays the shared FallCriterion, unchanged and comparable with
+        // every run already published; this is a second, independent verdict on the
+        // same window, so the two can be read against each other.
+        public int ctrlStateAtContact = -1;
+        public int ctrlStatePeakAfterContact = -1;
+        public float ctrlCriticalAfterContactSeconds = -1f;
+        public float ctrlFallenAfterContactSeconds = -1f;
+        public float ctrlCriticalFrames;
+        public float ctrlFallenFrames;
         public float deliveredImpulseNs;
         public float deliveredImpulseAtEntryNs;
         public float deliveredVerticalImpulseNs;
@@ -256,6 +274,11 @@ public class ImpactRecorder
             ? BodySupportGeometry.Level(hasSupport, comPosition.x, comVX, comHeight,
                 state.supportMinX, state.supportMaxX)
             : BodySupportGeometry.NoSupport;
+        // The controller's OWN answer to the same question, on the same frame. The
+        // card asks the throw record for "the shared FallCriterion AND the
+        // controller's own state": the first is `fell` below, this is the second.
+        // -1 = the rig has no controller in this run (the column then says so).
+        int ctrlState = balance != null ? balance.GeometricFallState : -1;
 
         if (bodyWeightN <= 0f)
             bodyWeightN = TotalMass() * Mathf.Abs(Physics2D.gravity.y);
@@ -314,12 +337,14 @@ public class ImpactRecorder
                 window.comXAtContact = comPosition.x;
                 window.comYAtContact = comPosition.y;
                 window.stepsAtContact = steps;
+                window.ctrlStateAtContact = ctrlState;
             }
 
             if (window.contacted && time >= window.contactTime
                 && time <= window.contactTime + windowSeconds)
             {
-                Accumulate(window, time, comPosition, comAX, margin, fzTotal, steps, projectile);
+                Accumulate(window, time, comPosition, comAX, margin, fzTotal, steps,
+                    projectile, ctrlState);
             }
         }
 
@@ -339,7 +364,7 @@ public class ImpactRecorder
         AppendRow(time, comPosition, comVX, comAX, tilt, angVel, pelvisY, margin,
             leftGrounded, rightGrounded, fzTotal, steps, supportLevel, activeThrow,
             projectileX, projectileY, projectileDistance, contacted, passiveReached,
-            pushMeanRatio, pushActive);
+            pushMeanRatio, pushActive, ctrlState);
         samples++;
 
         PushHistory(comAX);
@@ -483,13 +508,38 @@ public class ImpactRecorder
 
     private string OutcomeText(ThrowWindow window)
     {
+        string outcome;
         if (window.alreadyDownAtContact)
-            return "already down when it arrived";
-        if (window.criterionFallTime > 0f)
-            return "down " + Fmt3(window.criterionFallTime - window.contactTime) + " s after contact";
-        if (window.fell)
-            return "down (criterion latched)";
-        return "still standing +" + Fmt3(Mathf.Max(0f, BannerAgeSeconds)) + " s";
+            outcome = "already down when it arrived";
+        else if (window.criterionFallTime > 0f)
+            outcome = "down " + Fmt3(window.criterionFallTime - window.contactTime) + " s after contact";
+        else if (window.fell)
+            outcome = "down (criterion latched)";
+        else
+            outcome = "still standing +" + Fmt3(Mathf.Max(0f, BannerAgeSeconds)) + " s";
+        return outcome + "  |  " + ControllerText(window);
+    }
+
+    // The controller's own reading of the same window (card: `fell` = criterion AND
+    // controller state). Printed on the frame so a still cannot show only one verdict.
+    private string ControllerText(ThrowWindow window)
+    {
+        if (window.ctrlStateAtContact < 0)
+            return "controller n/a";
+        StringBuilder sb = new StringBuilder(96);
+        sb.Append("controller ").Append(window.ctrlStateAtContact
+            .ToString(CultureInfo.InvariantCulture)).Append(" at contact");
+        if (window.ctrlFallenAfterContactSeconds >= 0f)
+        {
+            sb.Append(", fallen +").Append(Fmt3(window.ctrlFallenAfterContactSeconds))
+                .Append(" s");
+        }
+        else
+        {
+            sb.Append(", no fall");
+        }
+        sb.Append(" -> ").Append(FallVerdict(window));
+        return sb.ToString();
     }
 
     private static string Fmt(float value)
@@ -514,7 +564,7 @@ public class ImpactRecorder
     }
 
     private void Accumulate(ThrowWindow window, float time, Vector2 comPosition, float comAX,
-        float margin, float fzTotal, int steps, ImpactProjectile projectile)
+        float margin, float fzTotal, int steps, ImpactProjectile projectile, int ctrlState)
     {
         window.framesInWindow += 1f;
         window.lastSteps = steps;
@@ -620,6 +670,32 @@ public class ImpactRecorder
         if (downNow && !window.fell)
         {
             window.fell = true;
+        }
+
+        // ─── the controller's own ladder, in the same window ───
+        // The window opens at the contact, so ctrlStateAtContact is the posture the
+        // blow found him in; both times below are measured from that contact, exactly
+        // like the criterion's. NoSupport (3) is flight - no foot carries the body -
+        // and is neither a fall nor an improvement, so it never sets the peak.
+        if (ctrlState >= 0)
+        {
+            if (ctrlState != BodySupportGeometry.NoSupport
+                && ctrlState > window.ctrlStatePeakAfterContact)
+            {
+                window.ctrlStatePeakAfterContact = ctrlState;
+            }
+            if (ctrlState == BodySupportGeometry.Critical)
+            {
+                window.ctrlCriticalFrames += 1f;
+                if (window.ctrlCriticalAfterContactSeconds < 0f)
+                    window.ctrlCriticalAfterContactSeconds = time - window.contactTime;
+            }
+            else if (ctrlState == BodySupportGeometry.Fallen)
+            {
+                window.ctrlFallenFrames += 1f;
+                if (window.ctrlFallenAfterContactSeconds < 0f)
+                    window.ctrlFallenAfterContactSeconds = time - window.contactTime;
+            }
         }
 
         // ─── L1 latency, evaluated online against the pre-impact band ───
@@ -834,14 +910,15 @@ public class ImpactRecorder
             .Append("fell").Append(';')
             .Append("passiveReached").Append(';')
             .Append("pushMeanFzRatio").Append(';')
-            .Append("pushActive").Append('\n');
+            .Append("pushActive").Append(';')
+            .Append("ctrlState").Append('\n');
     }
 
     private void AppendRow(float time, Vector2 comPosition, float comVX, float comAX, float tilt,
         float angVel, float pelvisY, float margin, bool leftGrounded, bool rightGrounded,
         float fzTotal, int steps, int supportLevel, int activeThrow, float projectileX,
         float projectileY, float projectileDistance, bool contacted, bool passiveReached,
-        float pushMeanRatio, bool pushActive)
+        float pushMeanRatio, bool pushActive, int ctrlState)
     {
         rows.Append(F(time)).Append(';')
             .Append(F(comPosition.x)).Append(';')
@@ -872,7 +949,8 @@ public class ImpactRecorder
             .Append(fallLatch.fired ? "1" : "0").Append(';')
             .Append(passiveReached ? "1" : "0").Append(';')
             .Append(F(pushMeanRatio)).Append(';')
-            .Append(pushActive ? "1" : "0").Append('\n');
+            .Append(pushActive ? "1" : "0").Append(';')
+            .Append(ctrlState.ToString(CultureInfo.InvariantCulture)).Append('\n');
     }
 
     private static string F(float value)
@@ -943,6 +1021,8 @@ public class ImpactRecorder
         int fellCount = 0;
         int pushCount = 0;
         int outOfPlaneCount = 0;
+        int ctrlFallenCount = 0;
+        int verdictMismatchCount = 0;
         float maxFz = 0f;
         float maxImpulse = 0f;
         float minActiveLatency = float.MaxValue;
@@ -954,6 +1034,15 @@ public class ImpactRecorder
             if (window.fell) fellCount++;
             if (window.pushedBack) pushCount++;
             if (window.outOfPlane) outOfPlaneCount++;
+            if (window.contacted)
+            {
+                // The card's `fell` = criterion AND controller: both are counted, and
+                // the mismatch is its own number so a run cannot hide one behind the
+                // other.
+                bool ctrlFell = window.ctrlFallenAfterContactSeconds >= 0f;
+                if (ctrlFell) ctrlFallenCount++;
+                if (ctrlFell != window.fell) verdictMismatchCount++;
+            }
             if (window.peakFzTotalN > maxFz) maxFz = window.peakFzTotalN;
             if (window.deliveredImpulseNs > maxImpulse) maxImpulse = window.deliveredImpulseNs;
             if (window.activeResponseTime > 0f)
@@ -981,6 +1070,11 @@ public class ImpactRecorder
         Num(json, "outOfPlaneCount", outOfPlaneCount);
         Num(json, "maxPeakFzTotalN", maxFz);
         Num(json, "maxDeliveredImpulseNs", maxImpulse);
+        // The two verdicts on the same windows: the shared FallCriterion and the
+        // controller's own ladder. The mismatch count is the number to watch.
+        Num(json, "ctrlFallenCount", ctrlFallenCount);
+        Num(json, "verdictMismatchCount", verdictMismatchCount);
+        Str(json, "fallVerdictDefinition", FallVerdictDefinitionText);
         json.Append("\"minActiveLatencyMs\":")
             .Append(minActiveLatency == float.MaxValue ? "-1" : F(minActiveLatency)).Append(',');
         json.Append("\"maxActiveLatencyMs\":")
@@ -1070,6 +1164,22 @@ public class ImpactRecorder
         json.Append("\"timeToFallSeconds\":")
             .Append(window.fell && window.criterionFallTime >= 0f
                 ? F(window.criterionFallTime - window.contactTime) : "-1").Append(',');
+        // ─── the controller's own verdict on the same window ───
+        // The card asks the throw record for "the shared FallCriterion AND the
+        // controller's own state". `fell` above is the criterion, unchanged and
+        // comparable with every run already published; these are the controller's,
+        // measured from the same contact by the same clock. A missing reading is -1;
+        // fallVerdict is one word so a row cannot be quoted without saying which of
+        // the two verdicts fired.
+        Num(json, "ctrlStateAtContact", window.ctrlStateAtContact);
+        Num(json, "ctrlStatePeakAfterContact", window.ctrlStatePeakAfterContact);
+        Num(json, "ctrlCriticalAfterContactSeconds", window.ctrlCriticalAfterContactSeconds);
+        Num(json, "ctrlFallenAfterContactSeconds", window.ctrlFallenAfterContactSeconds);
+        BoolField(json, "ctrlFell", window.ctrlFallenAfterContactSeconds >= 0f);
+        Num(json, "ctrlCriticalFraction",
+            Fraction(window.ctrlCriticalFrames, window.framesInWindow));
+        Num(json, "ctrlFallenFraction", Fraction(window.ctrlFallenFrames, window.framesInWindow));
+        Str(json, "fallVerdict", FallVerdict(window));
         json.Append("\"peakComExcursionM\":").Append(F(window.peakComExcursionM)).Append(',');
         json.Append("\"comExcursionAtWindowEndM\":").Append(F(window.comExcursionAtEndM)).Append(',');
         json.Append("\"returnedWithin50mmAtWindowEnd\":")
@@ -1152,6 +1262,52 @@ public class ImpactRecorder
         if (denominator <= 0f) return "0";
         return (numerator / denominator).ToString("0.####", CultureInfo.InvariantCulture);
     }
+
+    // The float form of Ratio(): a JSON number instead of a JSON string.
+    private static float Fraction(float numerator, float denominator)
+    {
+        return denominator <= 0f ? 0f : numerator / denominator;
+    }
+
+    // A JSON boolean field, written like Str() so no call site quotes a key by hand.
+    private static void BoolField(StringBuilder json, string key, bool value)
+    {
+        json.Append('"').Append(key).Append('"').Append(':')
+            .Append(value ? "true" : "false").Append(',');
+    }
+
+    // A string field, escaped the way the rest of the file escapes one. Written with
+    // char literals so a key never has to be quoted by hand at the call site.
+    private static void Str(StringBuilder json, string key, string value)
+    {
+        json.Append('"').Append(key).Append('"').Append(':').Append('"')
+            .Append(Escape(value)).Append('"').Append(',');
+    }
+
+    // The card's per-throw `fell` is "the shared FallCriterion AND the controller's own
+    // state". Both are published in the row; this is the one-word reading of the pair,
+    // so a throw can never be quoted without saying which of the two fired. Both are
+    // window-scoped: the window is the throw's own windowSeconds after its contact.
+    private static string FallVerdict(ThrowWindow window)
+    {
+        if (!window.contacted) return "not-contacted";
+        bool ctrlFell = window.ctrlFallenAfterContactSeconds >= 0f;
+        if (window.fell && ctrlFell) return "both";
+        if (window.fell) return "criterion-only";
+        if (ctrlFell) return "controller-only";
+        return "neither";
+    }
+
+    // The definition travels with the numbers, the way pushDefinition does.
+    private const string FallVerdictDefinitionText =
+        "ctrlState* is BalanceController.GeometricFallState, the ladder the controller " +
+        "itself publishes (BodySupportGeometry against the estimator's live support span): " +
+        "0 supported, 1 critical = the capture point has left the hull, 2 fallen = the CoM " +
+        "itself has, 3 no support = no foot carries the body (flight, never counted as a " +
+        "fall). ctrlFallenAfterContactSeconds / ctrlCriticalAfterContactSeconds are measured " +
+        "from the contact, like timeToFallSeconds; fallVerdict compares ctrlFell with `fell` " +
+        "(the shared FallCriterion, unchanged) over the same window: both | criterion-only | " +
+        "controller-only | neither.";
 
     private static void Num(StringBuilder json, string key, float value)
     {
