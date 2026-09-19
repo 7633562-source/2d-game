@@ -244,6 +244,14 @@ residual is the detail difference between the two edge rows, not a ramp.
 - Physics: no `.cs` touched. `ArtLibrary.Skin` / `ArtLibrary.Fabric` have exactly one caller,
   `GalleryScene.cs:72` (the swatch row) plus the two editor checks, so neither PNG is on any
   simulation path. This cycle's `git status`: `Tools/gen-level-textures.py`, the two PNGs, this card.
+- Re-gated on the changed bytes (editor closed, no `-nographics`):
+  `Unity.exe -batchmode -projectPath "E:/Games/2D Game/My project" -executeMethod
+  ArtImportCheck.VerifyArt -logFile Logs/art-import-check-2026-09-19-tilelevel.log -quit` ->
+  `UNITY EXIT=0`, 0 `error CS`, `failures=0`: all four `Level/*` via `Load<Sprite>` (1024x256 ppu=128,
+  128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100), all seven `Art/<key>` `512x512 readable=True`,
+  `TILE ground_cap ... REPEATS`, `TILE ground_fill box=32x2m ... colourDiffAtOneTile=0,0000 -> REPEATS`.
+  The notes now read `ArtLibrary.Albedo(dirt) = texture` / `Tiled(dirt) = sprite`, not `null (stub)`:
+  the tool's own "stubs today" comment was stale and is corrected in the same commit.
 
 **Still open.** `bark`, `leaf`, `grass`, `denim`, `dirt` keep their wrap: no worse than their own
 grain by the numbers, but `leaf` still shows a sliced vein at the wrap by eye, so the next step

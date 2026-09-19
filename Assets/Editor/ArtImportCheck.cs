@@ -8,8 +8,8 @@ using UnityEngine.Rendering;
 //   LevelArt.PathsFor   -> Resources.Load<Sprite>("Level/ground_fill" | "Level/ground_cap"
 //                          | "Level/sky" | "Level/sign_finish")
 //   LevelArt.LoadAt     -> the same paths through Resources.LoadAll<Sprite> as a fallback
-//   ArtLibrary.LoadSource (pre-stub) -> Resources.Load<Texture2D>("Art/" + key), key = skin,
-//                          fabric, denim, dirt, grass, bark, leaf; needs isReadable for sampling
+//   ArtLibrary.Albedo   -> Resources.Load<Texture2D>("Art/" + key), key = skin, fabric, denim,
+//                          dirt, grass, bark, leaf; needs isReadable for ArtLibrary.Sample
 //
 // It also renders the grass cap the way StaticPlatform draws it (Tiled draw mode, Continuous,
 // 0.14 m tall) and measures whether the texture really repeats. The import stores wrapU/wrapV = 1,
@@ -48,12 +48,12 @@ public static class ArtImportCheck
         for (int i = 0; i < materialKeys.Length; i++)
             CheckMaterial(materialKeys[i]);
 
-        // Honest status of the code path: these two are stubs today, so the material files are
-        // reachable by the loaders' path convention but not consumed by any drawing code yet.
+        // Status of the code path, printed either way: wired since ART-1a (a missing key must
+        // return null - that is what the labelled MISSING ART tile keys off).
         Debug.Log("ART-IMPORT-CHECK note ArtLibrary.Albedo(dirt) = "
-            + (ArtLibrary.Albedo(ArtLibrary.Dirt) == null ? "null (stub)" : "texture"));
+            + (ArtLibrary.Albedo(ArtLibrary.Dirt) == null ? "null (no file)" : "texture"));
         Debug.Log("ART-IMPORT-CHECK note ArtLibrary.Tiled(dirt) = "
-            + (ArtLibrary.Tiled(ArtLibrary.Dirt) == null ? "null (stub)" : "sprite"));
+            + (ArtLibrary.Tiled(ArtLibrary.Dirt) == null ? "null (no file)" : "sprite"));
 
         CheckTiling(LevelArt.CapKey, 8f, 0.14f);        // the strip StaticPlatform draws today
         CheckTiling(LevelArt.FillKey, 32f, 2f);         // the widest slab ("Behind"), 4 tiles of 8 m
