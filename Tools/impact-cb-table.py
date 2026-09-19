@@ -30,6 +30,11 @@ ARCHIVE_A = os.path.join(RUNS, "impact-pre-a12521af")
 # rebuilds at 00:30 and 00:32: `impact-pre-8868d6a6/` is named for the manifest that
 # superseded it, as the two folders above are.
 ARCHIVE_B = os.path.join(RUNS, "impact-pre-8868d6a6")
+# The 00:35 (39a689fd) set, superseded at 02:11 by `8c4be56d` (638 files): the walk lane's
+# build added one recorder column and moved three of its own arm-window columns, so the
+# eight 39a689fd labels were archived as `impact-pre-8c4be56d/` and re-run (level cycle 20.09
+# 02:33). Named for the manifest that superseded them, as the three folders above are.
+ARCHIVE_C = os.path.join(RUNS, "impact-pre-8c4be56d")
 MANIFEST = os.path.join(PROJECT, "Build", "Headless", "build-manifest.json")
 
 CARD_NUMBERS = ["pelvisDrop", "rmsShoulderJointSpeed", "rmsElbowJointSpeed", "armSwingFraction",
@@ -50,7 +55,8 @@ TRACE = [
     ("7ebbad89 19:24", "imp_cb1", ARCHIVE),
     ("bf191843 22:32", "imp_cb1", ARCHIVE_A),
     ("a12521af 23:33", "imp_cb1", ARCHIVE_B),
-    ("39a689fd 00:35", "imp_cb1", RUNS),
+    ("39a689fd 00:35", "imp_cb1", ARCHIVE_C),
+    ("8c4be56d 02:11", "imp_cb1", RUNS),
 ]
 
 
