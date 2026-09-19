@@ -307,16 +307,29 @@ public static class Art1Check
 
     private static void Row(StringBuilder sb, string what, string texture)
     {
-        bool real = texture.StartsWith("Art/") ? ArtLibrary.Albedo(texture.Substring(4)) != null
-            : texture.StartsWith("Level/") ? LevelKeyPresent(texture)
-            : false;
-        sb.AppendLine("  " + what + " -> " + texture + " -> " + (real ? "real" : "MISSING"));
-    }
+        // Resources.Load takes a path WITHOUT the file extension: asking for
+        // "Art/Human/head.png" returns null and the row then says MISSING even
+        // though the part loads (this inventory printed 65 false MISSING rows on
+        // 19.09 while part keys checked=55 missing=0). Strip it, the same way
+        // LevelKeyPresent does.
+        string key = texture;
+        if (key.StartsWith("Art/"))
+            key = key.Substring("Art/".Length);
+        else if (key.StartsWith("Level/"))
+            key = key.Substring("Level/".Length);
+        else
+        {
+            sb.AppendLine("  " + what + " -> " + texture + " -> MISSING");
+            return;
+        }
 
-    private static bool LevelKeyPresent(string texture)
-    {
-        string key = texture.Substring("Level/".Length).Replace(".png", "");
-        return LevelArt.Load(key) != null;
+        if (key.EndsWith(".png", System.StringComparison.Ordinal))
+            key = key.Substring(0, key.Length - 4);
+
+        bool real = texture.StartsWith("Art/")
+            ? ArtLibrary.Albedo(key) != null
+            : LevelArt.Load(key) != null;
+        sb.AppendLine("  " + what + " -> " + texture + " -> " + (real ? "real" : "MISSING"));
     }
 
     private static void Report(string label, bool ok)
