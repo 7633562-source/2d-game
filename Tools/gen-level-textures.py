@@ -286,8 +286,19 @@ def paint_ground_fill(w=1024, h=256):
 # more rows, and neighbouring tufts have to differ by more than one - that is what MIN/MAX buy, and
 # it is the only thing this repaint changes: the tuft construction, the brightness fields, the
 # de-tick guard and the wrap-exact clump ring are untouched.
-GRASS_TUFT_MIN = 3          # px: smallest blade tip row (a tip at row 3 leaves 11 rows of grass)
-GRASS_TUFT_MAX = 9          # px: largest blade tip row, i.e. the shortest blade
+GRASS_TUFT_MIN = 0          # px: smallest blade tip row (a tip at row 0 reaches the surface line)
+GRASS_TUFT_MAX = 6          # px: largest blade tip row, i.e. the shortest blade
+# Fourth repaint 19.09n. `SpawnSurfaceCap` puts the cap's box top exactly ON the ground surface and
+# hangs the 0.14 m box INTO the soil, so every row the canvas leaves empty at its top is a row of
+# bare soil the player sees above the grass. Measured on a real frame (Trials/Runs/gallery5_level
+# .png, level lens): the shipped band 3..9 left the canvas's top 4 rows empty and the frame showed
+# 4 soil-toned rows above 5 green rows - 44 % of the drawn 9 px band was bare soil, and two blind
+# reads called the strip "a green band sunk below the surface, with a layer of soil over it". The
+# band is now 0..6 (same 6-row spread, lifted 3 rows) with `min_top` 0, which draws the same
+# silhouette 3 canvas rows higher: 22 % of the band reads as the soil-grass contact, the tuft
+# fraction stays 99 %, the wrap seam improves 4.33 -> 3.13 levels against its own grain 6.06, and
+# no column gains a height spike (1 px). Candidates and the blind sheets:
+# Trials/Runs/art-0-cap-tips/ (Tools/art0-cap-tips.py).
 # Third repaint 19.09f. The "gap in the cover" branch below used to SUBTRACT 3 from the tip row, and
 # a smaller row is a TALLER blade: the two tufts that hit `blade(mid) < 0.16` were painted as the
 # strip's tallest blades (tip row 2..4 against a 6..7 line, 5 columns wide at x=112) instead of as
@@ -421,7 +432,18 @@ def _cap_taper(tops, h=14, rise=2, dip=3, rounds=4):
     return [h - v for v in height]
 
 
-def paint_ground_cap(w=128, h=14):
+def paint_ground_cap(w=128, h=14, tip_lo=None, tip_hi=None, min_top=0):
+    """Paint the 0.14 m grass cap.
+
+    `tip_lo` / `tip_hi` override the blade-tip band (defaults GRASS_TUFT_MIN / GRASS_TUFT_MAX) and
+    `min_top` is the highest row a tip may reach (1 by default, so the canvas keeps one clear row at
+    its top). `SpawnSurfaceCap` puts the box top ON the ground surface and hangs the box INTO the
+    soil, so a tip that stops short of `min_top` leaves that many rows of bare soil above the grass
+    in the game (measured: 4 rows in the real frame at 1..2 screen px each). The overrides exist so
+    the band can be judged on a real junction before the shipped constant is touched.
+    """
+    lo = GRASS_TUFT_MIN if tip_lo is None else tip_lo
+    hi = GRASS_TUFT_MAX if tip_hi is None else tip_hi
     img = new_image(w, h)
     px = img.load()
     clump = wrap_noise(w, 7, 211, octaves=3, gain=0.62, growth=2.7)    # clumps of one height
@@ -430,7 +452,7 @@ def paint_ground_cap(w=128, h=14):
     tip = wrap_noise(w, 23, 213, octaves=3, gain=0.50)                 # which tips catch the light
     dark = wrap_noise(w, 11, 215, octaves=1, gain=0.5)                 # dark tufts, ~0.31 m wide runs
     grain = wrap_noise(w, 54, 216, octaves=2, gain=0.5, growth=2.3)    # 2 px cells: root-row grain
-    span = float(GRASS_TUFT_MAX - GRASS_TUFT_MIN)
+    span = float(hi - lo)
 
     # One top and one light face per TUFTS, not per column: the silhouette is a run of blades that
     # share an edge. A 1 px column would come back at every repeat as the same picket.
@@ -443,10 +465,10 @@ def paint_ground_cap(w=128, h=14):
         # is only 1.28 m of ground, so a dominant low-frequency hump would come back at every
         # repeat as a wave (eye check, 19.09): the weight sits on the blade field instead.
         f = clump(mid) * 0.45 + blade(mid) * 0.55
-        base = int(round(GRASS_TUFT_MIN + f * span))
+        base = int(round(lo + f * span))
         if blade(mid) < 0.16:
             base = GRASS_TOP_GAP                  # a gap in the cover: the tuft sits at the root line
-        base = max(1, min(GRASS_TUFT_MAX, base))
+        base = max(min_top, min(hi, base))
         for i in range(width):
             x = start + i
             step = 0
@@ -454,9 +476,9 @@ def paint_ground_cap(w=128, h=14):
                 step = -1                       # the tuft's last blade is a step short
             elif width >= 3 and i - width // 2 == 1 and blade(x) < 0.34:
                 step = 1                        # one blade leans out INSIDE its own tuft
-            tops[x] = max(1, min(GRASS_TOP_GAP, base - step))
+            tops[x] = max(min_top, min(GRASS_TOP_GAP, base - step))
         lit = 0.55 + 0.45 * tip(mid)            # a tuft catches the light as a group
-        darkx = dark(mid) > 0.86 and base < GRASS_TUFT_MAX - 1
+        darkx = dark(mid) > 0.86 and base < hi - 1
         for i in range(width):
             x = start + i
             lit_by_x[x] = lit

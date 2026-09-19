@@ -817,4 +817,75 @@ still shows the core alone rather than the assembled fire (a static stack needs 
 in the scene, kept from drifting from `Campfire` - the next item here); the wide-slab fill's look; the
 sign at native size only in the LEVEL row; `leaf`'s 0.5 m tiling rhythm; the cap/soil style mismatch.
 
+## Fourteenth pass 19.09 (artist) - the grass cap reaches the ground surface, and the soil lip is gone
+
+The ART-0 brief's five items were re-verified on today's bytes (editor closed, output kept): both gates
+through bash, `art0-import-gate.sh` -> `unity exit=0`, `failures=0`, the four `Level/*` through
+`Load<Sprite>` (1024x256 ppu=128 RGB24, 128x14 ppu=100 RGBA32, 512x128 ppu=32 RGB24, 64x320 ppu=100
+RGBA32), the seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap box=8x0,14m ... colourDiffAt
+OneTile=0,0083 vs rowStd 0,0169 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 -> REPEATS`;
+`art1-gate.sh` -> `ART-1A-CHECK end failures=0`, 55 part keys + 7 materials + 4 level keys + the flame
+core real, `flower -> MISSING (procedural)` and `UI icons -> MISSING` the only gaps.
+`Tools/art0-meta-audit.py`: `problems=0`, 318 `.meta` files with 318 distinct guids. Nothing had to be
+added to the ART-0 file set; the loader contract is unchanged and is quoted in full in the eighth pass.
+
+The picture that failed a fresh read was `ground_cap`, and the defect was geometric. `StaticPlatform
+.SpawnSurfaceCap` puts the cap's box top exactly ON the ground surface and hangs the 0.14 m box INTO the
+soil, so every row the canvas leaves empty at its top is a row of bare soil the player sees above the
+grass. The shipped canvas left its top 4 rows empty (`tip rows 4..9`), and a real frame
+(`Trials/Runs/gallery5_level.png`, level lens 64.67 px/m) showed exactly that: rows 669-672 soil, 673-677
+green - **44 % of the 9 px drawn band was soil above the green**, and a blind read called it "a green band
+sunk below the surface, with a layer of soil over it".
+
+Change, in `Tools/gen-level-textures.py` only (one PNG shipped): `GRASS_TUFT_MIN/MAX` 3/9 -> 0/6 and
+`paint_ground_cap` gained `tip_lo` / `tip_hi` / `min_top` (the old look is reproducible with 3, 9, 1;
+`Tools/art0-cap-oldcheck.py` repaints it and prints the old md5).
+
+| measurement (128x14 canvas, 9 drawn rows at 64.67 px/m) | shipped | this pass |
+|---|---|---|
+| tip rows | 4..9 std 1.18 | 1..6 std 1.18 (6 distinct) |
+| soil above the green, drawn rows / share | 4 of 9 / 44 % | 2 of 9 / 22 % (and the first is a soil-grass blend) |
+| green rows in the real frame | 673-677 (5) | 671-677 (7) |
+| wrap seam vs own inner grain | 4.33 / 6.08 | 3.13 / 6.06 |
+| worst dark / bright column stand-out (guard 3.0) | 1.2 / 2.2 | 2.4 / 1.5 |
+| height spike / mean neighbour step / tuft columns | 1 px / 1.30 / 99 % | 1 px / 0.91 / 99 % |
+| md5 / bytes | `67f407c7...` / 1519 B | `8d5f842e...` / 1746 B |
+| `.meta` | guid `d8187581...` | byte-identical (`cmp`), guid did not move |
+
+Candidates were painted and judged before the constant moved (`Tools/art0-cap-tips.py`, sheets and
+mapping in `Trials/Runs/art-0-cap-tips/`): band 0..6 beat 3..9 in a blind 3-panel sheet ("ship") and in
+the A/B against the shipped canvas; 0..9 was rejected (raggeder, worse seam 3.92 and a 2 px spike); and
+band -1..6, which does put a blade on row 0, measured identically at draw scale (a single row is 0.65 px
+of the 9) and was not taken. Recorded on the way: the numbers a vision read reports are not evidence -
+one sheet read called two different canvases "pixel-identical" and another mis-placed the panels; only
+the preference between two panels was stable, so the decision rests on that plus the measurement.
+
+`Tools/art0-cap-canvas-diff.py`: **829 of 1792 px changed (46.26 %), rows 1..12**, row 0 untouched, the
+root rows 10-13 keep their alpha and colour, alpha differs only because the silhouette moved 3 rows up.
+
+**Evidence.** Real build (`art-gallery-capture.sh art0capb`, `PREVIEW_BUILD_OK ... scenes=12 errors=0`,
+8 stills, 165-frame / 16.5 s pan, `real=29 missing=11`, capture failures 0, buildGuid
+`8d0942d6007d422799c23be82687a30c`, video `Trials/Runs/art0capb.mp4`). Against `gallery5` (buildGuid
+`dc09a872...`, the same tree but for this PNG and the tools), `Tools/art0-cap-frames-ab.py` shows every
+still's differing rows form exactly ONE run whose height equals the cap's drawn height at that still's
+own ortho - photo 2=2, human 37~38, apple 14=14, materials 21=21, level 9=9, fire 45~48, placeholder
+2=2, tree 32 vs 58 (the run is clipped by the trunk, x 0-677 only); 153 638 px over the 8 stills and
+nothing else on any frame moved. Two blind reads of identical windows from the two real builds
+(mapping `Trials/Runs/art-0-cap-frames/map.txt`) picked this build both times - the LEVEL band ("the
+grass reaches the surface line in the BOTTOM panel ... in the TOP panel there is a strip of bare soil
+between the surface line and the tops of the grass") and the HUMAN close-up ("the green tufts come out
+at the surface line right under the feet"; the other "looks like a layer-order mistake where the ground
+hangs above the grass"). Full numbers and the quoted sources: `Trials/Runs/art-0-cap-tips-report.md`.
+
+**Physics.** Two files in `git status` for this pass - one PNG and `Tools/gen-level-textures.py`
+(outside `Assets/`, never compiled), plus the new offline probes under `Tools/`. No `.cs` touched; the
+cap is a child `SpriteRenderer` with no collider and no `Rigidbody2D`, and its box (`size.x` x 0.14),
+`localPosition`, tint and sorting order are constants in `StaticPlatform` that were not edited.
+
+**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the FIRE row
+still shows the core alone rather than the assembled fire (the next item here); the wide-slab fill's
+look; the sign at native size only in the LEVEL row; `leaf`'s 0.5 m tiling rhythm; `filterMode Point`
+for the pixel art. **Closed by this pass: the cap/soil style mismatch** - it was the empty top of the
+cap canvas, measured 44 % -> 22 % and judged blind on real frames.
+
 
