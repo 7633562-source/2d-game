@@ -146,7 +146,8 @@ CORE_BODY = dict(
     feather=1.85, base_in=0.05, base_pow=0.50,
     bulge_at=0.20, bulge_amp=0.32, bulge_w=0.30,
     wob_amp=0.08, wob_cells=1.6, wob_phase=1.7,
-    lean_q=-0.06, lean_s=0.08, lean_cells=0.85, lean_phase=0.9)
+    lean_q=-0.06, lean_s=0.08, lean_cells=0.85, lean_phase=0.9,
+    edge_amp=0.055, edge_cells=2.30, edge_phase=0.7)
 
 # The body's alpha ramps up over the bottom 22 % of the canvas (the tongues keep
 # flame_mask's 0.10): a long, wide fade is what makes the base dissolve into the
@@ -158,27 +159,36 @@ CORE_ROOT_FADE = 0.22
 SOFT_UNION_P = 8.0
 
 CORE_LICKS = (
-    # the tall centre lick - the hottest point of the fire, leaning a little
+    # the tall centre lick - the hottest point of the fire, leaning a little.
+    # tip_pow stays 2.40: the thirteenth pass tried 1.75 on it (and 1.70/1.65 on the
+    # side licks) to round the tips, and both a 4x canvas read and a blind read of
+    # the assembled fire still said "the tips are needles", while the crown's top
+    # third measured 10.6 -> 9.2 px wide - narrower, i.e. the change moved away from
+    # what it was for. Reverted; the tip read is a proportion question, not a
+    # tip_pow one.
     dict(x_off=0.00, y0=0.34, y1=1.00, fade_in=0.30,
          p=dict(half=0.44, tip_pow=2.40, taper=0.90, dissolve=0.52, dissolve_from=0.50,
                 feather=1.75, base_in=0.03, base_pow=1.00,
                 bulge_at=0.28, bulge_amp=0.14, bulge_w=0.26,
                 wob_amp=0.14, wob_cells=2.20, wob_phase=0.5,
-                lean_q=0.20, lean_s=0.14, lean_cells=0.80, lean_phase=0.4)),
+                lean_q=0.20, lean_s=0.14, lean_cells=0.80, lean_phase=0.4,
+                edge_amp=0.150, edge_cells=2.70, edge_phase=0.30)),
     # the left lick: shorter, and it curls out to its own side
     dict(x_off=-0.40, y0=0.24, y1=0.76, fade_in=0.34,
          p=dict(half=0.34, tip_pow=2.30, taper=0.95, dissolve=0.54, dissolve_from=0.46,
                 feather=1.75, base_in=0.03, base_pow=1.00,
                 bulge_at=0.30, bulge_amp=0.12, bulge_w=0.24,
                 wob_amp=0.12, wob_cells=1.90, wob_phase=2.2,
-                lean_q=-0.26, lean_s=-0.20, lean_cells=0.90, lean_phase=1.5)),
+                lean_q=-0.26, lean_s=-0.20, lean_cells=0.90, lean_phase=1.5,
+                edge_amp=0.180, edge_cells=2.20, edge_phase=1.90)),
     # the right lick: the shortest, so the two shoulders do not match
     dict(x_off=0.40, y0=0.24, y1=0.66, fade_in=0.34,
          p=dict(half=0.32, tip_pow=2.30, taper=0.95, dissolve=0.56, dissolve_from=0.42,
                 feather=1.75, base_in=0.03, base_pow=1.00,
                 bulge_at=0.30, bulge_amp=0.12, bulge_w=0.24,
                 wob_amp=0.12, wob_cells=1.80, wob_phase=4.1,
-                lean_q=0.24, lean_s=0.16, lean_cells=0.85, lean_phase=2.7)),
+                lean_q=0.24, lean_s=0.16, lean_cells=0.85, lean_phase=2.7,
+                edge_amp=0.165, edge_cells=2.50, edge_phase=3.40)),
 )
 
 # The tint ramp, mirrored from Campfire.FlameColor / TickTongues.
@@ -232,6 +242,24 @@ def flame_mask(w, h, p, x_off=0.0, root_fade=0.10):
     bulge = 1.0 + p["bulge_amp"] * np.exp(-((ys - p["bulge_at"]) / p["bulge_w"]) ** 2)
     wob = 1.0 + p["wob_amp"] * np.sin(2.0 * math.pi * p["wob_cells"] * ys + p["wob_phase"])
     half = p["half"] * base * env * bulge * wob
+
+    # A living flame's flank is not a smooth curve (ART-0, thirteenth pass). The
+    # crown was already licked, but every flank of every lick was a clean arc, and
+    # a fresh read of a real frame named the result "a glowing crystal": smooth
+    # contour, no torn edge. `edge_amp` ripples the half-width with two harmonics
+    # (the second at 2.37x the first and 1.71x its phase, so the pattern never
+    # repeats inside one band), windowed to zero at the root - a fire's base is a
+    # wide calm mass, not a fringe - and to zero over the last 12 % of the band,
+    # where `dissolve` already owns the outline. Default 0: the three tongue
+    # canvases keep the exact shape they were rejected with.
+    e_amp = p.get("edge_amp", 0.0)
+    if e_amp > 0.0:
+        c1 = p["edge_cells"]
+        ph = p["edge_phase"]
+        rip = (0.62 * np.sin(2.0 * math.pi * c1 * ys + ph)
+               + 0.38 * np.sin(2.0 * math.pi * c1 * 2.37 * ys + ph * 1.71))
+        win = np.clip(ys / 0.18, 0.0, 1.0) * np.clip((1.0 - ys) / 0.12, 0.0, 1.0)
+        half = half * (1.0 + e_amp * rip * win)
 
     cx = x_off + p["lean_q"] * ys ** 2 + p["lean_s"] * np.sin(
         math.pi * p["lean_cells"] * ys + p["lean_phase"]) * ys ** 0.8
@@ -299,12 +327,84 @@ def core_mask(w, h):
     return np.clip(a, 0.0, 1.0)
 
 
+# ─── the core's own colour (ART-0, thirteenth pass) ─────────────────────────
+# Until this pass `paint` wrote RGB = 255 into every canvas and the core reached
+# the screen as flat white modulated by Campfire.CoreTint (1, 0.94, 0.72) - one
+# pale cream, top to bottom. Two fresh reads of a real frame measured the result
+# the same way: "there are no orange or red shades at all", the palette was
+# cream / pastel yellow / white only, and the fire read as a glowing crystal.
+# The colour belongs in the picture, so the core canvas now carries the same
+# white -> yellow -> orange -> red ramp the procedural tongues are tinted with
+# (`flame_color`, kept as the single source of the fire palette), driven by a heat
+# field built from the alpha the eleventh pass already fixed:
+#
+#   hot  = how close the pixel is to the spine   (alpha ** 0.5, 0 at the flank)
+#   root = how low it sits in the box            (1 at the coal bed, 0 at the crown)
+#   q    = 1 - hot * (1 - CORE_ROOT_BIAS + CORE_ROOT_BIAS * root)
+#
+# q = 0 on the spine low down (white hot), ~0.45 on the spine at the crown
+# (yellow), 1 on the coldest flank (amber-orange). Only RGB changes: the alpha
+# channel is byte-identical to the eleventh pass's canvas, so the silhouette this
+# pass is judged on is the one already accepted.
+CORE_HEAT_MIN = 0.05      # not pure white even at the hottest pixel: a flame has
+                          # no blown-out core, and 0 is where the ramp is softest
+CORE_HEAT_MAX = 0.82      # the coldest rim stops short of red (1.0): an amber
+                          # rim reads as fire, a red one as a hazard light
+CORE_ROOT_BIAS = 0.45     # how much of the heat comes from the height rather
+                          # than from the distance to the spine
+
+# ON, and the way it was decided is the point. The ramp was first judged by two
+# NAMED reads (LEFT = shipped, RIGHT = candidate) of the assembled fire and of the
+# 4x canvas; both preferred the shipped flat white, and on that evidence the pass
+# almost reverted. Blind reads of the same two moments then called it a tie in the
+# assembly, and the decisive one - a blind 5x window A/B of the gallery's FIRE row
+# from two real player builds (art0flame2 = white, art0flame2h = this ramp) - read
+# the ramp side as "clearly the more believable fire: the warm gradient gold ->
+# orange repeats how wood burns", and the shipped white side as "a cream-pale
+# glowing object, an overexposed silhouette, a neon spell effect - it would look
+# out of place next to painted grass, wood and cloth". That is the original
+# complaint, answered on the frame.
+#
+# Why it is right and not a taste flip: the core canvas is drawn ALONE in the
+# gallery's fire row (0.16 x 0.38 m, 40x121 px there), so in that row the canvas
+# IS the whole colour of the fire, and a white canvas can only ever be a pale
+# cream under CoreTint. In the assembled campfire the same canvas sits in FRONT of
+# 24 procedural tongue discs whose tints carry the white -> yellow -> orange -> red
+# ramp, and there the blind reads saw no difference - colouring the carrier costs
+# nothing to the hot centre the discs provide.
+#
+# The flat-white path stays one line away (CORE_HEAT_RAMP = False) for the record:
+# white_ripple_ab/ in Trials/Runs/art-flamecore-1909m/ holds the shape-only variant.
+CORE_HEAT_RAMP = True
+
+
+def core_heat(alpha):
+    """The core canvas's heat field: 0 = hottest (white), 1 = coolest (amber)."""
+    h = alpha.shape[0]
+    rows = (np.arange(h, dtype=np.float64) + 0.5) / h     # 0 = top of the PNG
+    root = (1.0 - rows)[:, None]                         # 1 = coal bed, 0 = crown
+    hot = np.clip(alpha, 0.0, 1.0) ** 0.5
+    q = 1.0 - hot * (1.0 - CORE_ROOT_BIAS + CORE_ROOT_BIAS * root)
+    return np.clip(CORE_HEAT_MIN + (CORE_HEAT_MAX - CORE_HEAT_MIN) * q, 0.0, 1.0)
+
+
 def paint(key):
-    """White RGB + the shape in alpha: the age ramp writes the colour."""
+    """The canvas: the shape in alpha, and - for the core - the heat ramp in RGB.
+
+    The three tongue canvases keep the flat white on purpose: they are tinted per
+    tongue at runtime from the age ramp (`flame_color(u, heat)`), so their own RGB
+    would be multiplied away and painting them would buy nothing. They are not
+    written either (see `main`).
+    """
     w, h = canvas_size(key)
     a = core_mask(w, h) if key == "core" else flame_mask(w, h, FLAME[key])
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
-    rgba[:, :, :3] = 255
+    if key == "core" and CORE_HEAT_RAMP:
+        lut = np.array([soften(flame_color(i / 255.0, 1.0)) for i in range(256)],
+                       dtype=np.uint8)
+        rgba[:, :, :3] = lut[np.round(core_heat(a) * 255.0).astype(np.uint8)]
+    else:
+        rgba[:, :, :3] = 255
     rgba[:, :, 3] = np.round(a * 255.0).astype(np.uint8)
     return Image.fromarray(rgba, "RGBA")
 
@@ -446,12 +546,22 @@ def soft_disc(n=SOFT_DISC_N):
 
 
 def tinted(sprite, rgb, alpha):
-    """SpriteRenderer: src = vertexColor * texture, straight alpha."""
+    """SpriteRenderer: src = vertexColor * texture, straight alpha.
+
+    The MULTIPLICATION is the point: a SpriteRenderer's `color` is a vertex
+    colour that modulates the texture, it does not replace it. Written as a
+    replace, this tool was exact only while every canvas was flat white (RGB
+    255, the shape in alpha) - the tint was then the whole colour and nobody
+    could see the difference. The thirteenth pass gives the core canvas its own
+    heat ramp in RGB, and with `rgb` written straight through the A/B sheets
+    would have drawn the OLD and the NEW core identically white: the evidence
+    would have been blind to the change it exists to judge.
+    """
     a = np.asarray(sprite.convert("RGBA"), dtype=np.float64) / 255.0
     out = np.zeros_like(a)
-    out[:, :, 0] = rgb[0] / 255.0
-    out[:, :, 1] = rgb[1] / 255.0
-    out[:, :, 2] = rgb[2] / 255.0
+    out[:, :, 0] = rgb[0] / 255.0 * a[:, :, 0]
+    out[:, :, 1] = rgb[1] / 255.0 * a[:, :, 1]
+    out[:, :, 2] = rgb[2] / 255.0 * a[:, :, 2]
     out[:, :, 3] = np.clip(a[:, :, 3] * alpha, 0.0, 1.0)
     return Image.fromarray((out * 255.0).astype(np.uint8), "RGBA")
 

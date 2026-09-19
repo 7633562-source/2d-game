@@ -749,4 +749,72 @@ shows the sign at native size only (a gameplay-size instance next to it is the n
 the cells read square at every scale); `leaf`'s tiling rhythm; the wide-slab fill's look; the flame core's
 spindle read and its thin straight tongues.
 
+## Thirteenth pass 19.09 (artist) - the flame core stops being a pale carrier, and the loaders are re-proved
+
+The ART-0 brief's five items were re-verified on today's bytes (HEAD `7dcf65e7`, editor closed): both
+gates through bash, `art0-import-gate.sh` -> `unity exit=0`, `failures=0`, the four `Level/*` through
+`Load<Sprite>` (1024x256 ppu=128 RGB24, 128x14 ppu=100 RGBA32, 512x128 ppu=32 RGB24, 64x320 ppu=100
+RGBA32), the seven `Art/<key>` `512x512 readable=True`, `TILE ground_cap box=8x0,14m ...
+colourDiffAtOneTile 0,0135 vs rowStd 0,0202 -> REPEATS`, `TILE ground_fill box=32x2m ... 0,0000 ->
+REPEATS`; `art1-gate.sh` -> `unity exit=0`, `ART-1A-CHECK end failures=0`, 55 part keys + 7 materials +
+4 level keys + the flame core real, `flower -> MISSING (procedural)` and `UI icons -> MISSING` the only
+gaps. `Tools/art0-meta-audit.py`: `problems=0`, 12 pictures passing the meta contract, 318 `.meta` files
+with 318 distinct guids. Nothing had to be added to the ART-0 file set; the loader contract is unchanged
+and is quoted in full in the eighth pass above.
+
+The picture that failed a fresh read was the campfire flame core. The read is a whole-one: the core is
+drawn ALONE in the FIRE row (0.16 x 0.38 m, 40x121 px there), and the row read as *"a pale cream glowing
+object - no orange or red shades at all"*, i.e. the original complaint in miniature. `paint()` had always
+written RGB 255 into every canvas, so the core reached the screen as flat white modulated by
+`Campfire.CoreTint` (1, 0.94, 0.72) - one pale cream root to crown. The canvas now carries the ramp:
+
+| | shipped | this pass |
+|---|---|---|
+| md5 / bytes | `0e01dd29...` / 4 687 | `50c26d40...` / 11 342 |
+| canvas, PPU, .meta | 81x192, 81 | unchanged; guid `3b4ac812` did not move, all 11 metas byte-identical |
+| palette of the opaque px | sat mean 0.000, sat>0.40 on 0.0 %, mean rgb (255,255,255) | sat mean 0.768, sat>0.40 on 100 %, mean rgb (255,193,59) |
+| ramp buckets (r-g) | white 100 % | yellow 68.5 % / amber 31.5 % |
+| silhouette | valley 32.2 px, top third 10.6 px, edge rows 0 | valley 30.0 px, top third 10.5 px, edge rows 0 |
+| ink in the fire row (real frame) | 40x121 px, rgb (213,202,159), sat 0.250 | 42x126 px, rgb (200,140,66), sat 0.638 |
+
+`q = 1 - alpha**0.5 * (0.55 + 0.45 * root)` indexed into the same `flame_color` palette the procedural
+tongues are tinted with, so canvas and discs cannot drift; alpha is untouched (opaque px 4 658 -> 4 654).
+Also `flame_mask` gained an optional two-harmonic ripple on the half-width (`edge_amp`, zero by default,
+so the rejected tongue canvases are unchanged): every flank used to be a clean arc, which a 4x read named
+"mathematically smooth".
+
+**The pass was nearly a revert, and that is the finding.** Two NAMED reads (assembled fire and 4x canvas,
+LEFT shipped / RIGHT candidate) both preferred the flat white and would have thrown the ramp away. Blind
+reads of the same moments in the assembly called it a tie, and a BLIND 5x window A/B of the fire row from
+two real builds (`art0flame2` = flat white, `art0flame2h` = the ramp) read the ramp side as *"clearly the
+more believable fire - gold -> orange repeats how wood burns"* and the shipped side as *"a cream-pale
+glowing object, an overexposed silhouette that would look out of place next to painted grass, wood and
+cloth"*. The mapping is in `frame_fire_blind_map.txt` and the lesson is in `Tools/gen-fire-textures.py`:
+a named panel hands the reader the answer it is supposed to find.
+
+**A tool bug fixed on the way.** `tinted()` WROTE the tint into RGB instead of MULTIPLYING it - exact
+only while every canvas is flat white, which was true until today, and with a coloured canvas the A/B
+sheets would have drawn both sides identically. Now `src = vertexColor * texture`, as Unity does it.
+
+**Evidence.** `art-gallery-capture.sh art0flame2h` (`PREVIEW_BUILD_OK ... scenes=12 errors=0`, 8 stills,
+165-frame / 16.5 s pan, `real=29 missing=11`, capture failures 0, buildGuid
+`016bd4bffdc244139e4ce6800833a6d6`, video `Trials/Runs/art0flame2h.mp4`; the shipped canvas's md5 is
+byte-identical inside that build). Against the A/B control build (`3942746521...`): `human`, `level`,
+`materials`, `tree` **pixel-identical**, `fire` 4 414 px inside x 934-985 y 683-811, `photo`/
+`placeholder` 17 px at x 1721-1723 y 572-577 (the same fire row from the whole-gallery lens), `apple`
+1 253 px (the plant lane's rig compiled between the two builds). Against the previously shipped
+`art0signc`: `fire` 4 455 px in the same box, `photo`/`placeholder` 17 px, the four control lenses
+identical. Full numbers, the loader lines quoted from the sources and a caution about whole-still reads
+inventing detail: `Trials/Runs/art-0-flame-1909m-report.md`.
+
+**Physics.** Four files in `git status` for this pass - one PNG and three offline tools under `Tools/`
+(outside `Assets/`, never compiled). No `.cs` touched; the core reaches the screen through
+`Albedo` -> `Sprite.Create` -> `Campfire.MakeDisc`, which writes `sr.sprite` only, and the campfire has
+no collider and no `Rigidbody2D`.
+
+**Still open.** `flower` (procedural; plant lane) and `UI icons` as labelled MISSING tiles; the FIRE row
+still shows the core alone rather than the assembled fire (a static stack needs the 24 tongues' geometry
+in the scene, kept from drifting from `Campfire` - the next item here); the wide-slab fill's look; the
+sign at native size only in the LEVEL row; `leaf`'s 0.5 m tiling rhythm; the cap/soil style mismatch.
+
 

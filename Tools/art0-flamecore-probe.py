@@ -31,7 +31,11 @@ from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN = os.path.join(ROOT, "Tools", "gen-fire-textures.py")
 SHIPPED = os.path.join(ROOT, "Assets", "Resources", "Art", "Campfire", "core.png")
-OUT_DIR = os.path.join(ROOT, "Trials", "Runs", "art-flamecore-2026-09-19")
+# ART0_FIRE_OUT keeps a later pass from overwriting an earlier pass's sheets:
+# the eleventh pass's core_ab_*.png are the evidence for the flip fix and this
+# pass's are the evidence for the colour ramp, and both have to stay readable.
+OUT_DIR = os.environ.get("ART0_FIRE_OUT",
+                         os.path.join(ROOT, "Trials", "Runs", "art-flamecore-2026-09-19"))
 NIGHT_BG = (26, 30, 44)
 ALPHA_CUT = 0.5
 
@@ -106,6 +110,48 @@ def crown_metrics(img):
                 w_top=float(w_top), w_bot=float(w_bot), edge_rows=int(edge_rows))
 
 
+def heat_metrics(img):
+    """The palette of one canvas: does it contain ANY orange or red at all?
+
+    The eleventh pass could only measure shape, because the canvas was flat white
+    (RGB 255, the shape in alpha) and every colour on screen came from a tint. The
+    thirteenth pass paints the ramp into the canvas, so the palette becomes a
+    measurable property of the shipped bytes - and it is the exact property the
+    fresh eye reads failed on ("orange and red shades are absent altogether").
+    """
+    a = np.asarray(img.convert("RGBA"), dtype=np.float64)
+    rgb, al = a[:, :, :3], a[:, :, 3] / 255.0
+    m = al >= ALPHA_CUT
+    if not m.any():
+        return None
+    px = rgb[m]
+    mx, mn = px.max(axis=1), px.min(axis=1)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0)
+    d = px[:, 0] - px[:, 1]                     # red minus green: the warm ramp's axis
+    return dict(
+        n=int(m.sum()),
+        sat_mean=float(sat.mean()), sat_p95=float(np.percentile(sat, 95)),
+        sat_frac40=float((sat > 0.40).mean()),
+        white=float((d < 12).mean()),
+        yellow=float(((d >= 12) & (d < 70)).mean()),
+        amber=float(((d >= 70) & (d < 130)).mean()),
+        orange_red=float((d >= 130).mean()),
+        mean_rgb=tuple(int(round(v)) for v in px.mean(axis=0)),
+        sat_hi=float(np.percentile(sat, 99)))
+
+
+def print_heat(name, img):
+    h = heat_metrics(img)
+    if h is None:
+        return
+    print("  %-4s palette (opaque px %d): sat mean %.3f p95 %.3f p99 %.3f, sat>0.40 on %.1f %%"
+          % (name, h["n"], h["sat_mean"], h["sat_p95"], h["sat_hi"], 100.0 * h["sat_frac40"]))
+    print("       %-4s ramp buckets (r-g): white %.1f %% / yellow %.1f %% / amber %.1f %% / "
+          "orange-red %.1f %%   mean rgb %s"
+          % (name, 100.0 * h["white"], 100.0 * h["yellow"], 100.0 * h["amber"],
+             100.0 * h["orange_red"], h["mean_rgb"]))
+
+
 def sheet(label, tiles, pxm_list):
     for pxm in pxm_list:
         row = tiles[pxm]
@@ -175,11 +221,25 @@ def frame_core_profile(path, out_dir, region=None):
               % (os.path.basename(path), win[0], win[2], win[1], win[3]))
     sub = a[win[1]:win[3], win[0]:win[2]]
     r, g, b = sub[:, :, 0], sub[:, :, 1], sub[:, :, 2]
-    core = (r > 225) & (g > 205) & (b > 140)
+    if region:
+        # A window the caller chose: find the drawn core by its WARMTH, not by
+        # whiteness. That test used to be exact (the canvas was flat white, so the
+        # core was the white-hot element); from the thirteenth pass the core
+        # carries its own amber ramp, and a whiteness test would have measured
+        # only the hot spine of the new picture and the whole of the old one.
+        core = (r - b) > 25
+    else:
+        core = (r > 225) & (g > 205) & (b > 140)
     ys, xs = np.nonzero(core)
     if xs.size == 0:
         print("  no core-coloured pixels in the fire window of %s" % os.path.basename(path))
         return
+    px = sub[core].astype(np.float64)
+    mx, mn = px.max(axis=1), px.min(axis=1)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0.0)
+    print("    ink %d px, mean rgb %s, saturation mean %.3f, sat>0.40 on %.1f %%"
+          % (px.shape[0], tuple(int(round(v)) for v in px.mean(axis=0)),
+             sat.mean(), 100.0 * (sat > 0.40).mean()))
     x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
     rows = []
     for y in range(y0, y1 + 1):
@@ -225,6 +285,7 @@ def main():
                  ("UPSIDE DOWN" if m["w_top"] > m["w_bot"] * 1.15 else "spindle"),
                  m["edge_rows"]))
         print_profile(name, img)
+        print_heat(name, img)
 
     # the assembly, both cores, one moment, one camera
     pool = {k: mod.paint(k) for k in mod.BOXES}
@@ -249,6 +310,36 @@ def main():
         p = os.path.join(OUT_DIR, "core_ab_4x.png")
         out.convert("RGB").save(p)
         print("  wrote %s" % os.path.relpath(p, ROOT))
+
+    # the BLIND 2x2: the same pairing at two moments, neutral labels. The named
+    # sheet above is fast to read and useless as evidence - whoever reads it knows
+    # which cell is the candidate. Here the slot order is a fixed shuffle and the
+    # mapping goes to a file, so the read cannot see which is which.
+    if old_img is not None:
+        cells = []
+        for t_state in (12.0, 12.35):
+            cells.append(mod.render_fire(t_state, {"core"}, pool_old, 220.0))
+            cells.append(mod.render_fire(t_state, {"core"}, pool, 220.0))
+        order = [2, 0, 3, 1]          # C=old@12.35, A=new@12.0, D=new@12.35, B=old@12.0
+        labels = ["A", "B", "C", "D"]
+        slot_of = {order[i]: i for i in range(4)}
+        col_w = max(c.width for c in cells)
+        row_h = max(c.height for c in cells)
+        blind = Image.new("RGBA", (col_w * 2 + 16, row_h * 2 + 16), NIGHT_BG + (255,))
+        mapping = {}
+        for idx in range(4):
+            slot = slot_of[idx]
+            blind.alpha_composite(cells[idx], ((slot % 2) * (col_w + 16),
+                                               (slot // 2) * (row_h + 16)))
+            mapping[labels[slot]] = ("shipped" if idx % 2 == 0 else "candidate",
+                                     "t=%.2f" % (12.0 if idx < 2 else 12.35))
+        p = os.path.join(OUT_DIR, "core_ab_blind_2x2.png")
+        blind.convert("RGB").save(p)
+        with open(os.path.join(OUT_DIR, "core_ab_blind_map.txt"), "w",
+                  encoding="utf-8", newline="\n") as fh:
+            for k in labels:
+                fh.write("%s = %s %s\n" % (k, mapping[k][0], mapping[k][1]))
+        print("  wrote %s (mapping in core_ab_blind_map.txt)" % os.path.relpath(p, ROOT))
     print("evidence -> %s" % os.path.relpath(OUT_DIR, ROOT))
 
 
