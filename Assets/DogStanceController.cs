@@ -908,6 +908,23 @@ public partial class DogStanceController : MonoBehaviour
     // publishes as fzL/fzR (ContactPoint2D.normalImpulse / dt is the force).
     // Paw order FR, FL, RR, RL — the order of the CSV grounded flags.
     public readonly float[] pawNormalImpulse = new float[4];
+
+    // ─── CYCLE 6 SENSOR: the load each paw actually carries ───
+    // The same manifold read (pawCol.GetContacts) that produces
+    // pawNormalImpulse, kept per paw as the VERTICAL component and divided by
+    // m*g*dt: pawLoadFraction[i] = Fn_i/(m*g), so 1 = that paw carries the whole
+    // body weight and 0.5 = its share in a two-paw stance. Read by the stance
+    // sweep only (ApplyWalkPropulsion); no other control law reads it and no
+    // published column changes.
+    private readonly float[] pawLoadFraction = new float[4];
+    private readonly float[] pawVerticalImpulse = new float[4];
+
+    // CYCLE 6: a stance limb carrying this share of the body weight sweeps with
+    // the full stance sweep; below it the sweep fades linearly to 0. 0.5 = the
+    // share a paw holds in a two-paw stance, so a loaded limb is bit-identical
+    // to the pre-change build.
+    public float walkStanceLoadRef = 0.5f;
+
     private readonly ContactPoint2D[] loadContacts = new ContactPoint2D[16];
     // sum(vertical Fn)/(m*g) for the frame, dimensionless: 1 = the paws carry
     // the whole weight, ~0 = the body is on its belly.
@@ -5044,7 +5061,9 @@ public partial class DogStanceController : MonoBehaviour
         ref float rlHip, ref float rrHip, ref float flSh, ref float frSh)
     {
         float dir = FacingSign();
-        float extra = 0f;
+        // CYCLE 6: `sweep` is the PUSH (u-ramped, signed along facing); the dual
+        // extra-extend further down is posture. The two used to be one variable.
+        float sweep = 0f;
         if (walkComMix > 0f && walkStanceSweepDeg > 0.01f && runSpeed > 0.05f)
         {
             // dog_ds3 (programmer): the stance sweep, not a speed nudge.
@@ -5058,15 +5077,15 @@ public partial class DogStanceController : MonoBehaviour
                 ? Mathf.Clamp01((Time.fixedTime - walkHalfBorn)
                                 / Mathf.Max(0.04f, WalkPeriodSeconds()))
                 : 0f;
-            extra = Mathf.Lerp(-2f, walkStanceSweepDeg, u) * tame;
+            sweep = Mathf.Lerp(-2f, walkStanceSweepDeg, u) * tame;
         }
 
         if (!walkCaptureArmed)
         {
             float age = walkHalfBorn >= 0f ? Time.fixedTime - walkHalfBorn : 0f;
             float ramp = Mathf.Clamp01(age / Mathf.Max(0.04f, WalkMinDual()));
-            extra = Mathf.Lerp(4f, 8f, ramp) * tame;
-            float dualHold = extra * dir;
+            float dual = Mathf.Lerp(4f, 8f, ramp) * tame;
+            float dualHold = dual * dir;
             if (flStance)
                 flSh = Mathf.Clamp(flSh + dualHold, -90f, 90f);
             if (frStance)
@@ -5091,6 +5110,7 @@ public partial class DogStanceController : MonoBehaviour
         }
 
         bool swingAirNow = SwingPairAir();
+        float posture = 0f;
         if (!swingAirNow)
         {
             // Peel: keep Dual extra-extend so the stance pair holds
@@ -5098,18 +5118,49 @@ public partial class DogStanceController : MonoBehaviour
             // after Arm dropped the pelvis into the 6 cm chord.
             float age = walkHalfBorn >= 0f ? Time.fixedTime - walkHalfBorn : 0f;
             float ramp = Mathf.Clamp01(age / Mathf.Max(0.04f, WalkMinDual()));
-            extra = Mathf.Max(extra, Mathf.Lerp(4f, 8f, ramp) * tame);
+            posture = Mathf.Lerp(4f, 8f, ramp) * tame;
         }
 
-        float hold = extra * dir;
+        // CYCLE 6, THE ONE CHANGE. The u-ramped sweep is the PUSH, so it is
+        // spent on the paw that is carrying the body; the extra-extend above is
+        // posture (it holds the girdle open through the peel) and stays
+        // unscaled. Per stance limb the angle added is now
+        //     max(sweep * loadShare, posture) * dir
+        // instead of
+        //     max(sweep, posture) * dir
+        // which is IDENTICAL on a limb carrying walkStanceLoadRef of the body
+        // (0.5 bw = a paw's share in a two-paw stance) and falls back to the
+        // posture term on a stance limb with no contact.
+        // Measured reason (cycle 5, DOGDIAG + the accepted walk trace): the
+        // intended stance diagonal holds one of its two paws 8-13 cm up through
+        // most of the half, so part of the sweep budget was spent on air, and
+        // the per-frame speed of the accepted walk FALLS as the flag count of
+        // "grounded" paws rises (0 paws 0.566 m/s, 4 paws 0.277 m/s). The load
+        // is the cycle-1 instrument, read by no control law before this cycle.
+        float holdFl = Mathf.Max(sweep * WalkStanceLoadShare(1), posture) * dir;
+        float holdFr = Mathf.Max(sweep * WalkStanceLoadShare(0), posture) * dir;
+        float holdRl = Mathf.Max(sweep * WalkStanceLoadShare(3), posture) * dir;
+        float holdRr = Mathf.Max(sweep * WalkStanceLoadShare(2), posture) * dir;
         if (flStance)
-            flSh = Mathf.Clamp(flSh + hold, -90f, 90f);
+            flSh = Mathf.Clamp(flSh + holdFl, -90f, 90f);
         if (frStance)
-            frSh = Mathf.Clamp(frSh + hold, -90f, 90f);
+            frSh = Mathf.Clamp(frSh + holdFr, -90f, 90f);
         if (rlStance)
-            rlHip = Mathf.Clamp(rlHip + hold, -90f, 90f);
+            rlHip = Mathf.Clamp(rlHip + holdRl, -90f, 90f);
         if (rrStance)
-            rrHip = Mathf.Clamp(rrHip + hold, -90f, 90f);
+            rrHip = Mathf.Clamp(rrHip + holdRr, -90f, 90f);
+    }
+
+    // CYCLE 6: how much of the stance sweep a limb is allowed to spend, from
+    // the load it is measurably carrying (pawLoadFraction = Fn/(m*g), filled by
+    // SampleCycle1Instruments from the contact manifold). 1 at
+    // walkStanceLoadRef and above, 0 for a limb in the air. Paw order matches
+    // PawCollider and the CSV: FR 0, FL 1, RR 2, RL 3.
+    private float WalkStanceLoadShare(int paw)
+    {
+        if (walkStanceLoadRef <= 0.001f)
+            return 1f;
+        return Mathf.Clamp01(pawLoadFraction[paw] / walkStanceLoadRef);
     }
 
     // Crouch → plant extension → stretch in the air → bite. No AddForce:
@@ -5396,6 +5447,7 @@ public partial class DogStanceController : MonoBehaviour
         {
             Collider2D pawCol = PawCollider(pk);
             float pawImpulse = 0f;
+            float pawVertical = 0f;
             if (pawCol != null)
             {
                 int hits = pawCol.GetContacts(groundContactFilter, loadContacts);
@@ -5403,16 +5455,29 @@ public partial class DogStanceController : MonoBehaviour
                 for (int ci = 0; ci < used; ci++)
                 {
                     pawImpulse += loadContacts[ci].normalImpulse;
-                    verticalImpulse += loadContacts[ci].normalImpulse * loadContacts[ci].normal.y;
+                    float vertical = loadContacts[ci].normalImpulse * loadContacts[ci].normal.y;
+                    verticalImpulse += vertical;
+                    pawVertical += vertical;
                 }
             }
             pawNormalImpulse[pk] = pawImpulse;
+            // CYCLE 6: the same term kept per paw. The running sum above adds
+            // the identical values in the identical order, so pawWeightFraction,
+            // the published columns and the physics do not move.
+            pawVerticalImpulse[pk] = pawVertical;
         }
 
         float bodyWeight = body != null ? body.totalMass * Physics2D.gravity.magnitude : 0f;
         pawWeightFraction = bodyWeight > 0.01f
             ? verticalImpulse / Time.fixedDeltaTime / bodyWeight
             : 0f;
+        // CYCLE 6 SENSOR: each paw's own share of the body weight, Fn_i/(m*g),
+        // from the SAME manifold read. Read by the stance sweep only.
+        float loadRef = bodyWeight * Time.fixedDeltaTime;
+        for (int pk = 0; pk < 4; pk++)
+            pawLoadFraction[pk] = loadRef > 0.0001f
+                ? Mathf.Clamp01(pawVerticalImpulse[pk] / loadRef)
+                : 0f;
 
         // ─── CYCLE 3 SENSOR: the capture point over the SAME support interval ───
         // Read-only, like everything else here: the physics numbers of the run
