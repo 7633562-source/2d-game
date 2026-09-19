@@ -20,9 +20,16 @@ import sys
 
 PROJECT = r"E:/Games/2D Game/My project"
 RUNS = os.path.join(PROJECT, "Trials", "Runs")
-# The 19:24 (7ebbad89) evidence was superseded by the 22:32 (bf191843) re-run, so it was
-# moved aside instead of deleted: a superseded run is still the only record of that build.
+# Superseded evidence is moved aside instead of deleted: a superseded run is still the only
+# record of that build. Two archives exist now - the 19:24 (7ebbad89) set, superseded by the
+# 22:32 (bf191843) re-run, and the bf191843 set itself, superseded when the tree moved on and
+# the manifest became a12521af (23:33).
 ARCHIVE = os.path.join(RUNS, "impact-pre-bf191843")
+ARCHIVE_A = os.path.join(RUNS, "impact-pre-a12521af")
+# The 23:33 (a12521af) set itself, superseded inside a two-minute window by the dog lane's
+# rebuilds at 00:30 and 00:32: `impact-pre-8868d6a6/` is named for the manifest that
+# superseded it, as the two folders above are.
+ARCHIVE_B = os.path.join(RUNS, "impact-pre-8868d6a6")
 MANIFEST = os.path.join(PROJECT, "Build", "Headless", "build-manifest.json")
 
 CARD_NUMBERS = ["pelvisDrop", "rmsShoulderJointSpeed", "rmsElbowJointSpeed", "armSwingFraction",
@@ -41,7 +48,9 @@ TRACE = [
     ("5794f0ef 11:56", "imp_v1", RUNS),
     ("59b8b311 18:03", "l2_hit_s1", RUNS),
     ("7ebbad89 19:24", "imp_cb1", ARCHIVE),
-    ("bf191843 22:32", "imp_cb1", RUNS),
+    ("bf191843 22:32", "imp_cb1", ARCHIVE_A),
+    ("a12521af 23:33", "imp_cb1", ARCHIVE_B),
+    ("39a689fd 00:35", "imp_cb1", RUNS),
 ]
 
 
@@ -60,7 +69,8 @@ def main():
     labels = [name for name in sys.argv[1:]] or [
         "imp_cb_quiet", "imp_cb1", "imp_cb2", "imp_cb3", "imp_cb1L", "imp_cb2L", "imp_cb3L"]
     print("\n== identity")
-    print("{0:14s} {1:>4s} {2:>10s} {3:12s} {4:7s}".format("label", "seed", "manifest?", "buildGuid", "throws"))
+    print("{0:14s} {1:>4s} {2:>10s} {3:>6s} {4:12s} {5:7s}".format(
+        "label", "seed", "manifest?", "guid?", "buildGuid", "throws"))
     for label in labels:
         path = os.path.join(RUNS, label + "-impacts.json")
         if not os.path.exists(path):
@@ -68,9 +78,15 @@ def main():
             continue
         doc = load(label)
         mf = "MATCH" if doc.get("sourceFingerprint") == manifest.get("fingerprint") else "STALE"
-        print("{0:14s} {1:>4} {2:>10s} {3:12s} {4:7d}".format(
-            label, doc.get("switches", {}).get("impactSeed", "-"), mf,
-            (doc.get("buildGuid") or "")[:12], len(doc.get("throws", []))))
+        # The fingerprint is over the manifest's file NAMES (trial-manifest.py), so two
+        # rebuilds of the same file set print the same fingerprint while being two builds.
+        # The buildGuid is the only field that tells those apart, and it is printed here
+        # because a fingerprint MATCH can hide a run made on a different player.
+        guid = (doc.get("buildGuid") or "")
+        gm = "same" if guid == manifest.get("buildGuid") else "OTHER"
+        print("{0:14s} {1:>4} {2:>10s} {3:>6s} {4:12s} {5:7d}".format(
+            label, doc.get("switches", {}).get("impactSeed", "-"), mf, gm,
+            guid[:12], len(doc.get("throws", []))))
 
     print("\n== rule zero (imp_cb_quiet vs burn_stance)")
     try:
