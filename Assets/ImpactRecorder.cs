@@ -32,6 +32,32 @@ public class ImpactRecorder
     private const int HistoryFrames = 100;            // 0.5 s at 200 Hz
     private const int JointCount = 6;                 // hip L/R, knee L/R, ankle L/R
 
+    // ─── THE BLOW AND THE BODY'S ANSWER (audit of 19.09) ───
+    // `Trials/Runs/impact-grid-report.md` section 5c measured the old definition: the
+    // flag was set on the first window frame with fzTotal > bodyWeight, and the window
+    // opened at the contact, so `pushedBack` was the COLLISION's own ground load - true
+    // in 12/12 classes at contact + 0..5 ms, and the above-weight impulse was 468-473
+    // frames of the stand's own re-settling in the classes that stayed up against 3-13
+    // frames in the ones that went down, i.e. not comparable between them. The blow and
+    // the answer are separate channels now:
+    //   * the PASSIVE window is the first 50 ms after the contact. The card's own
+    //     latency model (30-50 ms spinal reflex, 100-150 ms long-loop, 150-250 ms
+    //     voluntary) says no living controller can put force on the ground that early,
+    //     so every above-weight frame inside it is the mechanical arrival of the blow.
+    //     A measured contact-duration column is reported next to it, because the object
+    //     can keep grazing the body long after its momentum has arrived - the 0.25 m
+    //     circle at 0.5 kg stays in contact for 280 ms while the 0.60 m plate is done in
+    //     10 ms, and a boundary drawn at "the contact ended" would call the same body
+    //     answer a push in one shape and not in the other.
+    //   * `pushedBack` is a SUSTAINED rise of the smoothed ground force after that.
+    // 5 % of body weight is ~500x the stand's own idle amplitude (measured pre-impact:
+    // +-0.05 N, 0.007 % of 695 N), and 40 ms is longer than the same 30-50 ms spinal
+    // reflex, so a shorter bump cannot be a leg pushing either.
+    private const float PassiveWindowSeconds = 0.05f;  // the card's spinal-reflex floor
+    private const int ContactSettleFrames = 5;         // 25 ms without a new contact impulse
+    private const int PushMeanFrames = 8;              // 40 ms of the smoothed load
+    private const float PushThresholdRatio = 0.05f;    // +5 % of body weight
+
     private readonly Human human;
     private readonly ImpactThrower thrower;
     private readonly string label;
@@ -104,9 +130,29 @@ public class ImpactRecorder
         public readonly float[] limitFrames = new float[JointCount];
         public float framesInWindow;
         public float peakFzTotalN;
+        // The passive window: the first PassiveWindowSeconds after the contact.
+        public bool passiveReached;
+        public float passivePeakFzRatio;
+        public float passiveExcessImpulseNs;
+        // The measured duration of the projectile's contact with the body (geometry,
+        // not force): the delivered impulse grows while the object is still touching.
+        public float lastDeliveredImpulse;
+        public int impulseStableFrames;
+        public float contactEndTime = -1f;
+        // The body's answer, measured only after the passive window.
+        public float peakFzAfterPassiveN;
+        public readonly float[] recentFz = new float[PushMeanFrames];
+        public int recentCount;
+        public int recentIndex;
+        public float pushMeanRatio;
+        public float pushMeanRatioPeak;
         public bool pushedBack;
         public float pushTime = -1f;
-        public float groundPushImpulseNs;
+        public int pushFrame = -1;          // frames after the contact frame
+        public float pushBackHoldSeconds;
+        public float pushBackImpulseNs;
+        public float pushBackPeakRatio;
+        public float groundPushImpulseNs;   // = pushBackImpulseNs, kept for the audit tools
         public bool fell;
         public float criterionFallTime = -1f;
         public bool alreadyDownAtContact;
@@ -245,16 +291,6 @@ public class ImpactRecorder
             }
         }
 
-        if (!headerWritten)
-        {
-            WriteHeader();
-            headerWritten = true;
-        }
-        AppendRow(time, comPosition, comVX, comAX, tilt, angVel, pelvisY, margin,
-            leftGrounded, rightGrounded, fzTotal, steps, supportLevel, activeThrow,
-            projectileX, projectileY, projectileDistance, contacted);
-        samples++;
-
         // ─── the per-throw windows ───
         for (int i = 0; i < windows.Count; i++)
         {
@@ -286,6 +322,25 @@ public class ImpactRecorder
                 Accumulate(window, time, comPosition, comAX, margin, fzTotal, steps, projectile);
             }
         }
+
+        // The row carries THIS frame's numbers, so it is written after the windows: the
+        // three push columns are the live state of the throw this frame belongs to.
+        ThrowWindow active = activeThrow >= 0 && activeThrow < windows.Count
+            ? windows[activeThrow] : null;
+        bool passiveReached = active != null && active.passiveReached;
+        float pushMeanRatio = active != null ? active.pushMeanRatio : 0f;
+        bool pushActive = active != null && passiveReached
+            && active.pushMeanRatio >= 1f + PushThresholdRatio;
+        if (!headerWritten)
+        {
+            WriteHeader();
+            headerWritten = true;
+        }
+        AppendRow(time, comPosition, comVX, comAX, tilt, angVel, pelvisY, margin,
+            leftGrounded, rightGrounded, fzTotal, steps, supportLevel, activeThrow,
+            projectileX, projectileY, projectileDistance, contacted, passiveReached,
+            pushMeanRatio, pushActive);
+        samples++;
 
         PushHistory(comAX);
         UpdateCaption(time);
@@ -387,7 +442,42 @@ public class ImpactRecorder
             .Append(Mathf.Max(0, window.lastSteps - window.stepsAtContact)
                 .ToString(CultureInfo.InvariantCulture));
         sb.Append('\n');
+        sb.Append(GroundText(window));
+        sb.Append('\n');
         sb.Append(OutcomeText(window));
+        return sb.ToString();
+    }
+
+    // The ground channel in one line: the passive window (the mechanical arrival of the
+    // blow), the measured contact duration, and what the body did about it. These were
+    // one column before the 19.09 audit (report 5c); the line is what the frame shows.
+    private string GroundText(ThrowWindow window)
+    {
+        StringBuilder sb = new StringBuilder(170);
+        sb.Append("passive 50 ms: peak ").Append(Fmt(window.passivePeakFzRatio)).Append(" W, ")
+            .Append(Fmt(window.passiveExcessImpulseNs)).Append(" N*s");
+        if (window.contactEndTime >= 0f)
+        {
+            sb.Append("  |  contact ")
+                .Append(Fmt((window.contactEndTime - window.contactTime) * 1000f)).Append(" ms");
+        }
+        sb.Append("  |  push ");
+        if (!window.passiveReached)
+        {
+            sb.Append("not measured yet (passive window)");
+        }
+        else if (!window.pushedBack)
+        {
+            sb.Append("none (peak 40 ms mean ")
+                .Append(Fmt(window.pushMeanRatioPeak)).Append(" W)");
+        }
+        else
+        {
+            sb.Append(Fmt(window.pushBackPeakRatio)).Append(" W at +")
+                .Append(Fmt((window.pushTime - window.contactTime) * 1000f)).Append(" ms, hold ")
+                .Append(Fmt(window.pushBackHoldSeconds * 1000f)).Append(" ms, ")
+                .Append(Fmt(window.pushBackImpulseNs)).Append(" N*s");
+        }
         return sb.ToString();
     }
 
@@ -460,11 +550,64 @@ public class ImpactRecorder
         }
 
         if (fzTotal > window.peakFzTotalN) window.peakFzTotalN = fzTotal;
-        if (bodyWeightN > 0f && fzTotal > bodyWeightN)
+
+        // ─── the blow, then the body's answer (see the header comment) ───
+        // Contact duration: the projectile's delivered impulse grows while it is still
+        // in contact with the body; ContactSettleFrames of no growth mean that contact
+        // has ended. Recorded as geometry - it decides nothing below.
+        float delivered = projectile.DeliveredImpulseNs;
+        if (delivered > window.lastDeliveredImpulse + 1e-6f)
         {
-            window.pushedBack = true;
-            if (window.pushTime < 0f) window.pushTime = time;
-            window.groundPushImpulseNs += (fzTotal - bodyWeightN) * fixedDelta;
+            window.lastDeliveredImpulse = delivered;
+            window.impulseStableFrames = 0;
+        }
+        else
+        {
+            window.impulseStableFrames++;
+        }
+        if (window.contactEndTime < 0f && window.impulseStableFrames >= ContactSettleFrames)
+            window.contactEndTime = time - (ContactSettleFrames - 1) * fixedDelta;
+
+        bool passive = time >= window.contactTime + PassiveWindowSeconds;
+        if (!passive)
+        {
+            // No living controller can answer this early: the sequence here is the
+            // mechanical arrival of the blow. This is what the old column counted.
+            if (bodyWeightN > 0f)
+                window.passivePeakFzRatio = Mathf.Max(window.passivePeakFzRatio,
+                    fzTotal / bodyWeightN);
+            window.passiveExcessImpulseNs += Mathf.Max(0f, fzTotal - bodyWeightN) * fixedDelta;
+        }
+        else
+        {
+            window.passiveReached = true;
+            if (fzTotal > window.peakFzAfterPassiveN) window.peakFzAfterPassiveN = fzTotal;
+            window.recentFz[window.recentIndex] = fzTotal;
+            window.recentIndex = (window.recentIndex + 1) % PushMeanFrames;
+            if (window.recentCount < PushMeanFrames) window.recentCount++;
+            if (window.recentCount == PushMeanFrames && bodyWeightN > 0f)
+            {
+                float mean = 0f;
+                for (int k = 0; k < PushMeanFrames; k++) mean += window.recentFz[k];
+                mean /= PushMeanFrames;
+                window.pushMeanRatio = mean / bodyWeightN;
+                window.pushMeanRatioPeak = Mathf.Max(window.pushMeanRatioPeak,
+                    window.pushMeanRatio);
+                if (window.pushMeanRatio >= 1f + PushThresholdRatio)
+                {
+                    window.pushedBack = true;
+                    if (window.pushFrame < 0)
+                    {
+                        window.pushTime = time;
+                        window.pushFrame = Mathf.RoundToInt(window.framesInWindow);
+                    }
+                    window.pushBackHoldSeconds += fixedDelta;
+                    window.pushBackImpulseNs += (mean - bodyWeightN) * fixedDelta;
+                    window.groundPushImpulseNs = window.pushBackImpulseNs;
+                    window.pushBackPeakRatio = Mathf.Max(window.pushBackPeakRatio,
+                        window.pushMeanRatio);
+                }
+            }
         }
         if (fallTime > 0f)
         {
@@ -688,13 +831,17 @@ public class ImpactRecorder
             .Append("projectileDistanceM").Append(';')
             .Append("contacted").Append(';')
             .Append("down").Append(';')
-            .Append("fell").Append('\n');
+            .Append("fell").Append(';')
+            .Append("passiveReached").Append(';')
+            .Append("pushMeanFzRatio").Append(';')
+            .Append("pushActive").Append('\n');
     }
 
     private void AppendRow(float time, Vector2 comPosition, float comVX, float comAX, float tilt,
         float angVel, float pelvisY, float margin, bool leftGrounded, bool rightGrounded,
         float fzTotal, int steps, int supportLevel, int activeThrow, float projectileX,
-        float projectileY, float projectileDistance, bool contacted)
+        float projectileY, float projectileDistance, bool contacted, bool passiveReached,
+        float pushMeanRatio, bool pushActive)
     {
         rows.Append(F(time)).Append(';')
             .Append(F(comPosition.x)).Append(';')
@@ -722,7 +869,10 @@ public class ImpactRecorder
             .Append(F(projectileDistance)).Append(';')
             .Append(contacted ? "1" : "0").Append(';')
             .Append(downNow ? "1" : "0").Append(';')
-            .Append(fallLatch.fired ? "1" : "0").Append('\n');
+            .Append(fallLatch.fired ? "1" : "0").Append(';')
+            .Append(passiveReached ? "1" : "0").Append(';')
+            .Append(F(pushMeanRatio)).Append(';')
+            .Append(pushActive ? "1" : "0").Append('\n');
     }
 
     private static string F(float value)
@@ -820,6 +970,14 @@ public class ImpactRecorder
         Num(json, "contacted", contactedCount);
         Num(json, "fellByCriterion", fellCount);
         Num(json, "pushBackCount", pushCount);
+        json.Append("\"pushDefinition\":\"");
+        json.Append("pushedBack = a ").Append(F(PushMeanFrames * fixedDelta * 1000f))
+            .Append(" ms sliding mean of fzTotal >= ")
+            .Append(F(1f + PushThresholdRatio))
+            .Append(" * bodyWeightN, measured only after the passive window (contact + ")
+            .Append(F(PassiveWindowSeconds * 1000f))
+            .Append(" ms, the card's spinal-reflex floor: no living controller can answer earlier); the blow's own arrival is passivePeakFzRatio / passiveExcessImpulseNs and contactMs is how long the projectile stayed in contact with the body");
+        json.Append("\",");
         Num(json, "outOfPlaneCount", outOfPlaneCount);
         Num(json, "maxPeakFzTotalN", maxFz);
         Num(json, "maxDeliveredImpulseNs", maxImpulse);
@@ -954,12 +1112,35 @@ public class ImpactRecorder
         json.Append("\"weightN\":").Append(F(bodyWeightN)).Append(',');
         json.Append("\"peakFzOverWeight\":").Append(bodyWeightN > 0f
             ? F(window.peakFzTotalN / bodyWeightN) : "-1").Append(',');
+        // ─── the blow and the body's answer (see the header comment) ───
+        // passive* is the mechanical arrival of the blow (the first 50 ms, before any
+        // living controller can answer); contactMs is the measured duration of the
+        // projectile's contact with the body; push* is the sustained rise of the
+        // smoothed ground force after the passive window.
+        json.Append("\"passiveWindowMs\":")
+            .Append(F(PassiveWindowSeconds * 1000f)).Append(',');
+        json.Append("\"passivePeakFzRatio\":").Append(F(window.passivePeakFzRatio)).Append(',');
+        json.Append("\"passiveExcessImpulseNs\":")
+            .Append(F(window.passiveExcessImpulseNs)).Append(',');
+        json.Append("\"contactMs\":").Append(window.contactEndTime < 0f
+            ? "-1" : F((window.contactEndTime - window.contactTime) * 1000f)).Append(',');
+        json.Append("\"peakFzAfterPassiveN\":").Append(F(window.peakFzAfterPassiveN)).Append(',');
+        json.Append("\"pushMeanWindowMs\":")
+            .Append(F(PushMeanFrames * fixedDelta * 1000f)).Append(',');
+        json.Append("\"pushMeanRatioPeak\":").Append(F(window.pushMeanRatioPeak)).Append(',');
+        json.Append("\"pushThresholdRatio\":").Append(F(1f + PushThresholdRatio)).Append(',');
         json.Append("\"pushedBack\":").Append(window.pushedBack ? "true" : "false").Append(',');
         json.Append("\"pushTime\":").Append(window.pushTime < 0f ? "-1" : F(window.pushTime)).Append(',');
         json.Append("\"pushFrame\":").Append(window.pushTime < 0f
             ? "-1"
             : Mathf.RoundToInt(window.pushTime / fixedDelta).ToString(CultureInfo.InvariantCulture))
             .Append(',');
+        json.Append("\"pushFrameAfterContact\":")
+            .Append(window.pushFrame.ToString(CultureInfo.InvariantCulture)).Append(',');
+        json.Append("\"pushBackHoldMs\":")
+            .Append(F(window.pushBackHoldSeconds * 1000f)).Append(',');
+        json.Append("\"pushBackPeakFzRatio\":").Append(F(window.pushBackPeakRatio)).Append(',');
+        json.Append("\"pushBackImpulseNs\":").Append(F(window.pushBackImpulseNs)).Append(',');
         json.Append("\"groundPushImpulseNs\":").Append(F(window.groundPushImpulseNs)).Append(',');
         json.Append("\"windowFrames\":")
             .Append(window.framesInWindow.ToString(CultureInfo.InvariantCulture));

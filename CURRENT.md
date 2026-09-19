@@ -666,3 +666,39 @@ read-only state struct. Today the split is a FILE boundary, so the compiler stil
 cosmetic routine from writing a physical field. Surfaces for that step: the moved block touches
 183 controller members and 19 controller methods are called from the physical side (`FacingSign` x16
 + 18 Sit*/Walk*/LeapHunt* tail/head routines). Report: `Trials/Runs/dog-cycle2-cosmetic-split.md`.
+
+## BALANCE-ARENA-1 push-back: the blow and the body's answer are one column no more (level worker, 19.09 ~16:40)
+
+The card's own column - *"whether the rig pushed back at all (vertical force above body weight after
+the impact, with the frame number where it happens)"* - was measured broken by the grid audit
+(`Trials/Runs/impact-grid-report.md` 5c): `pushedBack` was true in **12/12** classes at contact
++0..5 ms, i.e. it was the collision's own ground load. One change, `Assets/ImpactRecorder.cs` only:
+the first 50 ms after the contact are the *passive window* (the card's spinal-reflex floor - no
+living controller can answer inside it), the measured contact duration is now its own column, and
+`pushedBack` is a 40 ms sliding mean of `fzTotal` reaching 1.05 x body weight **after** that window.
+
+Acceptance MEASURED on build fp `d4055c0109978b8c67c01ef1eb5d4d07f32dd0d166af656c37d14cc4b5b59ec4`,
+guid `c49c83d3b6d64723aba4a1c018a3d761`: rule zero `python Tools/impact-json-diff.py
+Trials/Runs/imp_quiet40.json Trials/Runs/pb_quiet.json` -> the card's four numbers unchanged
+(0.0148 / 2.6542 / 7.5647 / 0.0), 700 shared keys with 11 differences, all label/clock/build
+identity; the twelve classes of `bash Tools/impact-pushback-grid.sh` are **identical to the accepted
+build in reference impulse, delivered impulse, contact time and fall verdict in 12/12** (e.g.
+50.916 N*s and contact 8.360 s on rect 15 kg / 4 m/s), so the change moved a measure, not physics.
+
+The new column: a push-back in **6/12** classes, and the six are exactly the six 0.5 kg classes.
+It arrives **+125..+145 ms** after the contact and lasts 25..65 ms (the card's long-loop band);
+nothing appears before +50 ms in any class. The answer is what separates the outcomes: 3.24 / 3.24
+/ 4.07 N*s buys a stand against a 2 N*s hit, 1.00 / 1.19 / 1.17 N*s does not buy one against 10 N*s
+(he is down 1.32-1.34 s later), and the six 60-300 N*s classes never answer at all (best peak 40 ms
+mean 1.025 W, below the 5 % threshold). `contactMs` turned out to need its own column: 10 ms for the
+0.60 m plate against 375 ms for the 0.25 m circle, which is why a boundary drawn at "the contact
+ended" called the same body answer a push in one shape and not in the other.
+
+Evidence: two 24.05 s 1920x1080 takes with the new line drawn on the frame
+(`impact_pb_v1L_*` = push, `impact_pb_v2L_*` = no answer), the 36.1 s cut
+`Trials/Runs/impact_pushback_two_takes.mp4`, four stills, and `Tools/impact-pushback-table.py` /
+`-probe.py` / `-video.sh`. Report: `Trials/Runs/impact-pushback-report.md`.
+
+NOT this lane, still open: L1 latency is still keyed on the collision (5.000 ms in 12/12) - the
+honest divergence definition needs an active-reaction-off run, i.e. a mode in
+`Assets/BalanceController.cs`, the walk stream's file.
