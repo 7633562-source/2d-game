@@ -20,6 +20,13 @@ downsamples to 512 at runtime anyway and tiled surfaces gain nothing above that 
 Painted here: ground_fill (soil side view), ground_cap (grass strip), sky (colour ramp),
 sign_finish (finish pennant). All four are seamless in X where they are tiled.
 
+The seven material tiles are downscaled 1024 -> 512 and then levelled: a legacy surface
+whose top edge is brighter than its bottom edge cannot tile, because every repeat steps by
+that difference and the eye reads the step as a line at the repeat (ART-0 review, 19.09:
+skin stepped 24.7 levels over 94.6 % of its boundary, 5.4x its own grain). Levelling adds
+one constant per row and one per column, so the level returns to itself at the wrap while
+every interior difference and every detail is left alone.
+
 Run from the project root:   python Tools/gen-level-textures.py
 Writes the PNGs plus their .meta import settings, then prints a verification table.
 """
@@ -30,6 +37,7 @@ import random
 import re
 import shutil
 
+import numpy as np
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -440,6 +448,58 @@ def seam_error(img):
     return seam, inner
 
 
+def wrap_stats(a, axis):
+    """(cut, inner) in 0-255 levels, averaged over the RGB channels.
+
+    cut   = |first edge pixel - last edge pixel|: the step a repeat shows at the wrap.
+    inner = |neighbour pixel|: the grain the eye already accepts inside the tile.
+    A tile whose cut is no worse than its own grain cannot be seen to repeat.
+    """
+    cut = np.abs(a.take(0, axis=axis).astype(np.int16) - a.take(-1, axis=axis).astype(np.int16))
+    inner = np.abs(np.diff(a.astype(np.int16), axis=axis))
+    return float(cut.mean()), float(inner.mean())
+
+
+def level_tile(img, ratio=2.0, floor=1.5, cap=64.0):
+    """Cancel a brightness ramp across a tile with one constant per row and one per column.
+
+    A legacy surface whose top edge is brighter than its bottom edge cannot tile: every
+    repeat steps by that difference and the eye reads the step as a line on the grid. The
+    correction c(y) = d * y / (h - 1), d being the row means' end-to-end difference, makes
+    the row means meet at the wrap, and the same in x. A constant per row cannot change an
+    interior difference, so no detail is blurred and no pixel is resampled or relocated -
+    unlike a roll, which only moves the step inside the tile (the 2x2 A/B showed that).
+
+    Left alone when the cut is no worse than the tile's own grain, or when the step is so
+    large that the file is not a surface. Returns (image, note).
+    """
+    a = np.asarray(img.convert("RGB")).astype(np.float64)
+    h, w = a.shape[:2]
+    correction = np.zeros_like(a)
+    parts = []
+    for axis, n, name in ((0, h, "Y"), (1, w, "X")):
+        cut, inner = wrap_stats(a, axis)
+        step = a.mean(axis=1 - axis)[0] - a.mean(axis=1 - axis)[-1]
+        if cut <= floor or cut <= ratio * inner:
+            parts.append("%s ok cut %.2f vs inner %.2f" % (name, cut, inner))
+            continue
+        if float(np.abs(step).max()) > cap:
+            parts.append("%s step %.1f over cap %.0f, left alone" % (
+                name, float(np.abs(step).max()), cap))
+            continue
+        ramp = np.linspace(0.0, 1.0, n)[:, None] * step[None, :]
+        correction += ramp.reshape((n, 1, 3) if axis == 0 else (1, n, 3))
+        parts.append("%s ramped %.1f..%.1f" % (name, float(step.min()), float(step.max())))
+    if correction.any():
+        out = np.clip(a + correction, 0.0, 255.0).astype(np.uint8)
+        for axis, name in ((0, "Y"), (1, "X")):
+            cut, inner = wrap_stats(out, axis)
+            parts.append("%s now cut %.2f vs inner %.2f" % (name, cut, inner))
+    else:
+        out = a.astype(np.uint8)
+    return Image.fromarray(out, "RGB"), "; ".join(parts)
+
+
 def main():
     os.makedirs(LEVEL_DIR, exist_ok=True)
     os.makedirs(ART_DIR, exist_ok=True)
@@ -465,12 +525,13 @@ def main():
         before = os.path.getsize(src)
         img = Image.open(src).convert("RGB")
         src_size = img.size
-        out = img.resize((512, 512), Image.LANCZOS)
+        down = img.resize((512, 512), Image.LANCZOS)
+        out, note = level_tile(down)
         path = os.path.join(ART_DIR, key + ".png")
         size = save(out, path, 512, True, False, guid_rng)
         rows.append(("Resources/Art/" + key + ".png",
                      "%dx%d -> %dx%d" % (src_size[0], src_size[1], 512, 512), 512,
-                     "%d KB -> %d KB" % (before // 1024, size // 1024), "readable"))
+                     "%d KB -> %d KB" % (before // 1024, size // 1024), "readable; " + note))
 
     meta_dir = os.path.join(ROOT, "Assets", "Resources", "Art.meta")
     if not os.path.exists(meta_dir):

@@ -178,3 +178,66 @@ Still open, unchanged by this cycle: the per-part sprites (`ART-1b`), the four `
 (`LevelArt.UseTiledFill()` + `ArtLibrary.Tiled` is the declared path and the fill is ready for it),
 and the legacy material tiles' approximate tiling (item 5 above).
 
+## Third pass 19.09 - the material tiles really tile now (skin, fabric)
+
+Item 5 above stopped at "a wrap blend is an art decision and is left open". The gallery's 1 m
+material swatch row (`Trials/Runs/gallery1_materials.png`, ART-1c) then showed it as a shipping
+defect, so it was measured and fixed.
+
+Measured on the shipped 512 bytes (`cut` = mean |first edge pixel - last edge pixel|, `inner` =
+mean |neighbour|, both in 0-255 levels over RGB):
+
+| material | cut X / Y | inner X / Y | ratio | verdict |
+|---|---|---|---|---|
+| skin | 5.90 / **24.71** | 4.01 / 4.54 | 1.5x / **5.4x** | defect: 94.6 % of the boundary pixels step more than 12 levels (p95 42) |
+| fabric | 5.72 / 7.23 | 2.71 / 2.98 | 2.1x / 2.4x | defect: 7.1 % / 15.7 % step more than 12 levels |
+| bark | 27.36 / 22.71 | 19.03 / 14.46 | 1.44x / 1.57x | noise texture: a cut is no worse than a groove |
+| leaf | 16.83 / 17.07 | 12.53 / 12.20 | 1.34x / 1.40x | left alone |
+| grass / denim / dirt | 30.17-22.54 | 26.20-18.68 | 1.13-1.23x | left alone |
+
+So `skin` and `fabric` are the two that cannot tile; the other five have a cut no worse than their
+own grain.
+
+**What was tried and rejected.** Moving the crop origin to the least-discontinuous cut (a pure roll,
+no resample) takes skin's boundary step from 24.71 to 4.09 and passes any boundary metric. A blind
+2x2 A/B with neutral labels (`Trials/Runs/art-0-tilewrap/skin_blind.png`) had the eye pick the
+*rolled* sheet as the one with a light band: a crop cannot remove a ramp, it only moves the step
+inside the tile (16 px above the bottom edge, 24.5 levels). Kept as evidence of the trap - a
+boundary metric cannot see a step that has moved inside.
+
+**The fix.** `level_tile` in `Tools/gen-level-textures.py` adds one constant per row
+(`c(y) = d * y / (h - 1)`, `d` = the row means' end-to-end difference) and one per column, and only
+when `cut > 1.5` levels **and** `cut > 2x` the tile's own grain, with a 64-level cap. A constant per
+row cannot change an interior difference: no blur, no resample, nothing relocated - the level simply
+returns to itself at the wrap. It fired on skin (Y ramp 16.8..31.3) and fabric (Y 4.7..6.9,
+X -4.0..-2.6), and on nothing else.
+
+After: skin Y cut **24.71 -> 5.64** (its own grain 4.54), fabric Y 7.23 -> 5.12, X 5.72 -> 4.91. The
+residual is the detail difference between the two edge rows, not a ramp.
+
+**Determinism.** The rerun rewrites all 11 PNGs; `git status` names exactly two changed
+(`skin.png`, `fabric.png`), and the four level PNGs plus all 11 `.meta` files are byte-identical
+(`md5sum` before/after) - the guids did not move, so no scene reference changes and the sizes stay
+407 KB / 334 KB.
+
+**Evidence.**
+- Blind 2x2 A/B, shipped bytes (`git show HEAD:Assets/Resources/Art/skin.png`) vs new, neutral
+  labels: `art-0-tilewrap/skin_fixed_blind.png`, `fabric_fixed_blind.png`. Read: "the right sheet
+  reads as one continuous surface; the left shows a clear brightness step."
+- The real frame, same camera and same moment: preview player rebuilt
+  (`Logs/art0-tilelevel-build.log`, exit 0) and captured with the ART-1 args
+  (`Logs/art0-tilelevel-gallery2.log`: `GALLERY-CAPTURE DONE label=gallery2 stills=7
+  panFrames=165 real=28 missing=13 dressed=5567`) into `Trials/Runs/gallery2_*.png`.
+  `gallery1_materials.png` vs `gallery2_materials.png` differ in exactly two column blocks,
+  x 281-431 and x 485-634 - the skin and fabric swatches - and nowhere else in the 1920x1080 frame.
+  `art-0-tilewrap/frame_skin_blind.png` and `frame_fabric_blind.png` (3x, LEFT = shipped,
+  RIGHT = fixed): the eye names the RIGHT as evenly lit on both.
+- Physics: no `.cs` touched. `ArtLibrary.Skin` / `ArtLibrary.Fabric` have exactly one caller,
+  `GalleryScene.cs:72` (the swatch row) plus the two editor checks, so neither PNG is on any
+  simulation path. This cycle's `git status`: `Tools/gen-level-textures.py`, the two PNGs, this card.
+
+**Still open.** `bark`, `leaf`, `grass`, `denim`, `dirt` keep their wrap: no worse than their own
+grain by the numbers, but `leaf` still shows a sliced vein at the wrap by eye, so the next step
+there - if Yury wants it - is a cross-fade band of a few tens of px over the wrap, which is a
+deliberate 2-3 % detail trade rather than this constant-per-row correction.
+
