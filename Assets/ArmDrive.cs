@@ -36,6 +36,18 @@ using UnityEngine;
 //     elbow angle, because an elbow ramp leaves the hand's position uncontrolled:
 //     the hand was measured 0.39 m past its own palm, walking along the floor.
 //
+//     Two more failed on p_arms50 and are now measured the other way:
+//     (3) "under the shoulder" is only half of it — the point must be a CHORD the
+//     arm can hold torque at. A lying shoulder 0.11 m over the slab latched a
+//     point 0.11 m away against a 0.218 m shortest usable chord: the solve
+//     clamped, the hand settled 0.32 m away from its own palm and the elbow
+//     "extended" 60 deg into the air (shoulder rise 0.03 m). The offset below is
+//     sqrt(reach^2 - drop^2), i.e. the palm is directly under the shoulder
+//     whenever that is reachable and at the arm's own minimum chord when it is
+//     not; (4) Hold must end when the elbow stops extending while the body is
+//     still down, otherwise one plant spends the whole fall (5775 of 6447 fallen
+//     frames in Hold, 2 strokes, no rise).
+//
 // Sign convention of this rig, checked against the recorded columns: jointAngle
 // negative = flexion = limb forward. A forward-swinging thigh has a NEGATIVE hip
 // jointAngle and a forward-swung arm has a NEGATIVE shoulder angle. A positive
@@ -69,6 +81,16 @@ public class ArmDrive : MonoBehaviour
     // measured optimum for BOTH being negative is cross/ips = 2 (t = 2).
     public float crossWeight = 1f;
     public float ipsWeight = 0.5f;
+    // The right shoulder's own cross weight, i.e. the ratio is per side
+    // (crossWeight/ipsWeight on the left, this one on the right). Measured: the
+    // rig is not mirror-symmetric where it counts -- in the accepted walk window
+    // corr(dL,hipR) = +0.36 against corr(dR,hipL) = +0.56, so with ONE ratio the
+    // two acceptance pairings cannot both go below -0.5 (measured p_arms50 with
+    // the shared ratio 2: shL-hipR -0.658, shR-hipL -0.418). Swept on the run's
+    // own recorded hips (_arms-ratiofit.py): the right pairing needs ratio 3 and
+    // the left is already at -0.83 there, while on a gait whose legs alternate
+    // both ratios keep every pairing and the arm-arm term negative.
+    public float crossWeightR = 1.5f;
     // +1: left shoulder against the right thigh (the acceptance pattern).
     // -1 flips to the same-side pairing, for a measurement.
     public float swingSign = 1f;
@@ -104,6 +126,19 @@ public class ArmDrive : MonoBehaviour
     // Measured p_arms21 with a fixed 0.30 m offset: the push left the slab at
     // 57 deg off vertical, the palm slipped and the shoulder rose 70 mm.
     public float plantSideMax = 0.35f;
+    // Extra chord over the arm's own shortest usable one that a latched point is
+    // kept at, metres. The plant is a CHORD question, not a posture question:
+    // measured p_arms50 (plantLateralShare 0), a lying shoulder 0.09-0.12 m over
+    // the slab latched the point straight under itself, 0.11 m away against an arm
+    // whose shortest usable chord is 0.218 m. The solve clamped, the hand settled
+    // 0.32 m away from its own palm, the elbow "extended" 60 deg into the air and
+    // the shoulder rose 0.03 m. NEGATIVE values are legal and mean "the chord may
+    // be shorter than the arm's own minimum", i.e. the palm goes straight under
+    // the shoulder and the solve presses it INTO the slab by the difference --
+    // that is the load a press wants. Measured 19.09 on the -165 elbow stop
+    // (p_arms70 = the old rig, press on, 0.03): a stroke opened the elbow 40-80
+    // deg and moved the shoulder pivot 0.005 m while shoving the body 2.08 m.
+    public float plantReachMargin = 0.03f;
     // How much of the latched point's lateral offset is filled by the chord rule.
     // 0 = the palm goes under the shoulder (the press posture); 1 = the former
     // lateral-fill rule, kept so the two can be compared on one build.
@@ -166,15 +201,34 @@ public class ArmDrive : MonoBehaviour
     public float pressReengageDeg = 12f;
     public float pressReengageCooldownSeconds = 0.4f;
     public float liftHoldSeconds = 0.30f;
+    // Height the Lift phase carries the hand at, metres above the latched palm.
+    // A lift that solves to the plant point itself is a horizontal slide ALONG
+    // the slab, which the ground blocks: measured p_arms52, the hand never left
+    // the spot under its own shoulder, the elbow folded onto its own stop (-150)
+    // and the strokes that followed delivered 1-3 deg of "extension" with the palm
+    // 0.20 m out of reach. Carrying the hand clear of the slab is the right motion
+    // but the wrong default HERE, and that is measured too: p_arms53/54 with 0.08
+    // m kept the palm on the slab 89-92 % of frames yet the chest ended flat on
+    // the ground (pivot -1.89, |tilt| 90, pelvis -1.860), against p_arms55/57 with
+    // 0 where the chest ended PROPPED (pivot -1.60, |tilt| 58, pelvis -1.73). The
+    // hand leaving the slab takes the only support the chest has. 0 = the hand
+    // stays planted through the lift.
+    public float liftClearanceMeters = 0f;
     // Shoulder bias added to the aim during the stroke, degrees.
     public float pressShoulderBias = 0f;
     // A stroke ends when the elbow is within this of the extension target.
     public float pressDoneMarginDeg = 6f;
     // Aim gain of the shoulder onto the latched palm (1 = point at it each step).
     public float pressAimGain = 1f;
-    public float pressTorqueScale = 3f;
+    public float pressTorqueScale = 4f;
     public float pressPGainScale = 2f;
     public float pressDriveSlewPerSecond = 60f;
+    // Same rate limit for the ELBOW target, deg/s. The shoulder had one from
+    // p_arms38 and the elbow did not, and that asymmetry is measurable: on
+    // p_arms60 the down-window elbow TARGET moved at 446-491 deg/s while the
+    // shoulder target moved at 58-60 (its own cap) -- the drive was asking the
+    // elbow for a step and the muscle spent the stroke catching up.
+    public float pressElbowSlewPerSecond = 90f;
     // Real contact for the press, plus a small band so a palm 1-2 mm above the
     // slab still counts as planted.
     public float handNearGroundSlop = 0.04f;
@@ -275,6 +329,7 @@ public class ArmDrive : MonoBehaviour
     // set yet: the aim slew limit needs the previous target to work from.
     private readonly float[] aimTargetPrev = new float[2];
     private readonly bool[] aimSlewSeen = new bool[2];
+    private readonly float[] elbowSlewPrev = new float[2];
     private readonly float[] strokeStartShoulder = new float[2];
     private readonly float[] strokeStartPelvisY = new float[2];
     private readonly float[] strokeStartShoulderY = new float[2];
@@ -324,6 +379,7 @@ public class ArmDrive : MonoBehaviour
     private const string ArgSign = "-armSign";
     private const string ArgIps = "-armIps";
     private const string ArgCross = "-armCross";
+    private const string ArgCrossR = "-armCrossR";
     private const string ArgWalkGain = "-armWalkGain";
     private const string ArgPush = "-armPush";
     private const string ArgPushScale = "-armPushScale";
@@ -331,6 +387,7 @@ public class ArmDrive : MonoBehaviour
     private const string ArgPlantSide = "-armPlantSide";
     private const string ArgPlantShare = "-armPlantShare";
     private const string ArgPlantStop = "-armPlantStop";
+    private const string ArgPlantReach = "-armPlantReach";
     private const string ArgPressDepth = "-armPressDepth";
     private const string ArgPressMode = "-armPressMode";
     private const string ArgDepthExtra = "-armDepthExtra";
@@ -342,6 +399,9 @@ public class ArmDrive : MonoBehaviour
     private const string ArgAimGain = "-armAimGain";
     private const string ArgPressShoulder = "-armPressShoulder";
     private const string ArgPressElbow = "-armPressElbow";
+    private const string ArgLiftHold = "-armLiftHold";
+    private const string ArgLiftClear = "-armLiftClear";
+    private const string ArgElbowSlew = "-armElbowSlew";
     public float armDebug;
     private const string ArgDebug = "-armDebug";
 
@@ -495,7 +555,6 @@ public class ArmDrive : MonoBehaviour
         // left arm's two terms cancel out and the drive emits nothing (p_arms8:
         // left shoulder target +-2 deg against the right one's +-20).
         float alpha = 1f - Mathf.Exp(-dt / Mathf.Max(0.05f, hipStatsTau));
-        float phaseScale = Mathf.Max(0.1f, ipsWeight + crossWeight);
         for (int i = 0; i < 2; i++)
         {
             if (hip[i] == null)
@@ -523,9 +582,13 @@ public class ArmDrive : MonoBehaviour
         // with a negative coefficient. The same-side term carries the opposite
         // sign and keeps the two arms in counter phase with each other in a
         // window where the legs move together (corr(hipL,hipR) near +1 otherwise
-        // forces both shoulders into one signal — the +0.99 of p_arms2).
-        float backL = dir * (ipsWeight * hipDev[SideL] - crossWeight * hipDev[SideR]) / phaseScale;
-        float backR = dir * (ipsWeight * hipDev[SideR] - crossWeight * hipDev[SideL]) / phaseScale;
+        // forces both shoulders into one signal — the +0.99 of p_arms2). The two
+        // ratios are per side (crossWeightR) because the two hips are not mirror
+        // signals in this rig, and each side is standardised by its own deviation.
+        float scaleL = Mathf.Max(0.1f, ipsWeight + crossWeight);
+        float scaleR = Mathf.Max(0.1f, ipsWeight + crossWeightR);
+        float backL = dir * (ipsWeight * hipDev[SideL] - crossWeight * hipDev[SideR]) / scaleL;
+        float backR = dir * (ipsWeight * hipDev[SideR] - crossWeightR * hipDev[SideL]) / scaleR;
         ArmPhaseL = Mathf.Clamp(backL, -1f, 1f) * walkBlend;
         ArmPhaseR = Mathf.Clamp(backR, -1f, 1f) * walkBlend;
 
@@ -701,9 +764,13 @@ public class ArmDrive : MonoBehaviour
 
                 if (phase[i] == PhaseLift)
                 {
-                    // Palm unloaded: the arm folds for the next stroke. Same solve
-                    // as the plant, but no stroke may start here.
-                    SolveArm(i, PlantTarget(i), out shoulderTarget, out elbowTarget);
+                    // Palm unloaded: the arm carries the hand CLEAR of the slab and
+                    // translates it to the next plant point (liftClearanceMeters),
+                    // then lowers it. Same solve as the plant, but no stroke may
+                    // start here.
+                    Vector2 liftTarget = PlantTarget(i);
+                    liftTarget.y += Mathf.Max(0f, liftClearanceMeters);
+                    SolveArm(i, liftTarget, out shoulderTarget, out elbowTarget);
                     if (phaseAge[i] >= liftHoldSeconds)
                     {
                         phase[i] = PhasePlant;
@@ -799,22 +866,35 @@ public class ArmDrive : MonoBehaviour
                         {
                             phase[i] = PhaseHold;
                             phaseAge[i] = 0f;
+                            // The stall that ENDED the stroke must not carry into
+                            // the hold, or the hold's own stall test would re-engage
+                            // on the first frame after the cooldown and the press
+                            // would churn (measured p_arms52 21.5-27 s: 0.5 s strokes
+                            // delivering 0-7 deg). The hold measures its own stall.
+                            strokeStall[i] = 0f;
                         }
                     }
                     else
                     {
                         // Hold: keep the loaded pose. Another stroke only after a
                         // dwell and only for a reason — the slab is gone, the body
-                        // sank and refolded the arm, or the elbow ran out of room
-                        // (straight = the press has given all it has). Measured
-                        // p_arms20: the old immediate re-engage on the elbow angle
-                        // alone ran 191 strokes of 0.18 s and 2.7 deg each;
-                        // p_arms27 without the out-of-room case sat in hold for
-                        // 33 s and pressed nothing.
+                        // sank and refolded the arm, the elbow ran out of room
+                        // (straight = the press has given all it has), or the elbow
+                        // has STOPPED extending while the body is still down. That
+                        // last one is the climbing loop, and it is measured: p_arms50
+                        // with the three former reasons only, the elbow stopped at
+                        // -73 deg, none of them ever fired, and the arm sat in Hold
+                        // for 5775 of the 6447 fallen frames (2 strokes in 32 s,
+                        // 0.03 m of shoulder rise). Measured p_arms20 the opposite
+                        // mistake: re-engaging on the elbow angle alone ran 191
+                        // strokes of 0.18 s and 2.7 deg each.
+                        TrackStroke(i, elbowAngle, dt);
                         bool sank = elbowAngle < strokeStartElbow[i] + pressReengageDeg;
                         bool outOfRoom = elbowAngle >= pressElbowTarget - pressDoneMarginDeg;
+                        bool stalled = strokeStall[i] >= pressStallSeconds;
                         if (phaseAge[i] >= pressReengageCooldownSeconds
-                            && (lostContactTime[i] >= pressLostContactSeconds || sank || outOfRoom))
+                            && (lostContactTime[i] >= pressLostContactSeconds || sank
+                                || outOfRoom || stalled))
                         {
                             ChoosePlantPoint(i);
                             phase[i] = PhaseLift;
@@ -846,6 +926,7 @@ public class ArmDrive : MonoBehaviour
                 {
                     aimSlewSeen[i] = true;
                     aimTargetPrev[i] = shoulder[i] != null ? shoulder[i].jointAngle : shoulderTarget;
+                    elbowSlewPrev[i] = elbow[i] != null ? elbow[i].jointAngle : elbowTarget;
                 }
                 if (pressDriveSlewPerSecond > 0f)
                 {
@@ -854,6 +935,16 @@ public class ArmDrive : MonoBehaviour
                         + Mathf.Clamp(shoulderTarget - aimTargetPrev[i], -maxStep, maxStep);
                 }
                 aimTargetPrev[i] = shoulderTarget;
+                // The elbow gets the same treatment it never had: the stroke is
+                // still free to open 90 deg/s, but the drive can no longer ask
+                // for a 450 deg/s step that the joint then chases.
+                if (pressElbowSlewPerSecond > 0f)
+                {
+                    float maxElbowStep = pressElbowSlewPerSecond * dt;
+                    elbowTarget = elbowSlewPrev[i]
+                        + Mathf.Clamp(elbowTarget - elbowSlewPrev[i], -maxElbowStep, maxElbowStep);
+                }
+                elbowSlewPrev[i] = elbowTarget;
             }
             else
             {
@@ -1022,23 +1113,35 @@ public class ArmDrive : MonoBehaviour
         float foldMin = (elbow[i] != null && elbow[i].useLimits ? elbow[i].limits.min : -150f);
         float interiorMin = Mathf.Clamp(180f + foldMin + plantStopMarginDeg, 10f, 170f);
         float chordStart = ChordForInterior(i, interiorMin);
-        // The latched point goes UNDER the shoulder (plantLateralShare 0). A palm
-        // that sits BESIDE the shoulder spends the elbow extension on a horizontal
+        // The latched point goes UNDER the shoulder (plantLateralShare 0) and, when
+        // the shoulder is too low over the slab for that to be reachable, at the
+        // shortest chord the arm can still hold torque at. A palm that sits BESIDE
+        // the shoulder for its own sake spends the elbow extension on a horizontal
         // shove instead of a lift: measured p_arms39 with the lateral-fill rule, a
         // shoulder 0.11 m over the slab latched a 0.29 m side point, the arm lay
         // flat (sh +45, el -103), and the whole body was shoved 2.0 m along the
-        // ground (pivot x 0.65 -> 2.67) with the pelvis never leaving -1.86. With
-        // the palm under the shoulder the chord is vertical, so the solve asks for
-        // the arm's minimum chord (0.218 m) while the floor is only 0.09-0.11 m
-        // away: the arm is loaded against the ground from the first plant frame
-        // and the shoulder is the only link that can give -- which is the press.
-        // plantLateralShare 1 restores the former fill rule for an A/B on one
-        // build; the offset is still capped by plantSideMax.
-        float lateralFill = drop < chordStart
-            ? Mathf.Sqrt(Mathf.Max(0f, chordStart * chordStart - drop * drop))
-            : 0f;
-        float offset = Mathf.Clamp(
-            Mathf.Lerp(0f, lateralFill, Mathf.Clamp01(plantLateralShare)), 0f, plantSideMax);
+        // ground (pivot x 0.65 -> 2.67) with the pelvis never leaving -1.86.
+        float reach = MinChord(i) + plantReachMargin;
+        float offset;
+        if (plantLateralShare > 0.5f)
+        {
+            // Former fill rule, kept for an A/B on one build.
+            float lateralFill = drop < chordStart
+                ? Mathf.Sqrt(Mathf.Max(0f, chordStart * chordStart - drop * drop))
+                : 0f;
+            offset = Mathf.Clamp(lateralFill, 0f, plantSideMax);
+        }
+        else
+        {
+            // sqrt(reach^2 - drop^2): 0 when the shoulder is high enough to take
+            // the point straight underneath (the press posture), and exactly the
+            // arm's minimum chord when it is not -- the nearest point on the slab
+            // the arm can push from at all.
+            float needed = drop < reach
+                ? Mathf.Sqrt(Mathf.Max(0f, reach * reach - drop * drop))
+                : 0f;
+            offset = Mathf.Clamp(needed, 0f, plantSideMax);
+        }
 
         // The fold the latched point asks for: the stroke starts here, so this is
         // the room the press has. Logged beside the delivered elbow angle, which
@@ -1062,7 +1165,14 @@ public class ArmDrive : MonoBehaviour
             PressPlantFoldR = plantFold;
         }
 
+        // Which side of the shoulder the palm lands on: the side the folded arm
+        // already lies. The rig's arms are not mirror-reachable (measured p_arms34:
+        // the left arm's world window is -18..232 deg, the right's 110..360), so a
+        // hardcoded side plants half the falls across the body. The fallback is the
+        // old fixed side when the hand is level with its own pivot.
         float side = i == SideL ? -1f : 1f;
+        if (hand[i] != null && Mathf.Abs(hand[i].position.x - pivot.x) > 0.05f)
+            side = hand[i].position.x >= pivot.x ? 1f : -1f;
         plantX[i] = pivot.x + side * offset;
         plantY[i] = palmY;
     }
@@ -1316,6 +1426,7 @@ public class ArmDrive : MonoBehaviour
         swingSign = ReadFloat(args, ArgSign, swingSign);
         ipsWeight = ReadFloat(args, ArgIps, ipsWeight);
         crossWeight = ReadFloat(args, ArgCross, crossWeight);
+        crossWeightR = ReadFloat(args, ArgCrossR, crossWeightR);
         walkPGainScale = ReadFloat(args, ArgWalkGain, walkPGainScale);
         pushEnabled = ReadFloat(args, ArgPush, pushEnabled);
         pressTorqueScale = ReadFloat(args, ArgPushScale, pressTorqueScale);
@@ -1323,6 +1434,7 @@ public class ArmDrive : MonoBehaviour
         plantSideMax = ReadFloat(args, ArgPlantSide, plantSideMax);
         plantLateralShare = ReadFloat(args, ArgPlantShare, plantLateralShare);
         plantStopMarginDeg = ReadFloat(args, ArgPlantStop, plantStopMarginDeg);
+        plantReachMargin = ReadFloat(args, ArgPlantReach, plantReachMargin);
         pressDepth = ReadFloat(args, ArgPressDepth, pressDepth);
         pressStrokeMode = ReadFloat(args, ArgPressMode, pressStrokeMode);
         pressDepthExtra = ReadFloat(args, ArgDepthExtra, pressDepthExtra);
@@ -1334,6 +1446,9 @@ public class ArmDrive : MonoBehaviour
         pressAimGain = ReadFloat(args, ArgAimGain, pressAimGain);
         pressShoulderBias = ReadFloat(args, ArgPressShoulder, pressShoulderBias);
         pressElbowTarget = ReadFloat(args, ArgPressElbow, pressElbowTarget);
+        liftHoldSeconds = ReadFloat(args, ArgLiftHold, liftHoldSeconds);
+        liftClearanceMeters = ReadFloat(args, ArgLiftClear, liftClearanceMeters);
+        pressElbowSlewPerSecond = ReadFloat(args, ArgElbowSlew, pressElbowSlewPerSecond);
         armDebug = ReadFloat(args, ArgDebug, armDebug);
     }
 

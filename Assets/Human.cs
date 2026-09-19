@@ -422,16 +422,27 @@ public class Human : MonoBehaviour
         HumanSegment lower = CreateSegment(sideName + "Lower", lowerArmSize, LOWER_ARM_MASS_FRACTION, lowerColor, lowerOrder);
         lower.transform.localPosition = new Vector3(shoulderX, shoulderRootY - upperArmSize.y - lowerArmSize.y * 0.5f, 0);
         lower.SetVisualOffset(visualShift);
-        // Elbow flexion to -150, not -140. A real elbow folds to about 150 deg,
-        // and the fall press needs the last 10: with the link chord at the -140
-        // stop the arm cannot fold short enough for the palm to come down under
-        // the shoulder, so the press was forced out sideways. Measured p_arms21:
-        // at -140 the plant point had to sit 0.30 m to the side and the push went
-        // 57 deg off vertical (the palm slid, the shoulder rose 70 mm).
+        // Elbow flexion to -165, not -150, and the reason is a chord, not anatomy.
+        // The press is a closed chain: the arm can only push the shoulder away
+        // from its own palm, along the chord, so the LIFT fraction of a stroke is
+        // drop/chord (drop = how far the shoulder sits above the slab). A lying
+        // shoulder sits 0.12 m over the slab, and the shortest chord this rig can
+        // fold to is what fixes the press. Measured p_arms21 at -140: plant 0.30 m
+        // aside, push 57 deg off vertical, shoulder rise 70 mm. Measured p_arms21
+        // -> p_arms22 at -150: plant 0.25 m aside. Measured 19.09 (p_arms70, this
+        // rig, press ON) against the same build with the press OFF (p_arms71):
+        // the stroke opens the elbow 40-80 deg and the shoulder pivot rises
+        // 0.005 m -- the run's whole shoulder band (-1.835..-1.709 m) is present
+        // with the arms doing NOTHING, while the body is shoved 2.08 m along the
+        // slab (comX 1.501 -> 3.582) against 0.09 m with the press off. The chord
+        // at the plant is 0.28 m long against a 0.12 m drop, i.e. a 25 deg push.
+        // At -165 the same rig folds to a 0.136 m chord, which puts the palm
+        // within 0.065 m of straight under the shoulder at that drop (a 61 deg
+        // push) and makes "the palm under the shoulder" reachable at all.
         lower.ConnectTo(upper,
             new Vector2(0, lowerArmSize.y * 0.5f),
             new Vector2(0, -upperArmSize.y * 0.5f),
-            -150f, 0f);
+            -165f, 0f);
         AddFriction(lower, elbowFriction);
         AddMuscles(lower, elbowMuscleTorque);
 
