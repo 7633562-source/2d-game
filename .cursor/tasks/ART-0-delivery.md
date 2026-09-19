@@ -224,14 +224,23 @@ residual is the detail difference between the two edge rows, not a ramp.
 - Blind 2x2 A/B, shipped bytes (`git show HEAD:Assets/Resources/Art/skin.png`) vs new, neutral
   labels: `art-0-tilewrap/skin_fixed_blind.png`, `fabric_fixed_blind.png`. Read: "the right sheet
   reads as one continuous surface; the left shows a clear brightness step."
-- The real frame, same camera and same moment: preview player rebuilt
-  (`Logs/art0-tilelevel-build.log`, exit 0) and captured with the ART-1 args
-  (`Logs/art0-tilelevel-gallery2.log`: `GALLERY-CAPTURE DONE label=gallery2 stills=7
-  panFrames=165 real=28 missing=13 dressed=5567`) into `Trials/Runs/gallery2_*.png`.
+- The real frame, same camera: preview player rebuilt (`Logs/art0-tilelevel-build.log`, exit 0) and
+  captured with the ART-1 args (`Logs/art0-tilelevel-gallery2.log`: `GALLERY-CAPTURE DONE
+  label=gallery2 stills=7 panFrames=165 real=28 missing=13 dressed=5567`) into
+  `Trials/Runs/gallery2_*.png`. All seven lenses framed identically (`orthoSize` equal to the
+  digit: 33.986 / 1.968 / 1.304 / 5.300 / 3.577 / 8.347), so the A/B is the same camera.
   `gallery1_materials.png` vs `gallery2_materials.png` differ in exactly two column blocks,
-  x 281-431 and x 485-634 - the skin and fabric swatches - and nowhere else in the 1920x1080 frame.
-  `art-0-tilewrap/frame_skin_blind.png` and `frame_fabric_blind.png` (3x, LEFT = shipped,
-  RIGHT = fixed): the eye names the RIGHT as evenly lit on both.
+  x 281-431 and x 485-634 - the skin and fabric swatches - 24119 px, and nowhere else in the
+  1920x1080 frame. `art-0-tilewrap/frame_skin_blind.png` and `frame_fabric_blind.png` (3x,
+  LEFT = shipped, RIGHT = fixed): the eye names the RIGHT as evenly lit on both.
+- Control: the same build captured twice (`gallery2b`, `-panSeconds 0`) is **pixel-identical**
+  (0 differing pixels in all seven frames), so the captures are deterministic and any difference
+  between gallery1 and gallery2 is the build's, not the capture's.
+- Frames that are NOT part of this A/B: `apple` (30403 px) and `level` (4350 px, x 1264-1415
+  y 605-668, i.e. the same skin/fabric swatches seen in the level lens) differ because gallery1 and
+  gallery2 are two player builds (`buildGuid` bdcea409 vs 481cb4c9) and the tree compiled in between
+  carries the plant lane's uncommitted rig work. The apple tree cannot be affected by this change at
+  all: it is dressed from `bark`, `leaf` and `Apple/fruit`, whose bytes are identical.
 - Physics: no `.cs` touched. `ArtLibrary.Skin` / `ArtLibrary.Fabric` have exactly one caller,
   `GalleryScene.cs:72` (the swatch row) plus the two editor checks, so neither PNG is on any
   simulation path. This cycle's `git status`: `Tools/gen-level-textures.py`, the two PNGs, this card.
