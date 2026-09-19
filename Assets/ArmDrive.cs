@@ -332,6 +332,26 @@ public class ArmDrive : MonoBehaviour
     public float PressHandContactFractionL { get; private set; }
     public float PressHandContactFractionR { get; private set; }
 
+    // ─── matched press window (instrumentation, arms cycle 8) ───
+    // Every press number above is scoped to a STROKE, so on the press-OFF
+    // control (`-armPush 0`) no stroke ever starts and all of them read 0.000 by
+    // construction: the control arm of the A/B has no value at all, and the
+    // claim "the push lifts the body" has never had a counterfactual to be read
+    // against. These are measured over a window that starts on the DOWN EDGE
+    // itself (the frame `down` turns true, which does not depend on pushEnabled)
+    // and is sampled every step while the body is down, so the same columns
+    // exist, over the same simulation seconds, with the press on and off on ONE
+    // build. Rise and travel in one window: the press's own record says the body
+    // was shoved 2.08 m along the slab, and a shove and a lift are told apart
+    // only when both are read in the same window.
+    public float PressWindowSeconds { get; private set; }
+    public float PressWindowShoulderRiseL { get; private set; }
+    public float PressWindowShoulderRiseR { get; private set; }
+    public float PressWindowPelvisRise { get; private set; }
+    public float PressWindowTravelX { get; private set; }
+    public float PressWindowContactFractionL { get; private set; }
+    public float PressWindowContactFractionR { get; private set; }
+
     private const int SideL = 0;
     private const int SideR = 1;
     private const int PhaseIdle = 0;
@@ -381,6 +401,16 @@ public class ArmDrive : MonoBehaviour
     private readonly float[] strokeShoulderExt = new float[2];
     private readonly float[] contactSamples = new float[2];
     private readonly float[] contactHits = new float[2];
+    // Matched press window state: latched on the down edge, monotone maxima.
+    private bool downPrev;
+    private bool winStarted;
+    private float winSeconds;
+    private float winSamples;
+    private readonly float[] winContactHits = new float[2];
+    private readonly float[] winPivotY = new float[2];
+    private readonly float[] winRise = new float[2];
+    private float winPelvisY;
+    private float winPelvisX;
     private readonly float[] outShoulder = new float[2];
     private readonly float[] outElbow = new float[2];
     private readonly float[] outSlew = new float[2];
@@ -548,6 +578,12 @@ public class ArmDrive : MonoBehaviour
         down = Mathf.Abs(tilt) >= fallTiltDeg || requestLive;
 
         SampleHandContact();
+        // The matched window is latched on the down edge and sampled while the
+        // body is down - before the press runs, so the frame the body goes down
+        // is in the window on both arms of the A/B.
+        if (down && !downPrev) BeginPressWindow();
+        downPrev = down;
+        if (down) SamplePressWindow(dt);
         UpdateWalkSwing(dt);
         UpdatePress(dt);
         WriteMuscles();
@@ -1465,6 +1501,67 @@ public class ArmDrive : MonoBehaviour
                 HandContactR = real;
                 HandNearGroundR = near;
             }
+        }
+    }
+
+    // ─── matched press window ───
+
+    // Starts on the frame the body goes down. `down` is |tilt| >= fallTiltDeg
+    // (or a live RequestArmPress), neither of which looks at pushEnabled, so the
+    // press-ON and press-OFF runs of one build open this window on the same
+    // event, at the same simulation time, and every number read from it is
+    // comparable across the two.
+    private void BeginPressWindow()
+    {
+        // One-shot: the FIRST down edge of the run opens the window. A second
+        // fall does not restart it, so every published number keeps its meaning
+        // as the largest excursion since the body first went down.
+        if (winStarted) return;
+        winStarted = true;
+        winSeconds = 0f;
+        winSamples = 0f;
+        winContactHits[SideL] = 0f;
+        winContactHits[SideR] = 0f;
+        winPivotY[SideL] = ShoulderPivotWorld(SideL).y;
+        winPivotY[SideR] = ShoulderPivotWorld(SideR).y;
+        winRise[SideL] = 0f;
+        winRise[SideR] = 0f;
+        winPelvisY = pelvisBody != null ? pelvisBody.position.y : 0f;
+        winPelvisX = pelvisBody != null ? pelvisBody.position.x : 0f;
+        PressWindowPelvisRise = 0f;
+        PressWindowTravelX = 0f;
+    }
+
+    // Monotone maxima inside the window: a body that gets up and falls again
+    // reports its largest excursion, which is what "gets up instead of lying"
+    // asks about.
+    private void SamplePressWindow(float dt)
+    {
+        if (!winStarted) BeginPressWindow();
+
+        winSeconds += dt;
+        winSamples += 1f;
+        for (int i = 0; i < 2; i++)
+        {
+            float rise = ShoulderPivotWorld(i).y - winPivotY[i];
+            if (rise > winRise[i]) winRise[i] = rise;
+            bool contact = i == SideL ? HandContactL : HandContactR;
+            if (contact) winContactHits[i] += 1f;
+        }
+        if (pelvisBody != null)
+        {
+            float pelvisRise = pelvisBody.position.y - winPelvisY;
+            if (pelvisRise > PressWindowPelvisRise) PressWindowPelvisRise = pelvisRise;
+            float travel = Mathf.Abs(pelvisBody.position.x - winPelvisX);
+            if (travel > PressWindowTravelX) PressWindowTravelX = travel;
+        }
+        PressWindowSeconds = winSeconds;
+        PressWindowShoulderRiseL = winRise[SideL];
+        PressWindowShoulderRiseR = winRise[SideR];
+        if (winSamples > 0f)
+        {
+            PressWindowContactFractionL = winContactHits[SideL] / winSamples;
+            PressWindowContactFractionR = winContactHits[SideR] / winSamples;
         }
     }
 

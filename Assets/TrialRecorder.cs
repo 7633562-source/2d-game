@@ -482,6 +482,23 @@ public class TrialRecorder
             // chasing a posture it cannot hold and the palm never lands.
             .Append("armAimBranchL").Append(';')
             .Append("armAimBranchR").Append(';')
+            // ─── armWindow* — APPEND-ONLY (arms cycle 8) ───
+            // The matched press window: latched on the frame the body goes DOWN
+            // and sampled while it is down, so these columns exist on the
+            // press-OFF control too. armWindowSeconds is the window's own length,
+            // armWindowRiseL/R the shoulder-pivot rise inside it, armWindowTravelX
+            // the body's own travel along the slab: a shove and a lift are told
+            // apart only when both are read in ONE window. The stroke-scoped
+            // armShoulderLiftL/R above is 0 on the control by construction (no
+            // stroke ever starts there), which is exactly why the press claim
+            // needed this pair.
+            .Append("armWindowSeconds").Append(';')
+            .Append("armWindowRiseL").Append(';')
+            .Append("armWindowRiseR").Append(';')
+            .Append("armWindowPelvisRise").Append(';')
+            .Append("armWindowTravelX").Append(';')
+            .Append("armWindowContactL").Append(';')
+            .Append("armWindowContactR").Append(';')
             // down = on the ground this frame, fell = latched at the first
             // down frame, so the frame the flag turns true is in the CSV.
             .Append("down").Append(';')
@@ -1131,6 +1148,15 @@ public class TrialRecorder
             .Append(F(armDrive != null ? armDrive.PressAimVoteR : 0f)).Append(';')
             .Append(F(armDrive != null ? armDrive.PressAimBranchL : 0f)).Append(';')
             .Append(F(armDrive != null ? armDrive.PressAimBranchR : 0f)).Append(';')
+            // Matched press window (arms cycle 8). Per frame, on every run, with
+            // the press on and off.
+            .Append(F(armDrive != null ? armDrive.PressWindowSeconds : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressWindowShoulderRiseL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressWindowShoulderRiseR : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressWindowPelvisRise : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressWindowTravelX : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressWindowContactFractionL : 0f)).Append(';')
+            .Append(F(armDrive != null ? armDrive.PressWindowContactFractionR : 0f)).Append(';')
             .Append(downNow ? "1" : "0").Append(';')
             .Append(physicalFallTime >= 0f ? "1" : "0").Append(';')
             // ─── WALK-1 command tap. Appended last, never reordered: the
@@ -1514,6 +1540,23 @@ public class TrialRecorder
         // if the legs hold, so on its own it cannot say whether the arms worked.
         AppendNum(json, "armPressShoulderLiftL", armDrive != null ? armDrive.PressShoulderLiftL : 0f);
         AppendNum(json, "armPressShoulderLiftR", armDrive != null ? armDrive.PressShoulderLiftR : 0f);
+        // ─── The MATCHED press window (arms cycle 8) ───
+        // The two numbers above are stroke scoped, and on the press-OFF control
+        // no stroke ever starts, so they read 0.000 there by construction and the
+        // control arm of any A/B is empty. These open on the DOWN EDGE instead
+        // and are sampled while the body is down, so the press-ON run and the
+        // press-OFF run of one build report the same columns over the same
+        // simulated seconds. armPressWindowRiseL/R is the shoulder-pivot rise,
+        // armPressWindowTravelX the body's travel along the slab, and the two
+        // fractions say how much of the window the palm was really on the
+        // ground. Read them as a PAIR with armPressShoulderLift*, never alone.
+        AppendNum(json, "armPressWindowSeconds", armDrive != null ? armDrive.PressWindowSeconds : 0f);
+        AppendNum(json, "armPressWindowRiseL", armDrive != null ? armDrive.PressWindowShoulderRiseL : 0f);
+        AppendNum(json, "armPressWindowRiseR", armDrive != null ? armDrive.PressWindowShoulderRiseR : 0f);
+        AppendNum(json, "armPressWindowPelvisRise", armDrive != null ? armDrive.PressWindowPelvisRise : 0f);
+        AppendNum(json, "armPressWindowTravelX", armDrive != null ? armDrive.PressWindowTravelX : 0f);
+        AppendNum(json, "armPressWindowContactL", armDrive != null ? armDrive.PressWindowContactFractionL : 0f);
+        AppendNum(json, "armPressWindowContactR", armDrive != null ? armDrive.PressWindowContactFractionR : 0f);
         AppendNum(json, "armPressPlantOffsetL", armDrive != null ? armDrive.PressPlantOffsetL : 0f);
         AppendNum(json, "armPressPlantOffsetR", armDrive != null ? armDrive.PressPlantOffsetR : 0f);
         // The elbow angle the plant asked for, degrees: the fold the stroke starts
