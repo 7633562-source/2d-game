@@ -41,6 +41,7 @@ public static class Art1Check
         CheckParts();
         CheckStubsWired();
         CheckMissingContract();
+        CheckFlameCore();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
         CheckSlabStretch(6f);
@@ -159,6 +160,50 @@ public static class Art1Check
             Color b = tex.GetPixel(12, 4);
             bool twoTone = Mathf.Abs(a.r - b.r) + Mathf.Abs(a.g - b.g) + Mathf.Abs(a.b - b.b) > 0.5f;
             Report("MISSING ART checker is two-tone (magenta/black)", twoTone);
+        }
+    }
+
+    // ART-0 gap 2 (19.09): the campfire flame core is painted art. The check follows
+    // the code path: "Campfire/core" is the key Campfire.CoreSprite() asks Albedo for,
+    // and the texture must be readable, because the sprite is built with Sprite.Create.
+    private static void CheckFlameCore()
+    {
+        const string key = "Campfire/core";
+        const float boxW = 0.16f;
+        const float boxH = 0.38f;
+
+        Texture2D tex = ArtLibrary.Albedo(key);
+        Report("flame core Art/" + key + ".png (Albedo, Campfire.CoreSprite)", tex != null);
+        if (tex == null)
+            return;
+
+        Debug.Log("ART-1A-CHECK INFO Art/" + key + " " + tex.width + "x" + tex.height
+            + " readable=" + tex.isReadable + " format=" + tex.format);
+        Report("flame core readable (Sprite.Create needs CPU pixels)", tex.isReadable);
+
+        // the core canvas must be in the core box's aspect, or the localScale stretch
+        // (the campfire's own sizing device) distorts the silhouette
+        float canvasAspect = tex.width / (float)tex.height;
+        float boxAspect = boxW / boxH;
+        Report("flame core canvas aspect " + canvasAspect.ToString("0.000") + " vs box "
+            + boxAspect.ToString("0.000"), Mathf.Abs(canvasAspect - boxAspect) < 0.02f);
+
+        // the tongues keep the soft disc on purpose - the painted ones lost the blind
+        // A/B (Tools/gen-fire-textures.py). No tongue canvas may creep into the build.
+        Report("flame tongues stay procedural (no Art/Campfire/tongue_*.png)",
+            ArtLibrary.Albedo("Campfire/tongue_a") == null);
+
+        // the exact call Campfire.CoreSprite() makes, on the imported texture: a readable
+        // PNG becomes a 1 m sprite here, which is what makes the swap safe on WebGL
+        Sprite core = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height),
+            new Vector2(0.5f, 0.5f), tex.width, 0, SpriteMeshType.FullRect);
+        Report("flame core Sprite.Create succeeds (the Campfire.CoreSprite path)", core != null);
+        if (core != null)
+        {
+            Debug.Log("ART-1A-CHECK INFO flame core sprite native="
+                + core.bounds.size.x.ToString("0.###") + "x" + core.bounds.size.y.ToString("0.###")
+                + "m (localScale takes this to the 0.16x0.38 m core box)");
+            Object.DestroyImmediate(core);
         }
     }
 
@@ -299,7 +344,9 @@ public static class Art1Check
         Row(sb, "ground cap", "Level/ground_cap.png");
         Row(sb, "sky", "Level/sky.png");
         Row(sb, "finish sign", "Level/sign_finish.png");
-        Row(sb, "campfire", "MISSING (procedural flame)");
+        Row(sb, "campfire flame core", "Art/Campfire/core.png");
+        sb.AppendLine("  campfire tongues -> procedural soft discs (intent: painted ones lost"
+            + " the blind A/B, not a gap)");
         Row(sb, "flower", "MISSING (procedural)");
         Row(sb, "UI icons", "MISSING");
         Debug.Log(sb.ToString());

@@ -72,7 +72,19 @@ public class Campfire : MonoBehaviour
 
     private static Texture2D SoftDiscTex;
     private static Sprite SoftDiscSprite;
+    private static Sprite PaintedCore;
+    private static bool PaintedCoreChecked;
     private static Material ParticleMat;
+
+    // ART-0 gap 2 (19.09): the flame core is painted art - Art/Campfire/core.png,
+    // "Campfire/core" for ArtLibrary.Albedo. The 24 pooled tongues deliberately
+    // keep the soft disc: at 15-30 px on screen a painted tongue reads as a
+    // spindle and the fire falls apart (three blind reviews, see
+    // Tools/gen-fire-textures.py and Trials/Runs/art-fire-2026-09-19/). The core
+    // is one sprite drawn in front, so a silhouette has room: it gives the fire
+    // the licked crown the disc cannot. A missing PNG keeps today's disc, and no
+    // collider, joint, mass or Body is involved either way - this file has none.
+    private const string CoreArtKey = "Campfire/core";
 
     private static readonly Color TongueWhite = new Color(1.00f, 0.97f, 0.88f, 1f);
     private static readonly Color TongueYellow = new Color(1.00f, 0.86f, 0.28f, 1f);
@@ -130,7 +142,8 @@ public class Campfire : MonoBehaviour
             new Vector3(0f, 0.36f, 0f),
             0f,
             new Color(1f, 0.94f, 0.72f, 1f),
-            FireOrder + 4);
+            FireOrder + 4,
+            CoreSprite());
         flameVisual = flame.transform;
 
         BuildTongues();
@@ -661,7 +674,9 @@ public class Campfire : MonoBehaviour
     }
 
     // Soft disc, 1 m × 1 m sprite. Size is localScale, not transform of a collider.
-    private SpriteRenderer MakeDisc(string name, Vector2 size, Vector3 local, float tilt, Color color, int sortingOrder)
+    // `sprite` swaps the picture (the painted flame core); it never changes the size,
+    // the colour or the sorting order.
+    private SpriteRenderer MakeDisc(string name, Vector2 size, Vector3 local, float tilt, Color color, int sortingOrder, Sprite sprite = null)
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(transform, false);
@@ -670,12 +685,30 @@ public class Campfire : MonoBehaviour
         go.transform.localScale = new Vector3(size.x, size.y, 1f);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = SoftSprite();
+        sr.sprite = sprite != null ? sprite : SoftSprite();
         sr.color = color;
         sr.sortingOrder = sortingOrder;
         sr.drawMode = SpriteDrawMode.Simple;
         SpriteLighting.ApplyUnlit(sr);
         return sr;
+    }
+
+    // The painted flame core, or null when the art is not in the build: 1 m wide
+    // sprite like SoftSprite, so localScale stays the only sizing device.
+    private static Sprite CoreSprite()
+    {
+        if (PaintedCoreChecked)
+            return PaintedCore;
+
+        PaintedCoreChecked = true;
+        Texture2D tex = ArtLibrary.Albedo(CoreArtKey);
+        if (tex == null)
+            return null;
+
+        PaintedCore = Sprite.Create(tex, new Rect(0f, 0f, tex.width, tex.height),
+            new Vector2(0.5f, 0.5f), tex.width, 0, SpriteMeshType.FullRect);
+        PaintedCore.name = "CampfireCore";
+        return PaintedCore;
     }
 
     private static Sprite SoftSprite()

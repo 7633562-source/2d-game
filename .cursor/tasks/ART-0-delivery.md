@@ -258,3 +258,31 @@ grain by the numbers, but `leaf` still shows a sliced vein at the wrap by eye, s
 there - if Yury wants it - is a cross-fade band of a few tens of px over the wrap, which is a
 deliberate 2-3 % detail trade rather than this constant-per-row correction.
 
+## Fourth pass 19.09 - gap 2: the campfire flame core is painted
+
+Gap list item 2 ("Campfire (flame/embers) - currently procedural") is answered. New art:
+`Assets/Resources/Art/Campfire/core.png` (81x192, RGBA32, readable, drawn by
+`Tools/gen-fire-textures.py`) plus `Campfire.CoreSprite()` -> `ArtLibrary.Albedo("Campfire/core")` ->
+`Sprite.Create`, handed to `MakeDisc` for the `FlameCore` renderer only (a missing PNG keeps today's
+soft disc; the campfire has no collider and no Rigidbody2D, so no physics file is involved).
+
+The three pooled-tongue canvases were painted, judged and **rejected**: three blind reviews of the same
+moment and camera (`Trials/Runs/art-fire-2026-09-19/flame_variants_300pxm.png`) ranked the all-painted
+fire last every time - 24 painted tongues read as separate spindles ("comb teeth", "glass fibres"),
+while the soft discs merge into one mass. The core, one sprite drawn in front, is the case that wins:
+the same review picked the core-painted fire as the best of four ("чёткое ядро с выразительной
+верхушкой"). The tongues therefore keep `SoftTexture()` on purpose, and the generator prints them as
+`rejected, evidence only, NOT written`.
+
+Verified: `grok-compile-gate.sh` exit 0; `art1-gate.sh` -> `ART-1A-CHECK end failures=0`, exit 0, with
+five new flame assertions (Albedo resolves, `81x192 readable=True format=RGBA32`, aspect 0,422 vs box
+0,421, no tongue PNG, `Sprite.Create` succeeds -> `native=1x2,37m`). Inventory moved **66 real / 3
+MISSING -> 67 / 2**; still missing: `flower` (plant lane) and `UI icons` (out of scope).
+
+Not done on purpose: `GalleryScene.BuildMissingRow` still draws the campfire gap tile (the level
+lane's file) - after this change that row is stale, and the fix is one conditional
+(`Albedo("Campfire/core") != null` -> `Campfire.SpawnAt(x, groundTopY)` and record it as real). No
+Unity frame of the campfire exists yet either: the gallery has no campfire object and the fire lab is
+not in `GalleryPreviewBuild`'s scene list; the pictures in `Trials/Runs/art-0-flame-report.md` are the
+mirrored render (same moment, same camera, same tint ramp). Full numbers: that report.
+
