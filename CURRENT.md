@@ -630,3 +630,39 @@ OPEN for the walk owner: what changed between the 14:10 player ddb38bf88d, trave
 14:18 and 14:25 edits to BalanceControllerWalk before the next cycle credits them. Every arm above
 is a single trajectory: the 0.37-to-0 pair is reproducible but must not be turned into a verdict -
 sweep 0 / 0.1 / 0.2 / 0.37.
+
+
+## Dog cycle 2 - the cosmetic layer is out of the physical file (dog worker, 19.09 ~16:25)
+
+One change: the expression / idle-flavour family moved out of `DogStanceController.cs` into
+`Assets/DogCosmetics.cs` as a second **part** of the same class (pure move, verified line by line).
+`DogStanceController.cs` 10 279 -> **5 792 lines** (md5 `40cfc2ac` -> `1363db98`), new
+`DogCosmetics.cs` 4 502 lines = 15-line header + **4 486 moved lines, 107 methods** (old lines
+2343-6828: `FacingSign`/`SetFacing`, turn-hop notes, the `Walk*` expression family, the whole
+`Sit*` library, `WalkHunt*`/`LeapHunt*`). Head/middle/tail of the old file are byte-identical to the
+two new files; only `partial` and the header comment were added. No gain, threshold, scenario flag,
+control law or amplitude touched.
+
+Acceptance MEASURED (build fp `d4055c0109978b8c67c01ef1eb5d4d07f32dd0d166af656c37d14cc4b5b59ec4`,
+guid `c49c83d3b6d64723aba4a1c018a3d761`, `Assembly-CSharp.dll` md5 `38e628747b2a82f126ce8162ef52ab56`,
+player newer than every source, `TRIAL_BUILD_OK`): `bash Tools/dog-det-run.sh dog_c2 5 25` ->
+**5/5 md5 `cf35e1dda4c69d6c433d825575bcf943`**, `cmp` clean against the accepted
+`dog_art1_md51..5` of the 15:22 build `4681f70b`; 102 of 106 JSON keys identical (the four that move
+are `label`, `sourceFingerprint`, `wallSeconds`, `wallPerSim`); `dog-cycle1-check.py dog_c21 dog_c25`
+-> RESULT OK, 39 columns, non-finite 0, `cycle1NanCount 0`; the `-visual` run `dog_c2_vis1` (no
+`-nographics`) is the same md5 and **all 126 frames are byte-identical** to the accepted
+`dog_art1_vis7` frames. Video `Trials/Runs/dog_c2_vis1.mp4`.
+
+VOID bar, measured: the review's "`DogStanceController.cs` < 1500 lines" is unreachable by moving
+cosmetics - its line map ("2305 onward cosmetic only") is wrong below the block: the cosmetic region
+is 2343-6828, and 6829-10279 (**3 451 lines**) is the walk/get-up/leap machinery (`Walk`,
+`DriveWalk` 203, `WalkLimbTargets` 143, `AdvanceWalkClock` 106, `DriveLeap` 107, `LogWalkDiag` 100,
+`ApplyWalkPropulsion` 73, paw/IK helpers), with 2 342 lines above the block (475-field knob surface +
+Bind/Sense/Drive/DriveGetUp). Reaching 1500 would need ~4 300 further lines, i.e. the walk
+controller itself.
+
+NOT done (its own cycle): the review's structure - `DogCosmetics` as a separate MonoBehaviour with a
+read-only state struct. Today the split is a FILE boundary, so the compiler still cannot stop a
+cosmetic routine from writing a physical field. Surfaces for that step: the moved block touches
+183 controller members and 19 controller methods are called from the physical side (`FacingSign` x16
++ 18 Sit*/Walk*/LeapHunt* tail/head routines). Report: `Trials/Runs/dog-cycle2-cosmetic-split.md`.
