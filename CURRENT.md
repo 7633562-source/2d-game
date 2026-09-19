@@ -695,7 +695,8 @@ projection's 1.965 s (**+0.540 s lead**, 3.105 s before the controller's own fal
 -0.1481 m. Warning, measured: the margin is below -0.05 m in 53.56 % of walk frames and the bare
 rule fires 107/153 times, so cycle 4's stance-phase gate is the binding constraint.
 Report: `Trials/Runs/dog-cycle3-capture-sensor.md`. Stand `Tools/dog-stand-cycle3.sh`, checker
-`hermes/scripts/dog-cycle3-check.py`.
+`hermes/scripts/dog-cycle3-check.py`, visual stand `Tools/dog-cycle3-visual.sh` (`-visual` without
+`-nographics`, 126 frames, all byte-identical to the accepted `shot_dog_c2_vis1_*`).
 NOTE: `Tools/impact-build.sh` writes `build-info.json` only - `Build/Headless/build-manifest.json`
 must be refreshed afterwards (`hermes/scripts/dog-write-manifest.sh`) or the player aborts with
 `TRIAL_PROVENANCE_FAILED`.
