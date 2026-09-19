@@ -153,6 +153,10 @@ public abstract class TreeBase : PlantBase, IWoodSensorSource
         MarkWoodLayer();
         Physics2D.SyncTransforms();
         BindGravityHold();
+        // One change, T2 (TREES plan): the hinge stop and the angle it is
+        // compared against must live in the same frame. Runs after the bind
+        // measurement, before any step can move the wood.
+        CentreJointStopsOnBind();
         CollectActuators();
         // Hash the rig at the grow pose, before any step can move it.
         RigHash = ComputeRigHash();
@@ -410,6 +414,43 @@ public abstract class TreeBase : PlantBase, IWoodSensorSource
             spring.holdTorque = -moment;
             spring.maxTorque = Mathf.Max(spring.maxTorque, Mathf.Abs(moment) * 0.5f + 16f);
             spring.restAngle = n.segment.joint.jointAngle;
+        }
+    }
+
+    // One change, T2 (TREES plan): put the hinge stop and the angle it is
+    // compared against in the same frame. A HingeJoint2D stop is measured in the
+    // PARENT's frame, not from the grow pose — an apple limb grown at 26 deg to
+    // its parent reports 26 deg at bind (measured 18.09 on the oak: the comment
+    // and the fix live at PlantTree.cs:2658-2671). A symmetric +-limbBendLimit
+    // stop therefore sat outside the pose: the solver folded the limb onto the
+    // stop at the first step, the spring kept pushing toward its restAngle (the
+    // bind angle, set above) and the two fought for the whole run — measured on
+    // the apple, T1 traces (build b242a8d): 4 of 15 joints born behind their own
+    // stop (J01 -7.337 vs +-5, J05 -14.246 vs +-12, J08 25.989 vs +-5, J12 18.620
+    // vs +-12), springSatFraction 0.06620833 identical with wind 0.12 and with
+    // wind 0. Centre each ordered stop on the joint's own bind angle: the same
+    // quantity the spring holds (restAngle) and the same one the T1 trace reports
+    // as the `angle` column (TreeJointTrace.cs:235 reads joint.jointAngle, :234
+    // the same joint's limits).
+    // The width of the stop is unchanged (per side, per order): no stiffness
+    // change, no cap change, no new knob.
+    private void CentreJointStopsOnBind()
+    {
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            Node n = nodes[i];
+            if (!n.dynamic || n.segment == null || n.segment.joint == null) continue;
+            HingeJoint2D joint = n.segment.joint;
+            float bend = BendLimitForOrder(OrderOfDepth(n.depth));
+            float bindDeg = joint.jointAngle;
+            // Unity ignores a limits write while useLimits is already true on some
+            // 2D builds (HumanSegment.ConnectTo, :188-201): same dance here.
+            joint.useLimits = false;
+            JointAngleLimits2D lim = joint.limits;
+            lim.min = bindDeg - bend;
+            lim.max = bindDeg + bend;
+            joint.limits = lim;
+            joint.useLimits = true;
         }
     }
 
