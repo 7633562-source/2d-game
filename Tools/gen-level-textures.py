@@ -765,6 +765,42 @@ LEAF_TONES = ((44, 98, 3), (61, 128, 4), (78, 159, 5), (94, 188, 6))
 LEAF_EDGE = (35, 76, 2)
 LEAF_VEIN = (116, 214, 9)
 
+# 28th pass (20.09). The crown does not repeat the leaves - it repeats the LAYOUT. The first
+# version scattered the 44 leaves with two independent uniform draws, which is a Poisson
+# process: it makes clumps and, by the same coin, voids, and both come round with the tile.
+# Measured on the shipped bytes (Tools/art0-leaf-cover-probe.py, luminance blurred over a
+# window, so the number is the tile's large-scale structure and not its leaf detail):
+# at a 12.5 cm window the field's std was 19.2 % of its mean with a 99.5 level band, and the
+# darkest 12.5 cm window stood at 50.5 against a 111.6 mean - i.e. a void about a quarter of
+# the tile, the thing the eye locks onto when the tile comes round. Two independent reads of
+# the 1 x 1 m swatch named the same two dark holes (upper left, lower left) and called the
+# repeat "obvious" (Trials/Runs/art-0-leaf-cover-28th.md).
+#
+# The fix is the PLACEMENT, not the leaves: one leaf per cell of a square lattice over the
+# tile, jittered inside its cell. Every cell is filled exactly once, so no void can be larger
+# than a cell and no clump can hold more than one leaf more than its neighbour - and because
+# the painter composites toroidally, a lattice is as seamless as the random scatter was.
+#
+# Decided by a blind pairwise read, not by the metric: a 1 x 1 m swatch (the material row's
+# own dress period, i.e. a 2 x 2 repeat - the hardest case) of the shipped tile against the
+# lattice tile, 2 reads with the sides swapped, 2/2 for the lattice: "the other one's dark
+# gaps form rhythmic holes in every quadrant" / "deep background showing between the leaf
+# groups, rhythmic dark spots". Neither read named a grid in the lattice tile. The metric
+# alone would have refused it - the lattice raises the autocorrelation at the cell period
+# (0.33 -> 0.46) while the reads saw an even crown, so the metric is recorded, not obeyed.
+# Sweep and panels: Tools/art0-leaf-placement-sweep.py, Tools/art0-leaf-tile-ab.py.
+LEAF_CELLS = 7                  # 7 x 7 = 49 cells; the tile is 0.5 m, so a cell is 7.1 cm
+LEAF_COUNT = LEAF_CELLS * LEAF_CELLS
+LEAF_FILLERS = 16               # the small dark leaves at the back of the sort
+LEAF_JITTER = 0.0               # half-width of the in-cell jitter, as a fraction of the cell:
+# 0.0 = anywhere in the cell (the classic jittered grid). Measured on the shipped bytes, a
+# small jitter (0.20..0.80) also correlated neighbour cells at the CELL period (the
+# autocorrelation at a 64 px shift 0.33 -> 0.58), i.e. it traded the void for a visible grid -
+# the same tile-reading defect in a finer size. 64 cells (8 x 8) was measured too and rejected:
+# it fixes the voids as well but lifts the tile's own mean from (66.8, 135.8, 4.5) to
+# (74.5, 151.4, 4.9), i.e. it repaints the crown's colour, which is not this pass' change.
+# At 49 cells the mean lands on (66.6, 136.8, 4.5) - the anchor the crowns were tuned to.
+
 
 def _smooth01(t):
     return t * t * (3.0 - 2.0 * t)
@@ -845,7 +881,7 @@ def _over(field, sprite, x, y):
     field[y0:y1, x0:x1, 3] = 255.0
 
 
-def paint_leaf(w=512, h=512, seed=20260919, count=44, fill=14):
+def paint_leaf(w=512, h=512, seed=20260919, count=LEAF_COUNT, fill=LEAF_FILLERS, jitter=LEAF_JITTER):
     """A foliage field, 2x supersampled and painted TOROIDALLY.
 
     Every leaf is composited at nine positions (its own plus the eight shifted copies of the
@@ -875,6 +911,10 @@ def paint_leaf(w=512, h=512, seed=20260919, count=44, fill=14):
     angles = [360.0 * k / float(count) + rng.uniform(-14.0, 14.0) for k in range(count)]
     rng.shuffle(angles)
 
+    # 28th pass: one leaf per lattice cell (see LEAF_CELLS above), jittered inside its cell.
+    cells = int(math.ceil(math.sqrt(count)))
+    cell_w, cell_h = w / float(cells), h / float(cells)
+
     leaves = []
     for i in range(count):
         # Every third leaf is a smaller, darker one in the back: a field of one size reads
@@ -890,8 +930,12 @@ def paint_leaf(w=512, h=512, seed=20260919, count=44, fill=14):
             "length": length,
             "ratio": rng.uniform(0.42, 0.70),
             "angle": angles[i],
-            "cx": rng.uniform(0.0, w),
-            "cy": rng.uniform(0.0, h),
+            # The cell, not the tile: the leaf stays inside its own cell, so every cell holds
+            # exactly one leaf and the jitter (0.20..0.80 of the cell, not 0..1) cannot push
+            # two neighbours into each other. A leaf that crosses the tile edge is still
+            # composited through all nine copies, so the lattice wraps like everything else.
+            "cx": ((i % cells) + rng.uniform(jitter, 1.0 - jitter)) * cell_w,
+            "cy": ((i // cells) + rng.uniform(jitter, 1.0 - jitter)) * cell_h,
             # Tone jitter per leaf: a field of four exactly repeated greens reads printed.
             "tone": rng.uniform(-0.13, 0.13),
             # The light comes from the upper left, but not from one single point: a shadow

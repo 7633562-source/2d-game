@@ -99,7 +99,12 @@ downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the ar
    is a PALM view on a side-view body (a procedural side-view redraw was attempted twice and
    rejected by the read - recorded in the generator), and the other nine parts' ink anchoring
    (torso 0.136 of 0.240 m in x, the limbs centred with 0.047-0.069 m of empty canvas at each end of
-   the bone) is a rig-wide decision, not a hand fix.
+   the bone) is a rig-wide decision, not a hand fix. **Measured and REFUSED in the 28th pass**
+   (`Trials/Runs/art-0-leaf-cover-28th-report.md` §5.2): the four limb inks are already at their
+   maximum size (96-99 % of the box width, the bone's length unreachable without distortion), so the
+   only freedom is which joint carries the slack - proximal anchoring doubles the wrist hole
+   (0.069 -> 0.137 m) and worsens the ankle, i.e. it moves the same hole. Do not re-open it without a
+   new instrument: the present centred placement is the minimax one.
 
 ## Objects that must appear in the gallery scene
 Human (all variants we can pose), dog, crow, chicken, hedgehog, oak/tree kinds, apple tree (+fruit),
