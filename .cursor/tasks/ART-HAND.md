@@ -43,3 +43,30 @@ folded walk at ~25 s — physical length stays 0.32.
 stretched onto the 0.06 × 0.32 collider rectangle; a short palm is
 empty pixels in that canvas, not a smaller `sprite.size`. Do not
 close this card until the dispatcher drops the 0.19 requirement.
+
+## Picture half — delivered 20.09 (ART-0 27th pass)
+
+The collider is unchanged (`Human.handSize` 0.06 × 0.16), and the canvas still maps onto it
+one-to-one (`.meta` ppu 3200, `Sliced`). What was wrong was the PICTURE, measured with
+`python Tools/art0-part-ink-probe.py` on the shipped bytes: the hand filled **33 %** of its own box
+(the only part of the body under half) and its ink was centred, so the wrist cut sat **0.052 m**
+below the bone's proximal edge - in the rig the hand hung detached from the forearm that ends at
+the wrist joint.
+
+`Tools/gen-human-hand-texture.py` rewrites that one canvas from the hand's own accepted pixels:
+`31,165 119x171 px (0.037 × 0.053 m), wrist margin 0.052 m, 31 832 B` became
+`6,0 180x261 px (0.056 × 0.082 m), wrist margin 0.000 m, 63 865 B` - 94 % of the box width, which is
+the proportional maximum for an art aspect of 0.70 in a box of 0.375. Nothing was repainted: the
+accepted painted hand is scaled and anchored at the wrist.
+
+Frames `art0hand27` against `art0hip29` (same lens, `ortho 1,97`; the human still moved in ONE
+cluster, the hand's box x 1067-1082 y 661-689, every other still identical or inside its own
+measured noise), three blind pairwise reads (seed 283 with the sides swapped) all correct. Report
+`Trials/Runs/art-0-hand-27th-report.md`.
+
+Two things this does NOT close: the PHYSICS length (the card's 0.19 against the code's 0.16 - the
+dispatcher's call, untouched here), and the hand's orientation - the shipped art is a PALM view on a
+side-view body. A procedural side-view hand was drawn twice this pass and read to a stop both times
+("кухонная лопатка / варежка", then "гребень / грабли: все четыре пальца в одной плоскости"); the
+record is in the generator's docstring so no later pass repeats it.
+

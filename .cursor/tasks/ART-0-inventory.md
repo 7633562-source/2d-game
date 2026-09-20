@@ -84,6 +84,22 @@ downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the ar
 4. Any Human clothing layer if the game shows one (skin/fabric/denim exist as materials but no cut
    garment sprites). OPEN.
 5. UI/HUD icons - out of scope for this scene unless Yury asks. OPEN.
+6. The human's `hand` canvas - DELIVERED (`Trials/Runs/art-0-hand-27th-report.md`): measured with
+   `Tools/art0-part-ink-probe.py` (shipped bytes only), the hand filled **33 %** of its own
+   `0.06 x 0.16 m` bone - the only part of the body under half - and its ink was centred, so the
+   wrist cut sat **0.052 m below** the bone's proximal edge. `Tools/gen-human-hand-texture.py` now
+   rewrites that one canvas from the hand's own accepted pixels (`LegacyArt/Human/hand.png`):
+   `31,165 119x171 px / 0.037 x 0.053 m / wrist margin 0.052 m / 31 832 B` ->
+   `6,0 180x261 px / 0.056 x 0.082 m / wrist margin 0.000 m / 63 865 B` (94 % of the box width is
+   the proportional maximum: the art's aspect 0.70 against the box' 0.375). Frames `art0hand27` vs
+   `art0hip29` (human still: 369 px in ONE cluster, the hand's box x 1067-1082 y 661-689; every
+   other still identical or inside its own measured noise), 3 blind pairwise reads (one with the
+   sides swapped) all correct. Still OPEN in this family: the assembled rig with real art has never
+   been drawn (the `human rig` row is ART-1b, the walk stream's `HumanSegment`), the hand art itself
+   is a PALM view on a side-view body (a procedural side-view redraw was attempted twice and
+   rejected by the read - recorded in the generator), and the other nine parts' ink anchoring
+   (torso 0.136 of 0.240 m in x, the limbs centred with 0.047-0.069 m of empty canvas at each end of
+   the bone) is a rig-wide decision, not a hand fix.
 
 ## Objects that must appear in the gallery scene
 Human (all variants we can pose), dog, crow, chicken, hedgehog, oak/tree kinds, apple tree (+fruit),
