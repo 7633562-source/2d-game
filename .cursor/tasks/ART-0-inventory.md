@@ -47,7 +47,12 @@ The material PNGs are 2-3 MB each (bark 2871 KB, grass 2920 KB, dirt 2659 KB, sk
 of them into `Resources/` unmodified would bloat the build for no visual gain. Tiled surfaces should be
 downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the artist stream owns that.
 
-## Gap list (what has no art at all) - status at the 21st pass, 20.09
+## Gap list (what has no art at all) - status at the 22nd pass, 20.09
+0. Materials on the small parts - CLOSED (`Trials/Runs/art-0-period-22nd-report.md`): the 21st pass'
+   open item 1. `ArtParts.Dress` now draws a MATERIAL (bark, leaf) `Tiled` at its authored 0.5 m period
+   whatever the part's size, so a limb or a leaf pad shows a CROP of the canvas at the canvas' own
+   scale instead of the whole 0.5 m sample squeezed into the part (5.00x on a 0.10 m limb, 4.17x on a
+   0.12 m leaf pad). Painted parts (human, flower, campfire logs) keep `Sliced`.
 1. `ground_fill`, `ground_cap`, `sky`, `sign_finish` - DELIVERED (`Trials/Runs/art-0-fill-18th-report.md`,
    `art-0-sign-report.md`, `art-0-cap-*.md`).
 2. Campfire (flame/embers) - the three logs DELIVERED (`art-0-logs-19th-report.md`), the flame core

@@ -132,17 +132,43 @@ def main():
           (TREE_ORTHO, 1.0 / m_per_px, LIMB[0] / m_per_px, LIMB[1] / m_per_px))
     onw = max(2, int(round(LIMB[0] / m_per_px)))
     onh = max(2, int(round(LIMB[1] / m_per_px)))
-    sliced = img.resize((onw, onh), Image.LANCZOS)
-    tiled = img.crop((0, CANVAS - bh, bw, CANVAS)).resize((onw, onh), Image.LANCZOS)
     zoom = 10
-    sheet = Image.new("RGB", (onw * zoom * 2 + 30, onh * zoom + 40), (110, 110, 110))
-    for i, p in enumerate((sliced, tiled)):
-        sheet.paste(p.resize((onw * zoom, onh * zoom), Image.NEAREST),
-                    (i * (onw * zoom + 30), 30))
-    path = os.path.join(OUT, "limb_sliced_vs_tiled_10x.png")
-    sheet.save(path)
-    print("wrote %s (LEFT panel = Sliced, RIGHT panel = Tiled; %d x %d px each at %dx)" %
-          (path, onw, onh, zoom))
+    for key in ("bark", "leaf"):
+        canvas = Image.open(os.path.join(ART, key + ".png")).convert("RGB")
+        sliced = canvas.resize((onw, onh), Image.LANCZOS)
+        tiled = canvas.crop((0, CANVAS - bh, bw, CANVAS)).resize((onw, onh), Image.LANCZOS)
+        sheet = Image.new("RGB", (onw * zoom * 2 + 30, onh * zoom + 40), (110, 110, 110))
+        for i, p in enumerate((sliced, tiled)):
+            sheet.paste(p.resize((onw * zoom, onh * zoom), Image.NEAREST),
+                        (i * (onw * zoom + 30), 30))
+        path = os.path.join(OUT, "limb_%s_sliced_vs_tiled_10x.png" % key)
+        sheet.save(path)
+        print("wrote %s (LEFT panel = Sliced, RIGHT panel = Tiled; %d x %d px each at %dx)" %
+              (path, onw, onh, zoom))
+
+    # What the change is worth ON SCREEN, per part size: both renderings of the same part
+    # as the gallery lens would show them. If the mean |difference| is a couple of levels
+    # the frames cannot carry the change and the report has to say so.
+    print("\n=== the pair as the gallery lens shows it (both panels the same part, same box)")
+    print("%-6s %-14s %8s %8s %9s %9s %9s" %
+          ("key", "box m", "screen", "|A-B|", "grainA", "grainB", "bands"))
+    boxes = [(0.10, 0.30), (0.12, 0.08), (0.20, 0.15), (0.30, 0.60), (0.05, 0.05)]
+    for key in ("bark", "leaf"):
+        canvas = Image.open(os.path.join(ART, key + ".png")).convert("RGB")
+        cg = lum(canvas)
+        for bw_m, bh_m in boxes:
+            bw_px = int(round(bw_m * px_per_m))
+            bh_px = int(round(bh_m * px_per_m))
+            ow = max(2, int(round(bw_m / m_per_px)))
+            oh = max(2, int(round(bh_m / m_per_px)))
+            a = lum(canvas.resize((ow, oh), Image.LANCZOS))
+            b = lum(canvas.crop((0, CANVAS - bh_px, bw_px, CANVAS)).resize((ow, oh), Image.LANCZOS))
+            diff = np.abs(a - b).mean()
+            grain_a = np.abs(np.diff(a, axis=1)).mean()
+            grain_b = np.abs(np.diff(b, axis=1)).mean()
+            print("%-6s %-14s %8s %8.2f %9.2f %9.2f %9s" %
+                  (key, "%.2fx%.2f" % (bw_m, bh_m), "%dx%d" % (ow, oh), diff, grain_a, grain_b,
+                   "yes" if diff >= 3.0 else "sub-visual"))
 
 
 if __name__ == "__main__":

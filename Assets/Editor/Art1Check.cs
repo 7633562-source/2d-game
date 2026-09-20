@@ -581,7 +581,10 @@ public static class Art1Check
         int dressed = ArtParts.DressAll(go.transform, true, ArtLibrary.Bark, ArtLibrary.Leaf, "");
 
         int barkParts = 0, leafParts = 0, notTiled = 0, movedScale = 0, empty = 0;
+        int tiny = 0, small = 0, upper = 0, mid = 0, big = 0;
         float smallestBox = float.MaxValue, smallestCropPx = float.MaxValue;
+        string[] smallestName = { "-", "-", "-" };
+        float[] smallestOf = { float.MaxValue, float.MaxValue, float.MaxValue };
         for (int i = 0; i < srs.Length; i++)
         {
             SpriteRenderer sr = srs[i];
@@ -607,19 +610,52 @@ public static class Art1Check
             if (sr.transform.localScale != partScale[i])
                 movedScale++;
             float minSide = Mathf.Min(box.x, box.y);
+            // The bands say how much of the rig the rule can even reach: a part under 0.02 m
+            // of the 0.5 m period shows under 20 of the canvas' 512 px, so it reads as one
+            // bark/leaf tone whichever draw mode it takes. Recorded so the claim is not wider
+            // than the fix.
+            if (minSide < 0.02f)
+                tiny++;
+            else if (minSide < 0.05f)
+                small++;
+            else if (minSide >= 0.30f)
+                big++;
+            else if (minSide >= 0.10f)
+                mid++;
+            else
+                upper++;
             if (minSide < smallestBox)
                 smallestBox = minSide;
             float period = isBark ? ArtParts.BarkTileMeters : ArtParts.LeafTileMeters;
             float cropPx = minSide * (sr.sprite.texture.width / period);
             if (cropPx < smallestCropPx)
                 smallestCropPx = cropPx;
+            for (int s = 0; s < smallestOf.Length; s++)
+            {
+                if (minSide < smallestOf[s])
+                {
+                    for (int t = smallestOf.Length - 1; t > s; t--)
+                    {
+                        smallestOf[t] = smallestOf[t - 1];
+                        smallestName[t] = smallestName[t - 1];
+                    }
+                    smallestOf[s] = minSide;
+                    smallestName[s] = sr.gameObject.name + "(" + (isBark ? "bark" : "leaf") + ")";
+                    break;
+                }
+            }
         }
 
         Debug.Log("ART-1A-CHECK INFO oak dressed=" + dressed + " barkParts=" + barkParts
             + " leafParts=" + leafParts + " notTiled=" + notTiled + " empty=" + empty
             + " smallestBox=" + smallestBox.ToString("0.000") + "m"
             + " itsCrop=" + smallestCropPx.ToString("0.#") + "px of the 512 canvas"
-            + " (a squeezed one would show all 512)");
+            + " (a squeezed one would show all 512) bands=<0.02m:" + tiny
+            + " 0.02-0.05m:" + small + " 0.05-0.10m:" + upper + " 0.10-0.30m:" + mid
+            + " >=0.30m:" + big + " smallest=" + smallestName[0] + " "
+            + smallestOf[0].ToString("0.000") + "m/" + smallestName[1] + " "
+            + smallestOf[1].ToString("0.000") + "m/" + smallestName[2] + " "
+            + smallestOf[2].ToString("0.000") + "m");
 
         Report("oak every bark/leaf part is Tiled (" + (barkParts + leafParts)
             + " parts, 0 in Sliced)", barkParts + leafParts > 0 && notTiled == 0);
@@ -646,6 +682,11 @@ public static class Art1Check
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
         HumanSegment.ApplyPicture(sr, box, HumanVisualShape.Box, null, Color.white, 0);
         Vector3 before = sr.transform.localScale;
+        // The box the dress will write: the placeholder's own reported box, which is the
+        // declared box snapped to the placeholder's pixels (the 21st pass recorded the
+        // 0.21-1.09 mm snap). The assertion below is that the dress adds NO transform
+        // factor on top of it - the old bug wrote a 0.99849 scale here.
+        Vector2 pre = ArtParts.BoxOf(sr);
         ArtParts.Dress(sr, key, tileMeters, true);
 
         Vector2 world = ArtParts.WorldBoxOf(sr);
@@ -661,13 +702,15 @@ public static class Art1Check
             + world.x.ToString("0.000") + "x" + world.y.ToString("0.000") + "m shows="
             + shownPx.ToString("0") + "/" + tex.width + "px at " + naturalPxPerM.ToString("0")
             + " px/m (Sliced would show " + tex.width + "px at " + slicedPxPerM.ToString("0")
-            + " px/m, " + (slicedPxPerM / naturalPxPerM).ToString("0.0") + "x the canvas' scale)");
+            + " px/m, " + (slicedPxPerM / naturalPxPerM).ToString("0.0")
+            + "x the canvas' scale) placeholderBox=" + pre.x.ToString("0.00000") + "x"
+            + pre.y.ToString("0.00000") + "m");
 
         Report(key + " " + box.x.ToString("0.000") + "x" + box.y.ToString("0.000") + "m period "
             + tileMeters.ToString("0.00") + "m is drawn " + (expectTiled ? "Tiled" : "Sliced"),
             expectTiled ? sr.drawMode == SpriteDrawMode.Tiled : sr.drawMode == SpriteDrawMode.Sliced);
-        Report(key + " dressing writes the part's own box (no transform factor)",
-            Mathf.Abs(world.x - box.x) <= 0.002f && Mathf.Abs(world.y - box.y) <= 0.002f);
+        Report(key + " dressing writes the box the part already had (no transform factor)",
+            Mathf.Abs(world.x - pre.x) <= 0.0005f && Mathf.Abs(world.y - pre.y) <= 0.0005f);
         Report(key + " dressing moves no localScale", sr.transform.localScale == before);
         if (expectTiled)
             Report(key + " keeps the canvas' own scale (canvas " + canvasMeters.ToString("0.000")

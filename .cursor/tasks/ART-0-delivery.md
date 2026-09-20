@@ -1303,6 +1303,66 @@ Left as labelled gaps (ART-0 gap 3b): the foliage (`Leaflet*`/`Leaf_*` - the 12 
 aspect 0.21-1.8, one canvas cannot serve them), the lavender spike and the autumn hip (`Spent`); plus
 `UI icons` as before. Full numbers: `Trials/Runs/art-0-flower-20th-report.md`.
 
+## Twenty-second pass 20.09 (artist) - a material keeps its world period, so the small parts stop squeezing the bark and the foliage
+
+Editor closed, bash only. This is item 1 of the 21st pass' own open list. `ArtParts.Dress` chose the
+draw mode by SIZE alone, so `Sliced` (which maps the WHOLE canvas onto the rect) took every part
+smaller than the 0.5 m period: a 0.10 x 0.30 m limb drew the whole 512 px `bark` canvas across its
+0.10 m (5120 px/m = 5.00x the authored 1024 px/m, and 1.67x along), and a 0.12 x 0.08 m leaf pad drew
+the whole painted leaf field at 4.17x, i.e. its 44 leaves of 0.033-0.127 m as miniature foliage. One
+oak therefore carried two bark scales - the trunk at its own period and every limb beside it at five
+times that.
+
+**The change** is one block of `Assets/ArtParts.cs`: the branch follows the ROLE now - a material
+(`tileMeters > 0`) is always drawn `Tiled`, so it keeps its authored world period and a part smaller
+than one tile shows a CROP at the canvas' own scale; a painted part (`tileMeters == 0`: `Human/head`,
+`Flower/petal`, `Campfire/log_a`) stays `Sliced`, so its single canvas still maps onto its box. The
+three call sites keep their behaviour (the logs and the flower canvases pass a zero period). The file's
+wrong header comment (Sliced "shows the tile cropped to the part's box" - the opposite of what Sliced
+does) went with it.
+
+The corner crop a Tiled limb shares with its family was measured before it was chosen
+(`Tools/art0-bark-crop-probe.py`): it sits at percentile 22.8 of all 84 666 sliding 102x307 windows,
+1.4 levels off the canvas mean, and the spread between all possible crops is 2.4 levels against the
+canvas' own 32.9. On screen at the `tree` lens the two renderings differ by 25-41 levels (bark) and
+33-58 levels (leaf), so the frames can carry the change.
+
+**The frames, one build, bash only** (`art-gallery-capture.sh art0period22`): `PREVIEW_BUILD_OK
+scenes=12 errors=0`, 10 stills + 165-frame / 16.5 s 1080p pan, 0 capture failures, `real=30 missing=7
+dressed=6833`, `buildGuid 50a8b89061c944ffba7d0de6f53753b8`; `boundsAfterDress` identical to
+`boundsBeforeDress` and every still's `fits` window identical to the previous label's. Against the
+21st pass' `art0scale21` (`debd785b…`, 02:54) `Tools/art0-frame-diff.py` moves exactly the
+material-dressed rows: **tree 76 668 px (3.70 %), apple 9 016 px (0.43 %), photo 582 px (0.03 %), the
+apple's 1 px sway, and human/level/materials/fire/flower/flowerbox byte-identical.** The silhouettes
+are untouched: `art0-tree-draw-probe.py` reports the same ink bbox (x 589-1330, y 31-1045), the same
+103 527 px of ink and the same trunk run at every rung of the ladder (41/37/40/58/61/69/77/85 px,
+0.0 %) in both labels. Two blind pairwise reads (seeds 17, 29, sides swapped) each named the NEW
+build - "the bark keeps a believable, stable scale along the whole tree", "the squeezed panel is dense
+striped bark and many small repeated leaflets".
+
+**Rule zero.** No simulation file touched: a sprite, a draw mode, `size` and `color` on a
+`SpriteRenderer`, plus the editor-only check. The dress cannot run in a headless trial
+(`RealArtEnabled` false; `DressLog` refuses), the new assertion `oak dressing adds no body (rule zero)`
+compares the oak's collider/rigidbody count before and after the dress, and `Build/Headless` was
+neither rebuilt nor run by this cycle - the walk lane's gate rebuilt it at 03:17 with this change in
+the tree (their commit `6ba7bc8c`) and their runs on it reproduce their accepted numbers
+(`c6q_stance` == `c6p_stance`, every cell of 201 columns).
+
+Gates after the change: `art1-gate.sh` -> `unity exit=0`, `failures=0` (111 OK lines, including the new
+`oak every bark/leaf part is Tiled (1829 parts, 0 in Sliced)`); `art0-import-gate.sh` -> `unity exit=0`,
+`failures=0`, the four `Level/*` through `Load<Sprite>`, the seven `Art/<key>` `512x512 readable=True`,
+`TILE ground_cap 0,0083 -> REPEATS`, `TILE ground_fill 0,0000 -> REPEATS`; `art0-meta-audit.py`
+`problems=0`, 20 pictures, 327 `.meta` / 327 guids.
+
+**Left open, with numbers.** 1480 of the oak's 1829 bark/leaf parts are under 0.02 m, i.e. they show
+under 20 of the canvas' 512 px and read as one tone in either mode - reaching them needs a second,
+finer material, which would then be wrong on the trunk (a later pass' decision). And `bark` is still a
+macro photograph at millimetre scale (autocorrelation under 0.5 at 2 px across, 6 px down) repeated
+every 0.5 m - the class of problem the 16th pass solved for `leaf` by painting it. Unchanged: the
+placeholder pixel snap in `ArtParts.BoxOf` (0.29688 vs 0.30 m), ART-0 gap 3b, the crowns' cut planes,
+the fire's sparks/smoke/embers, the UI icons. Full numbers:
+`Trials/Runs/art-0-period-22nd-report.md`.
+
 ## Twenty-first pass 20.09 (artist) - the gate caught a real look bug: tiled parts drew up to 5x too big
 
 Editor closed, bash only. The cycle started as bookkeeping for the two passes above and found their
