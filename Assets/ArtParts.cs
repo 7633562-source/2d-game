@@ -62,6 +62,23 @@ public static class ArtParts
     // 1.364x (Iris), and `Tools/gen-flower-leaf-textures.py` prints the whole table.
     public const float LeafFamilyWide = 0.8f;
 
+    // --- The lavender SPIKE and the autumn HIP (ART-0 gap 3b, the last two rows, 24th pass) -
+    // Two more card collages, one canvas each, the same mechanism as the leaf:
+    //   * the lavender spike (`spikeCount = 4` in ApplyKind) is a HumanSegment named "Spike_i"
+    //     whose own sprite `PaintSpikeFlorets` / `PaintSpentSpike` switch OFF behind six flat
+    //     cards (`Floret0/1/2` + `FloretTip0/1/2`, autumn: `SpentFloret*`);
+    //   * the autumn seed head is the `Bloom` part of the other ELEVEN kinds, whose own sprite
+    //     `PaintSpentBloom` switches OFF behind TWELVE flat cards (`Spent`, `SpentTip`,
+    //     `SpentR`, `SpentRTip`, `SpentCap*`, `SpentCapFill*`).
+    // Both canvases are drawn in the part's own box: the spike's box is `bloomSize` of one kind
+    // (0.028 x 0.050 m, aspect 0.560) so its four parts are drawn EXACTLY, the hip's is the
+    // geometric mean of the eleven bloom boxes (0.0802 x 0.0834 m, aspect 0.962, worst kind
+    // error 1.430x on Poppy) - both tables are printed by `Tools/gen-flower-spike-textures.py`.
+    // The rig's `Sepal*` (calyx) cards and the spent `Disk` STAY: they are painted parts, not
+    // cards, and a spent hip keeps its sepals.
+    public const string FlowerSpikeKey = "Flower/spike";
+    public const string FlowerHipKey = "Flower/hip";
+
     public static readonly string[] FlowerKeys =
     {
         FlowerPetalKey, FlowerTipKey, FlowerCupKey, FlowerCalyxKey, FlowerDiskKey,
@@ -207,11 +224,31 @@ public static class ArtParts
         }
 
         dressed += DressFlowerLeaves(root, real);
+        dressed += DressFlowerHeads(root, real);
 
         if (real && dressed > 0)
             Debug.Log("ART-PARTS flowers dressed=" + dressed + "/" + renderers.Length
                 + " root=" + root.name);
         return dressed;
+    }
+
+    // The toggle puts back exactly the cards a dress switched off, and nothing else: the set is
+    // the record, not a flag on the card. Every pass that hides cards calls this on the way back
+    // (the first pass to run finds the whole set and clears it; the next one finds it empty).
+    private static void RestoreHiddenCards(string label)
+    {
+        if (HiddenCards.Count == 0)
+            return;
+        int back = 0;
+        foreach (SpriteRenderer card in HiddenCards)
+        {
+            if (card == null)
+                continue;
+            card.enabled = true;
+            back++;
+        }
+        Debug.Log("ART-PARTS " + label + " restore cardsBackOn=" + back + " of " + HiddenCards.Count);
+        HiddenCards.Clear();
     }
 
     // --- the foliage (ART-0 gap 3b) ---------------------------------------------------
@@ -226,20 +263,8 @@ public static class ArtParts
     // part's name (`InitializeVisualOnly`).
     private static int DressFlowerLeaves(Transform root, bool real)
     {
-        if (!real && HiddenCards.Count > 0)
-        {
-            // The toggle puts back exactly the cards this dress switched off.
-            int back = 0;
-            foreach (SpriteRenderer card in HiddenCards)
-            {
-                if (card == null)
-                    continue;
-                card.enabled = true;
-                back++;
-            }
-            Debug.Log("ART-PARTS leaf restore cardsBackOn=" + back + " of " + HiddenCards.Count);
-            HiddenCards.Clear();
-        }
+        if (!real)
+            RestoreHiddenCards("leaf");
 
         HumanSegment[] parts = root.GetComponentsInChildren<HumanSegment>(true);
         int dressed = 0;
@@ -309,6 +334,107 @@ public static class ArtParts
         }
         Debug.Log("ART-PARTS leaf " + visual.parent.name + " canvas=" + key
             + " cardsHidden=" + hidden + " kept=Petiole*");
+    }
+
+    // --- the spike and the hip (ART-0 gap 3b, the last two rows, 24th pass) --------------
+    // Same mechanism as the foliage, on two more part families:
+    //   * a HumanSegment named "Spike_i" (lavender, four of them) whose own sprite the rig
+    //     switched OFF behind the florets' flat cards -> Flower/spike;
+    //   * the "Bloom" part of the eleven non-lavender kinds IN AUTUMN, whose own sprite
+    //     `PaintSpentBloom` switched OFF behind twelve `Spent*` cards -> Flower/hip.
+    // The season is read off the RIG's own output, not off a season field: the hip is the
+    // bloom that carries a card whose name starts with "Spent", which is exactly what
+    // `PaintSpentBloom` adds and `PaintBloomPetals` does not.
+    private static int DressFlowerHeads(Transform root, bool real)
+    {
+        if (!real)
+            RestoreHiddenCards("head");
+
+        HumanSegment[] parts = root.GetComponentsInChildren<HumanSegment>(true);
+        int dressed = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.sprite == null)
+                continue;
+            // Scoped by the HOST COMPONENT, exactly like the bloom and the foliage passes:
+            // PlantStrawberry builds its own parts and the yard's decor flowers collide.
+            if (part.GetComponentInParent<PlantFlower>() == null)
+                continue;
+
+            string key = HeadKeyFor(part);
+            if (string.IsNullOrEmpty(key) || ArtLibrary.Albedo(key) == null)
+                continue;   // no canvas: the caller shows a labelled ArtMissing tile
+
+            SpriteRenderer sr = part.sprite;
+            Vector2 box = BoxOf(sr);
+            if (box.x <= 0.0001f || box.y <= 0.0001f)
+                continue;
+
+            // enable: the rig switched this renderer off on purpose, and the canvas is what
+            // takes that slot back. Dress() remembers the state it found (Saved.enabled), so
+            // real=false puts the part back to a switched-off box behind its cards.
+            if (!Dress(sr, key, 0f, real, true, true))
+                continue;
+            if (!real)
+                continue;   // restoring: Dress() has put the part's own sprite back and the
+                            // cards were switched on by RestoreHiddenCards above.
+            dressed++;
+            HideHeadCards(part, key);
+        }
+        return dressed;
+    }
+
+    // "Spike_i" is the lavender raceme; a "Bloom" that carries a `Spent*` card is the autumn
+    // seed head. Nothing else in the flower rig answers for a canvas here.
+    private static string HeadKeyFor(HumanSegment part)
+    {
+        string name = part.gameObject.name;
+        if (!string.IsNullOrEmpty(name)
+            && name.StartsWith("Spike", System.StringComparison.Ordinal))
+            return FlowerSpikeKey;
+        if (string.Equals(name, "Bloom", System.StringComparison.Ordinal)
+            && HasCardNamed(part.transform, "Spent"))
+            return FlowerHipKey;
+        return null;
+    }
+
+    private static bool HasCardNamed(Transform root, string token)
+    {
+        SpriteRenderer[] cards = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < cards.Length; i++)
+        {
+            if (cards[i] == null)
+                continue;
+            if (cards[i].gameObject.name.StartsWith(token, System.StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    // The rig's flat cards this canvas replaces. Kept to the two names the spike and the hip
+    // are built from (`Floret*` / `SpentFloret*` under a spike, `Spent*` under a spent bloom),
+    // so the rig's painted parts - the `Sepal*` calyx, the spent `Disk` - are never touched,
+    // and the part's own renderer (on the child object `visual`) is not caught either.
+    private static void HideHeadCards(HumanSegment part, string key)
+    {
+        SpriteRenderer[] cards = part.GetComponentsInChildren<SpriteRenderer>(true);
+        int hidden = 0;
+        for (int i = 0; i < cards.Length; i++)
+        {
+            SpriteRenderer card = cards[i];
+            if (card == null || !card.enabled)
+                continue;
+            string n = card.gameObject.name;
+            if (!n.StartsWith("Floret", System.StringComparison.Ordinal)
+                && !n.StartsWith("Spent", System.StringComparison.Ordinal))
+                continue;
+            card.enabled = false;
+            HiddenCards.Add(card);
+            hidden++;
+        }
+        Debug.Log("ART-PARTS head " + part.gameObject.name + " canvas=" + key
+            + " cardsHidden=" + hidden + " kept=Sepal*/Disk");
     }
 
     private static string FlowerKeyDeep(SpriteRenderer sr)

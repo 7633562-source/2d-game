@@ -61,8 +61,13 @@ downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the ar
    `calyx`, `disk` in `Art/Flower/`). Gap 3b, the FOLIAGE - DELIVERED (`art-0-leaflet-23rd-report.md`:
    `Art/Flower/leaf.png` + `leaf_erect.png`, one painted leaf-pair canvas per leaflet family, the rig's
    16-card collage stepping aside; the family split 1.667-1.944 against 0.333-0.571 with
-   `ArtParts.LeafFamilyWide` 0.8, worst per-kind aspect error 1.364x on Iris). Still missing -> `gap 3b`:
-   the lavender spike (`Spike_i`) and the autumn hip (`Spent*`) - flat boxes, no canvas yet.
+   `ArtParts.LeafFamilyWide` 0.8, worst per-kind aspect error 1.364x on Iris). Gap 3b CLOSED
+   (`art-0-spike-24th-report.md`): the lavender spike (`Spike_i`) and the autumn hip (`Flower/hip.png`)
+   are painted canvases now (`Art/Flower/spike.png` + `Art/Flower/hip.png`, one canvas taking the part's
+   own box, the rig's cards stepping aside through `ArtParts.DressFlowerHeads`). Left in 3b: the flower
+   STEM is still the rig's flat tapered box (a visual read picks it as the last flat element of the
+   plant), and the hip canvas carries an aspect error on the tall kinds (1.35x Poppy / 1.37x Bluebell
+   and Crocus).
 4. Any Human clothing layer if the game shows one (skin/fabric/denim exist as materials but no cut
    garment sprites). OPEN.
 5. UI/HUD icons - out of scope for this scene unless Yury asks. OPEN.

@@ -45,6 +45,7 @@ public static class Art1Check
         CheckFireLogs();
         CheckFlowerParts();
         CheckFlowerFoliage();
+        CheckFlowerHeads();
         CheckMaterialPeriod();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
@@ -679,6 +680,207 @@ public static class Art1Check
         for (int i = 0; i < all.Length; i++)
             ArtParts.Forget(all[i]);
         Object.DestroyImmediate(go);
+    }
+
+    // ART-0 gap 3b, the last two rows (24th pass, 20.09): the lavender SPIKE and the autumn HIP.
+    // Same mechanism as the foliage, on the two other card collages of the flower rig: the part's
+    // own sprite (which the rig switched OFF behind the cards) takes a painted canvas, and the
+    // rig's flat boxes step aside. Checked in both seasons, because the season is read off the
+    // rig's own output - a `Spent*` card under a `Bloom` - and not off a season field: a SUMMER
+    // rose must take NO hip canvas at all.
+    private static void CheckFlowerHeads()
+    {
+        ArtLibrary.RealArtEnabled = true;
+        CheckHeadRig(FlowerKind.Lavender, PlantSeason.Summer, ArtParts.FlowerSpikeKey, 4, 0);
+        CheckHeadRig(FlowerKind.Lavender, PlantSeason.Autumn, ArtParts.FlowerSpikeKey, 4, 0);
+        CheckHeadRig(FlowerKind.Rose, PlantSeason.Autumn, ArtParts.FlowerHipKey, 0, 1);
+        CheckHeadRig(FlowerKind.Rose, PlantSeason.Summer, null, 0, 0);
+    }
+
+    private static void CheckHeadRig(
+        FlowerKind kind, PlantSeason season, string want, int expectSpikes, int expectHips)
+    {
+        GameObject go = new GameObject("Art1CheckHead_" + kind + "_" + season);
+        PlantFlower plant = (PlantFlower)go.AddComponent(PlantFlower.ComponentType(kind));
+        plant.seed = 11;
+        plant.season = season;
+        plant.BuildFlower();
+        Vector3 scale = go.transform.localScale;
+
+        int spikes = 0, hips = 0, withCanvas = 0, badBox = 0, whiteTint = 0, wrongCanvas = 0;
+        int hiddenCards = 0, stillOn = 0, keptSepals = 0, keptDisk = 0, bodies = 0;
+        Vector2 spikeWorld = Vector2.zero, hipWorld = Vector2.zero;
+        float spikeAspect = 0f, hipAspect = 0f;
+
+        HumanSegment[] parts = go.GetComponentsInChildren<HumanSegment>(true);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.sprite == null)
+                continue;
+            string name = part.gameObject.name;
+            bool spike = name.StartsWith("Spike", System.StringComparison.Ordinal);
+            bool hip = string.Equals(name, "Bloom", System.StringComparison.Ordinal)
+                && HasSpentCard(part.transform);
+            if (!spike && !hip)
+                continue;
+            if (spike)
+                spikes++;
+            else
+                hips++;
+
+            SpriteRenderer sr = part.sprite;
+            Vector2 box = ArtParts.BoxOf(sr);
+            if (spike)
+            {
+                spikeAspect = box.y > 0.0001f ? box.x / box.y : 0f;
+                spikeWorld = ArtParts.WorldBoxOf(sr);
+            }
+            else
+            {
+                hipAspect = box.y > 0.0001f ? box.x / box.y : 0f;
+                hipWorld = ArtParts.WorldBoxOf(sr);
+            }
+
+            string canvas = CanvasName(want);
+            if (!sr.enabled || sr.sprite == null || sr.sprite.texture == null)
+                continue;
+            if (sr.sprite.texture.name != canvas)
+            {
+                if (!string.IsNullOrEmpty(want))
+                    wrongCanvas++;
+                continue;
+            }
+            withCanvas++;
+            if (sr.drawMode != SpriteDrawMode.Sliced)
+                badBox++;
+            if (Mathf.Abs(sr.size.x - box.x) > 0.001f || Mathf.Abs(sr.size.y - box.y) > 0.001f)
+                badBox++;
+            if (sr.color == Color.white)
+                whiteTint++;
+
+            SpriteRenderer[] cards = part.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int c = 0; c < cards.Length; c++)
+            {
+                SpriteRenderer card = cards[c];
+                if (card == null || card == sr)
+                    continue;   // the part's own picture: the canvas lives there
+                string cn = card.gameObject.name;
+                bool mine = cn.StartsWith("Floret", System.StringComparison.Ordinal)
+                    || cn.StartsWith("Spent", System.StringComparison.Ordinal);
+                if (mine)
+                {
+                    if (card.enabled)
+                        stillOn++;
+                    else
+                        hiddenCards++;
+                }
+                else if (cn.StartsWith("Sepal", System.StringComparison.Ordinal))
+                {
+                    if (card.enabled)
+                        keptSepals++;
+                }
+                else if (cn.StartsWith("Disk", System.StringComparison.Ordinal) && card.enabled)
+                {
+                    keptDisk++;
+                }
+                if (card.GetComponent<Collider2D>() != null
+                    || card.GetComponent<Rigidbody2D>() != null)
+                    bodies++;
+            }
+        }
+
+        Debug.Log("ART-1A-CHECK INFO head " + kind + " " + season + " spikes=" + spikes
+            + " hips=" + hips + " withCanvas=" + withCanvas
+            + " spikeAspect=" + spikeAspect.ToString("0.000") + " hipAspect=" + hipAspect.ToString("0.000")
+            + " canvas=" + (want ?? "none") + " cardsHidden=" + hiddenCards
+            + " sepalsKept=" + keptSepals + " diskKept=" + keptDisk
+            + " spikeBox=" + spikeWorld.x.ToString("0.0000") + "x" + spikeWorld.y.ToString("0.0000") + "m"
+            + " hipBox=" + hipWorld.x.ToString("0.0000") + "x" + hipWorld.y.ToString("0.0000") + "m");
+
+        Report("flower " + kind + " " + season + " has its spike parts (" + spikes + ")",
+            spikes == expectSpikes);
+        Report("flower " + kind + " " + season + " has its spent hips (" + hips + ")",
+            hips == expectHips);
+        if (string.IsNullOrEmpty(want))
+        {
+            Report("flower " + kind + " " + season + " takes NO head canvas (no card collage)",
+                withCanvas == 0 && spikes == 0 && hips == 0);
+        }
+        else
+        {
+            int wantParts = expectSpikes + expectHips;
+            Report("flower " + kind + " " + season + " every head part carries Art/" + want + ".png",
+                withCanvas == wantParts);
+            Report("flower " + kind + " " + season + " no head part draws another canvas",
+                wrongCanvas == 0);
+            Report("flower " + kind + " " + season + " every head part keeps its own box (Sliced,"
+                + " size == box)", badBox == 0);
+            Report("flower " + kind + " " + season + " every head part keeps the kind colour"
+                + " (tint not white)", whiteTint == 0);
+            Report("flower " + kind + " " + season + " the card collage stepped aside ("
+                + hiddenCards + " cards off, " + stillOn + " still on)", stillOn == 0 && hiddenCards > 0);
+        }
+        Report("flower " + kind + " " + season + " head dressing moves no localScale",
+            go.transform.localScale == scale);
+        Report("flower " + kind + " " + season + " head renderers carry no body (rule zero)",
+            bodies == 0);
+
+        ArtParts.DressFlower(go.transform, false);
+        int backOn = 0, canvasOff = 0, headParts = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.sprite == null)
+                continue;
+            string name = part.gameObject.name;
+            bool spike = name.StartsWith("Spike", System.StringComparison.Ordinal);
+            // A spent bloom is a head too; a SUMMER bloom is the petal fan's own business and
+            // is not counted here (its own renderer is switched off by the rig as well).
+            bool hip = string.Equals(name, "Bloom", System.StringComparison.Ordinal)
+                && HasSpentCard(part.transform);
+            if (!spike && !hip)
+                continue;
+            headParts++;
+            if (!part.sprite.enabled)
+                canvasOff++;
+            SpriteRenderer[] cards = part.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int c = 0; c < cards.Length; c++)
+            {
+                if (cards[c] != null && cards[c].enabled && cards[c] != part.sprite)
+                    backOn++;
+            }
+        }
+        Debug.Log("ART-1A-CHECK INFO head " + kind + " " + season + " restore: canvasOff="
+            + canvasOff + " cardsBackOn=" + backOn + " headParts=" + headParts);
+        if (!string.IsNullOrEmpty(want))
+            Report("flower " + kind + " " + season + " real=false puts the head cards back",
+                canvasOff == headParts && backOn == hiddenCards + keptSepals + keptDisk
+                && headParts == expectSpikes + expectHips);
+
+        SpriteRenderer[] all = go.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < all.Length; i++)
+            ArtParts.Forget(all[i]);
+        Object.DestroyImmediate(go);
+    }
+
+    private static bool HasSpentCard(Transform root)
+    {
+        SpriteRenderer[] cards = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < cards.Length; i++)
+        {
+            if (cards[i] != null
+                && cards[i].gameObject.name.StartsWith("Spent", System.StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    // The canvas' texture name is the PNG's file name without extension: "Flower/spike" ->
+    // Art/Flower/spike.png -> "spike".
+    private static string CanvasName(string key)
+    {
+        return string.IsNullOrEmpty(key) ? "" : key.Substring(key.LastIndexOf('/') + 1);
     }
 
     // ART-0 22nd pass: a MATERIAL keeps its authored world period, so a part smaller than

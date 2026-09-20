@@ -471,33 +471,55 @@ public class GalleryScene : MonoBehaviour
         // so this row was two labelled gaps; PlantFlower now dresses its own petals from
         // Resources/Art/Flower/ (grey canvases - the kind's colour multiplies them) and
         // the row is the catalogue's own flower bed, one step right of the berry.
-        FlowerKind[] flowerRow = { FlowerKind.Rose, FlowerKind.Daisy, FlowerKind.Tulip, FlowerKind.Sunflower };
+        // Six entries on 20.09 (24th pass): the four summer kinds, plus the LAVENDER (the only
+        // kind whose rig builds `Spike_i` parts) and one AUTUMN ROSE (the only kind that draws
+        // the spent hip in this row). Both new entries sit BETWEEN the summer kinds on purpose:
+        // the row's `RowBounds` - and so the camera the `flower` still is taken with - is
+        // unchanged, which is what makes this pass' before/after pair the same camera.
+        FlowerKind[] flowerRow =
+        {
+            FlowerKind.Rose, FlowerKind.Lavender, FlowerKind.Daisy,
+            FlowerKind.Tulip, FlowerKind.Rose, FlowerKind.Sunflower
+        };
+        float[] flowerAt = { 2.300f, 2.725f, 3.150f, 4.000f, 4.425f, 4.850f };
+        PlantSeason[] flowerSeason =
+        {
+            PlantSeason.Summer, PlantSeason.Summer, PlantSeason.Summer,
+            PlantSeason.Summer, PlantSeason.Autumn, PlantSeason.Summer
+        };
+        string[] flowerName =
+        {
+            "rose", "lavender (spike)", "daisy",
+            "tulip", "rose (autumn hip)", "sunflower"
+        };
         int flowerParts = 0;
         for (int i = 0; i < flowerRow.Length; i++)
         {
-            GameObject flower = new GameObject("Flower_" + flowerRow[i]);
+            GameObject flower = new GameObject("Flower_" + flowerRow[i] + "_" + i);
             flower.transform.SetParent(root, false);
-            flower.transform.position = new Vector2(x + 2.30f + i * 0.85f, PlantFlower.RootY(groundTopY));
+            flower.transform.position = new Vector2(x + flowerAt[i], PlantFlower.RootY(groundTopY));
             PlantFlower plant = (PlantFlower)flower.AddComponent(PlantFlower.ComponentType(flowerRow[i]));
             plant.seed = 11 + i;   // a different lean and height per kind, as the yard gives them
+            plant.season = flowerSeason[i];
             plant.BuildFlower();
             Unlit(flower);
             // The label rides a LEVEL anchor, not the flower: the flower's own transform
             // carries the picture lean (stemLean), and text parented to it came out tilted
             // and ran into the next flower's label.
-            GameObject labelHost = new GameObject("FlowerLabel_" + flowerRow[i]);
+            GameObject labelHost = new GameObject("FlowerLabel_" + i);
             labelHost.transform.SetParent(root, false);
             labelHost.transform.position = flower.transform.position;
-            ItemLabel(labelHost.transform, flowerRow[i].ToString().ToLowerInvariant());
+            ItemLabel(labelHost.transform, flowerName[i]);
             flowerParts += ArtParts.DressFlower(flower.transform, true);
         }
-        Add(root, "flower bed  (rose, daisy, tulip, sunflower)",
+        Add(root, "flower bed  (rose, lavender, daisy, tulip, autumn rose, sunflower)",
             "Art/Flower/petal.png + petal_tip.png + cup.png + calyx.png + disk.png"
-            + " + leaf.png / leaf_erect.png",
+            + " + leaf.png / leaf_erect.png + spike.png + hip.png",
             ArtLibrary.HasArt(ArtParts.FlowerPetalKey),
-            "PlantFlower.BuildFlower dresses its own petals, " + flowerParts + " parts on the row"
-            + " (the foliage is painted too now, one canvas per leaflet family: ART-0 gap 3b"
-            + " delivered; the lavender spike and the autumn hip are still boxes)");
+            "PlantFlower.BuildFlower dresses its own petals, foliage, spikes and hip ("
+            + flowerParts + " parts on the row): the lavender spike and the autumn hip are the"
+            + " last two card collages, delivered as Art/Flower/spike.png and Art/Flower/hip.png"
+            + " (ART-0 gap 3b closed)");
 
         ScaleBarAt(root, x - 1.4f, "berry");
         RowBounds["berry"] = new Bounds(new Vector3(x + 1.35f, 0.8f, 0f), new Vector3(7.6f, 3.4f, 0f));

@@ -422,6 +422,12 @@ public class PlantFlower : MonoBehaviour
         // ortho 5. 0.90 still orange beside TuftFill / bark 0.04.
         // 0.92 reads a spent hip without a hinge. PartCount 62.
         Color spent = Color.Lerp(bloomColor, new Color(0.42f, 0.28f, 0.12f, 1f), 0.92f);
+        // ART-0 gap 3b (24th pass): the twelve boxes below step aside for one painted canvas
+        // on this part's own box (ArtParts.DressFlowerHeads), and the canvas is drawn in the
+        // part's OWN colour - so the part has to carry the tint the boxes carried, or the
+        // gallery's autumn hip would come back in the kind's summer-lerped red.
+        if (bloom.sprite != null)
+            bloom.sprite.color = spent;
         GameObject hip = new GameObject("Spent");
         hip.transform.SetParent(bloom.transform, false);
         SpriteRenderer hipSr = hip.AddComponent<SpriteRenderer>();
@@ -687,6 +693,11 @@ public class PlantFlower : MonoBehaviour
         // russet. 0.84 still lavender beside TuftFill / bark 0.04.
         // 0.88 reads a spent raceme. PartCount 62.
         Color spent = Color.Lerp(bloomColor, new Color(0.42f, 0.32f, 0.16f, 1f), 0.88f);
+        // ART-0 gap 3b (24th pass): the six boxes below step aside for one painted canvas on
+        // this part's own box (ArtParts.DressFlowerHeads), drawn in the part's OWN colour - so
+        // the part carries the spent tint the boxes carried.
+        if (spike.sprite != null)
+            spike.sprite.color = spent;
         int n = 3;
         for (int k = 0; k < n; k++)
         {
