@@ -239,6 +239,22 @@ public class ArmDrive : MonoBehaviour
     // Aim gain of the shoulder onto the latched palm (1 = point at it each step).
     public float pressAimGain = 1f;
     public float pressTorqueScale = 4f;
+    // ARM cycle 11. pressTorqueScale raises the shoulder/elbow CEILINGS while the
+    // body is down; the PD's damper must not follow that boost. ArmDrive.Drive
+    // computes signal = raw / (1 + damping) with damping = dGain * torque *
+    // Rad2Deg / speedRef * dt / Ieff, so a 4x ceiling was also a 4x damper and the
+    // press throttled its own activation: on the six stored runs of build
+    // 41fd907f the mean |actElbow| inside a press is 0.043-0.211 and no stored
+    // press anywhere saturates the joint (116 side-samples, 0.03-0.68), while the
+    // error against its own aim averages 14.10 deg on the left of p_arms70 -- an
+    // error that asks for a full signal. The single-switch pair on build 41fd907f
+    // says it is the ceiling: p_arms57 (-armLiftClear 0 -armPushScale 4) act
+    // 0.117/0.137, palm contact 0.544/0.660; p_arms56 (+ -armPushScale 6) act
+    // 0.082/0.050, contact 0.482/0.290 -- a HIGHER ceiling pressed LESS. 1 = the
+    // damper uses the joint's base ceiling (shoulder 40, elbow 30 N.m), which is
+    // what the walk has always had at scale 1; 0 = the former behaviour, kept as
+    // the control on the same build.
+    public float pressDamperFromBase = 1f;
     public float pressPGainScale = 2f;
     public float pressDriveSlewPerSecond = 60f;
     // Same rate limit for the ELBOW target, deg/s. The shoulder had one from
@@ -491,6 +507,7 @@ public class ArmDrive : MonoBehaviour
     private const string ArgWalkGain = "-armWalkGain";
     private const string ArgPush = "-armPush";
     private const string ArgPushScale = "-armPushScale";
+    private const string ArgDamperBase = "-armDamperBase";
     private const string ArgFallTilt = "-armFallTilt";
     private const string ArgPlantSide = "-armPlantSide";
     private const string ArgPlantShare = "-armPlantShare";
@@ -1450,9 +1467,9 @@ public class ArmDrive : MonoBehaviour
             float elRef = balance != null ? balance.elbowErrorReferenceDegrees : 25f;
 
             Drive(shoulder[i], outShoulder[i], shP, shD, shRef,
-                shFlex[i], shExt[i], ref shoulderInertia[i], outSlew[i]);
+                shFlex[i], shExt[i], ref shoulderInertia[i], outSlew[i], shTorqueBase);
             Drive(elbow[i], outElbow[i], elP, elD, elRef,
-                elFlex[i], elExt[i], ref elbowInertia[i], outSlew[i]);
+                elFlex[i], elExt[i], ref elbowInertia[i], outSlew[i], elTorqueBase);
         }
 
         // A press stroke needs authority over the palm's friction; outside the
@@ -1476,7 +1493,7 @@ public class ArmDrive : MonoBehaviour
     // cannot overshoot at the arm's small inertia.
     private void Drive(HingeJoint2D joint, float targetAngle, float pGain, float dGain,
                        float errorRef, Muscle flexor, Muscle extensor,
-                       ref float cachedInertia, float slewPerSecond)
+                       ref float cachedInertia, float slewPerSecond, float damperBase)
     {
         if (joint == null || flexor == null || extensor == null) return;
 
@@ -1496,7 +1513,12 @@ public class ArmDrive : MonoBehaviour
             cachedInertia = EffectiveInertia(joint);
         if (cachedInertia > 0f)
         {
-            float k = dGain * flexor.maxTorque * Mathf.Rad2Deg / Mathf.Max(1f, speedRef);
+            // Arm cycle 11: the damper is tuned at the joint's BASE ceiling. The
+            // press boost (pressTorqueScale) must buy authority only -- if the
+            // damper follows the boost, signal = raw / (1 + 4x damping) and the
+            // press throttles the very activation it needs (see pressDamperFromBase).
+            float damperTorque = pressDamperFromBase > 0.5f ? damperBase : flexor.maxTorque;
+            float k = dGain * damperTorque * Mathf.Rad2Deg / Mathf.Max(1f, speedRef);
             damping = k * dt / cachedInertia;
         }
 
@@ -1644,6 +1666,7 @@ public class ArmDrive : MonoBehaviour
         walkPGainScale = ReadFloat(args, ArgWalkGain, walkPGainScale);
         pushEnabled = ReadFloat(args, ArgPush, pushEnabled);
         pressTorqueScale = ReadFloat(args, ArgPushScale, pressTorqueScale);
+        pressDamperFromBase = ReadFloat(args, ArgDamperBase, pressDamperFromBase);
         fallTiltDeg = ReadFloat(args, ArgFallTilt, fallTiltDeg);
         plantSideMax = ReadFloat(args, ArgPlantSide, plantSideMax);
         plantLateralShare = ReadFloat(args, ArgPlantShare, plantLateralShare);
