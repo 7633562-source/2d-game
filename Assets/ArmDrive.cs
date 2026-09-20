@@ -332,6 +332,21 @@ public class ArmDrive : MonoBehaviour
     // the only thing this follows; the lateral offset stays latched. Default ON.
     // `-armPalmLive 0` restores the frozen point, `-armPalmLive 0..1` lerps.
     public float pressPalmLiveDepth = 1f;
+    // ARMS cycle 14. A press-up is a TWO-PALM move, and the drive used to give one
+    // palm up on a clock. Measured on p_arms81 (the newest arms build, 40 s, the
+    // press-ON run) over the fallen window: the pelvis rises and falls back 18 times
+    // by >= 0.05 m (drops up to 0.157 m), and in 16 of those 18 fall-backs BOTH palms
+    // are loaded for 0.0-17.1 % of the drop (13 of them exactly 0.0 %; the drop is
+    // carried by one palm in 11 of the 18). One side is in Plant/Lift at the top or
+    // the bottom of 17 of the 18. The rise that precedes them (29.5-30.4 s, pivot
+    // -1.789 -> -1.600 m) runs with BOTH sides in Press/Hold. The run's own split is
+    // both 12.2 %, one 56.3 %, none 31.5 %, against the press-OFF control's both
+    // 96.4 %. So while this side's palm is STILL on the slab, the Hold must not give
+    // the point up to plant a fresh one: it re-engages the stroke from the point it
+    // holds, and the two palms stay loaded together. Only a palm that has really left
+    // the slab (lostContactTime >= pressLostContactSeconds) re-plants as before.
+    // Default ON; `-armTwoPalm 0` is the stored behaviour on the same build.
+    public float pressTwoPalm = 1f;
     public float pressRequestHoldSeconds = 0.25f;
 
     // Read-only state, for the recorder and the get-up.
@@ -407,6 +422,11 @@ public class ArmDrive : MonoBehaviour
     public float PressWristHoldR { get { return wristHold[SideR]; } }
     public float PressWristActL { get { return wrFlex[SideL] != null ? wrFlex[SideL].activation : 0f; } }
     public float PressWristActR { get { return wrFlex[SideR] != null ? wrFlex[SideR].activation : 0f; } }
+    // Stroke re-engages taken from a palm that was still on the slab instead of a
+    // fresh plant, per side (arms cycle 14). Both must be > 0 for the change to be
+    // alive at all; a 0 on a fall with two palms down means the branch never fired.
+    public int PressTwoPalmReengagesL { get { return twoPalmReengages[SideL]; } }
+    public int PressTwoPalmReengagesR { get { return twoPalmReengages[SideR]; } }
     // Shoulder pivot height and the latched palm height, metres. The gap between
     // them is what the arm has to span, so a press that cannot reach the slab is
     // told from one that reaches it and is not loaded.
@@ -523,6 +543,9 @@ public class ArmDrive : MonoBehaviour
     private readonly float[] runShoulderLiftMax = new float[2];
     private readonly float[] contactSamples = new float[2];
     private readonly float[] contactHits = new float[2];
+    // Stroke re-engages taken from the palm that is still holding the slab instead
+    // of a fresh plant (arms cycle 14). Read back on the `-armDebug 1` line.
+    private readonly int[] twoPalmReengages = new int[2];
     // Matched press window state: latched on the down edge, monotone maxima.
     private bool downPrev;
     private bool winStarted;
@@ -591,6 +614,7 @@ public class ArmDrive : MonoBehaviour
     private const string ArgDepthExtra = "-armDepthExtra";
     private const string ArgDepthRate = "-armDepthRate";
     private const string ArgPalmLive = "-armPalmLive";
+    private const string ArgTwoPalm = "-armTwoPalm";
     private const string ArgHipTau = "-armHipTau";
     private const string ArgStrokeRate = "-armStrokeRate";
     private const string ArgStrokeMin = "-armStrokeMin";
@@ -1128,13 +1152,38 @@ public class ArmDrive : MonoBehaviour
                         bool sank = elbowAngle < strokeStartElbow[i] + pressReengageDeg;
                         bool outOfRoom = elbowAngle >= pressElbowTarget - pressDoneMarginDeg;
                         bool stalled = strokeStall[i] >= pressStallSeconds;
+                        // ARMS cycle 14: the two-palm hold. An arm still on the slab is
+                        // a support, and one palm is not enough to lift a torso:
+                        // measured p_arms81 (the newest arms build), 16 of the 18
+                        // fall-backs of the pelvis >= 0.05 m hold BOTH palms for
+                        // 0.0-17.1 % of the drop (13 exactly 0.0 %), the drop is carried
+                        // by one palm in 11 of them, and one side sits in Plant/Lift at
+                        // the top or the bottom of 17 of the 18 -- while the rises (the
+                        // 29.5-30.4 s climb, pivot -1.789 -> -1.600 m) run with BOTH
+                        // sides in Press/Hold. So while this side's palm is STILL on the
+                        // slab the point is KEPT (no ChoosePlantPoint, no lift) and the
+                        // stroke is re-engaged from it -- the 0.4 s dwell of Hold is
+                        // kept, the load is not. A palm that has really left the slab
+                        // (lostContactTime >= pressLostContactSeconds) re-plants exactly
+                        // as before, which is what moves a useless point.
+                        // On the same record the gate has 577 (L) / 791 (R) frames of
+                        // Hold with the side's own palm on the slab to act on.
+                        bool ownPalmHeld = lostContactTime[i] < pressLostContactSeconds;
                         if (phaseAge[i] >= pressReengageCooldownSeconds
                             && (lostContactTime[i] >= pressLostContactSeconds || sank
                                 || outOfRoom || stalled))
                         {
-                            ChoosePlantPoint(i);
-                            phase[i] = PhaseLift;
-                            phaseAge[i] = 0f;
+                            if (pressTwoPalm > 0.5f && ownPalmHeld)
+                            {
+                                twoPalmReengages[i]++;
+                                BeginStroke(i, elbowAngle);
+                            }
+                            else
+                            {
+                                ChoosePlantPoint(i);
+                                phase[i] = PhaseLift;
+                                phaseAge[i] = 0f;
+                            }
                         }
                     }
                 }
@@ -1249,7 +1298,8 @@ public class ArmDrive : MonoBehaviour
                 "[ARM] t={0:F2} {1} ph={2} age={3:F2} touch={4} lost={5:F2} " +
                 "pivot=({6:F2},{7:F2}) palm=({8:F2},{9:F2}) hand=({10:F2},{11:F2}) " +
                 "sh={12:F1}[{13:F0},{14:F0}] el={15:F1}[{16:F0}] plantFold={17:F1} " +
-                "tgt=({18:F1},{19:F1}) wr={20:F1}->{21:F1} act={22:F2} drop={23:F3} tilt={24:F1}", Time.fixedTime, i == SideL ? "L" : "R",
+                "tgt=({18:F1},{19:F1}) wr={20:F1}->{21:F1} act={22:F2} drop={23:F3} tilt={24:F1} two={25}",
+                Time.fixedTime, i == SideL ? "L" : "R",
                 phase[i], phaseAge[i], (i == SideL ? HandContactL : HandContactR) ? 1 : 0,
                 lostContactTime[i], pivot.x, pivot.y, palm.x, palm.y, handPos.x, handPos.y,
                 sh, shLo, shHi, el, elLo,
@@ -1258,7 +1308,8 @@ public class ArmDrive : MonoBehaviour
                 i == SideL ? PressWristHoldL : PressWristHoldR,
                 i == SideL ? PressWristActL : PressWristActR,
                 i == SideL ? PressPlantDropL : PressPlantDropR,
-                i == SideL ? PressPlantTiltL : PressPlantTiltR));
+                i == SideL ? PressPlantTiltL : PressPlantTiltR,
+                twoPalmReengages[i]));
         }
     }
 
@@ -1825,6 +1876,7 @@ public class ArmDrive : MonoBehaviour
         pressDepthExtra = ReadFloat(args, ArgDepthExtra, pressDepthExtra);
         pressDepthRate = ReadFloat(args, ArgDepthRate, pressDepthRate);
         pressPalmLiveDepth = ReadFloat(args, ArgPalmLive, pressPalmLiveDepth);
+        pressTwoPalm = ReadFloat(args, ArgTwoPalm, pressTwoPalm);
         hipStatsTau = ReadFloat(args, ArgHipTau, hipStatsTau);
         pressStrokeDegPerSecond = ReadFloat(args, ArgStrokeRate, pressStrokeDegPerSecond);
         pressMinStrokeSeconds = ReadFloat(args, ArgStrokeMin, pressMinStrokeSeconds);
