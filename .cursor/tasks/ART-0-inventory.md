@@ -143,8 +143,20 @@ crop that is 87 % ink with a cut leaf on 100 % of the window borders
 (`Tools/art0-leaf-window-probe.py`) - a green plate edged by the part's own rectangle, which is
 what three reads of `art0leaf28_tree.png` named. From the 29th pass such a part draws the
 painted leaf card (`ArtParts.TreeLeafCardKey`, one branch in `DressAll`), a part at or above
-0.12 m keeps the material. **Still open, measured**: the small green chips ON the trunk are NOT
-drawn by those cards - the whole frame difference between `art0leaf28` and `art0leaf29` is
-confined to y 31-253 and the trunk rows 300-1000 are 0.0 % changed - so their owner is a
-leaf-material part at or above 0.12 m that overlaps the trunk; name it with an editor probe
-before moving anything. Report `Trials/Runs/art-0-leaf-card-29th-report.md`.
+0.12 m keeps the material.
+
+**CLOSED, 30th pass (20.09)** - `Trials/Runs/art-0-trunk-owner-30th-report.md`. The trunk chips
+have a NAME now, and it is not what the 29th pass predicted. `Assets/Editor/ArtTrunkProbe.cs`
+builds the gallery in edit mode, reproduces the shipped "oak close" lens (its own base frame is
+0 px different from `art0leaf29_tree.png`), and then PAINTS OUT each of the 892 renderers of the
+oak that reach the bole, one at a time. The owners are the rig's `Spur0_Tuft{0,1,2}_*` clusters
+dressed with the `leaf` MATERIAL - the top single part owns 37 px at `0.016x0.035 m`, every
+owner reads `cardBand=False`, and NOT ONE of them is a "leaf-material part at or above 0.12 m":
+that hypothesis is refuted. Attribution of the bole's 7883 px of green: leaf material 5488 px
+(69.6 %), leaf cards 1276 px (16.2 %), both leaf languages off leaves 0 px and the "neither"
+set is 0 px, so the bole carries no unexplained green. The complaint's own word was tested too:
+of the 36 green clusters on the bole, 0 pairs are byte-identical at native size (1 same-size
+pair), and two 4x zooms of the shipped still both report organic jagged silhouettes with
+leaflets and no texture-crop edge. Nothing was moved, on purpose. What is still open there: the
+rig's own module seams and the base gap (the 17th pass' item), and the 1171 leaf parts under
+0.02 m that keep the material - the owner list in the report is their population.
