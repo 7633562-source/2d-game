@@ -64,10 +64,15 @@ downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the ar
    `ArtParts.LeafFamilyWide` 0.8, worst per-kind aspect error 1.364x on Iris). Gap 3b CLOSED
    (`art-0-spike-24th-report.md`): the lavender spike (`Spike_i`) and the autumn hip (`Flower/hip.png`)
    are painted canvases now (`Art/Flower/spike.png` + `Art/Flower/hip.png`, one canvas taking the part's
-   own box, the rig's cards stepping aside through `ArtParts.DressFlowerHeads`). Left in 3b: the flower
-   STEM is still the rig's flat tapered box (a visual read picks it as the last flat element of the
-   plant), and the hip canvas carries an aspect error on the tall kinds (1.35x Poppy / 1.37x Bluebell
-   and Crocus).
+   own box, the rig's cards stepping aside through `ArtParts.DressFlowerHeads`). The flower STEM is
+   painted too (`art-0-stem-25th-report.md`): `Art/Flower/stem.png` + `stem_stout.png`, chosen by the
+   drawn box aspect through `ArtParts.StemKeyFor` / `StemFamilyStout` 0.112, the rig's `Cone*` cards
+   stepping aside, the winter `Frost*` / `WinterBud*` chips staying on the cane; worst per-kind aspect
+   error 1.52x on Daffodil, 1.23x on the corm pair. **Gap 3b is now CLOSED**: every part of the flower
+   rig carries a painted canvas. Left in the set: the knot pattern is one canvas for all ten stalk
+   kinds, the hip canvas' aspect error on the tall kinds (1.35x Poppy / 1.37x Bluebell and Crocus), the
+   corm canvas has gate evidence but no frame read yet, and the level's / yard's DECOR flowers
+   (`YardAmbient.AddHousePart` builds its own petals) are flat cards of their own, not this rig.
 4. Any Human clothing layer if the game shows one (skin/fabric/denim exist as materials but no cut
    garment sprites). OPEN.
 5. UI/HUD icons - out of scope for this scene unless Yury asks. OPEN.

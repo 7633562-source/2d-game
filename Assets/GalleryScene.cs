@@ -516,9 +516,9 @@ public class GalleryScene : MonoBehaviour
             "Art/Flower/petal.png + petal_tip.png + cup.png + calyx.png + disk.png"
             + " + leaf.png / leaf_erect.png + spike.png + hip.png",
             ArtLibrary.HasArt(ArtParts.FlowerPetalKey),
-            "PlantFlower.BuildFlower dresses its own petals, foliage, spikes and hip ("
-            + flowerParts + " parts on the row): the lavender spike and the autumn hip are the"
-            + " last two card collages, delivered as Art/Flower/spike.png and Art/Flower/hip.png"
+            "PlantFlower.BuildFlower dresses its own petals, foliage, spikes, hip and stem ("
+            + flowerParts + " parts on the row): the lavender spike, the autumn hip and the stem are"
+            + " painted canvases now - Art/Flower/spike.png, hip.png, stem.png and stem_stout.png"
             + " (ART-0 gap 3b closed)");
 
         ScaleBarAt(root, x - 1.4f, "berry");

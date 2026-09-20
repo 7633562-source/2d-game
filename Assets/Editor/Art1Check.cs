@@ -46,6 +46,7 @@ public static class Art1Check
         CheckFlowerParts();
         CheckFlowerFoliage();
         CheckFlowerHeads();
+        CheckFlowerStems();
         CheckMaterialPeriod();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
@@ -862,6 +863,274 @@ public static class Art1Check
         for (int i = 0; i < all.Length; i++)
             ArtParts.Forget(all[i]);
         Object.DestroyImmediate(go);
+    }
+
+    // ART-0 gap 3b, the last flat element of the plant (25th pass, 20.09): the flower's STEM.
+    // `PlantFlower` line 128 builds one HumanSegment named "Stem" per plant and paints it with a
+    // one-band `PaintVisualTaper`, i.e. `PaintVisualConeFill`: the part's own sprite is switched
+    // OFF behind six `Cone*` cards. The canvas takes that slot back and the cone cards step aside;
+    // the rig's winter chips (`Frost*`, `WinterBud*`) stay on the cane.
+    private static void CheckFlowerStems()
+    {
+        ArtLibrary.RealArtEnabled = true;
+        // The canvas is chosen by the box aspect, so both families have to be walked, in more than
+        // one season: `ApplyKind` sets stemWidth/stemHeight per kind and the season does not touch
+        // them (spring scales bloomSize/leafSize/diskSize only), so these are the boxes the whole
+        // game draws.
+        CheckStemRig(FlowerKind.Rose, PlantSeason.Summer, ArtParts.FlowerStemKey);
+        CheckStemRig(FlowerKind.Daffodil, PlantSeason.Summer, ArtParts.FlowerStemKey);
+        CheckStemRig(FlowerKind.Lavender, PlantSeason.Autumn, ArtParts.FlowerStemKey);
+        CheckStemRig(FlowerKind.Sunflower, PlantSeason.Spring, ArtParts.FlowerStemKey);
+        CheckStemRig(FlowerKind.Poppy, PlantSeason.Summer, ArtParts.FlowerStemKey);
+        CheckStemRig(FlowerKind.Crocus, PlantSeason.Summer, ArtParts.FlowerStemStoutKey);
+        CheckStemRig(FlowerKind.Violet, PlantSeason.Summer, ArtParts.FlowerStemStoutKey);
+        // Winter is where the rig hangs chips on the cane: they must survive the dress.
+        CheckStemRig(FlowerKind.Rose, PlantSeason.Winter, ArtParts.FlowerStemKey);
+        CheckStemRig(FlowerKind.Crocus, PlantSeason.Winter, ArtParts.FlowerStemStoutKey);
+        CheckForeignStem();
+        CheckStemPhysics();
+    }
+
+    private static void CheckStemRig(FlowerKind kind, PlantSeason season, string want)
+    {
+        GameObject go = new GameObject("Art1CheckStem_" + kind + "_" + season);
+        PlantFlower plant = (PlantFlower)go.AddComponent(PlantFlower.ComponentType(kind));
+        plant.seed = 11;
+        plant.season = season;
+        plant.BuildFlower();
+        Vector3 scale = go.transform.localScale;
+
+        int stems = 0, withCanvas = 0, badFamily = 0, badBox = 0, whiteTint = 0, bodies = 0;
+        int hiddenCards = 0, stillOn = 0, chipsKept = 0, chipsOff = 0, others = 0;
+        // How many cone cards the rig BUILT is not a constant: `PaintVisualConeFill` returns
+        // before the two edge wedges and their tips when the half-drop is under 4 mm
+        // (`halfDrop = 0.19 * stemWidth`), so the thin stems carry 2 cards (ConeCore,
+        // ConeCoreTip) and the 0.028 m Sunflower carries all 6. Measured, not assumed.
+        int coneCards = 0;
+        float boxAspect = 0f, canvasAspect = 0f;
+        Vector2 stemWorld = Vector2.zero;
+
+        HumanSegment[] parts = go.GetComponentsInChildren<HumanSegment>(true);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.visual == null || part.sprite == null)
+                continue;
+            if (!string.Equals(part.gameObject.name, "Stem", System.StringComparison.Ordinal))
+            {
+                others++;   // leaves, bloom, spike, disk: the rest of the plant, untouched
+                continue;
+            }
+
+            stems++;
+            SpriteRenderer sr = part.sprite;
+            Vector2 box = ArtParts.BoxOf(sr);
+            boxAspect = box.y > 0.0001f ? box.x / box.y : 0f;
+            stemWorld = ArtParts.WorldBoxOf(sr);
+            if (ArtParts.StemKeyFor(boxAspect) != want)
+                badFamily++;
+
+            string canvas = CanvasName(want);
+            if (!sr.enabled || sr.sprite == null || sr.sprite.texture == null
+                || sr.sprite.texture.name != canvas)
+                continue;
+            withCanvas++;
+            canvasAspect = (float)sr.sprite.texture.width / sr.sprite.texture.height;
+            if (sr.drawMode != SpriteDrawMode.Sliced)
+                badBox++;
+            if (Mathf.Abs(sr.size.x - box.x) > 0.001f || Mathf.Abs(sr.size.y - box.y) > 0.001f)
+                badBox++;
+            if (sr.color == Color.white)
+                whiteTint++;
+
+            // The cards under THIS part's Visual only: the leaves and the bloom are children of
+            // the Stem GameObject, so a walk from the part would count the whole plant.
+            SpriteRenderer[] cards = part.visual.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int c = 0; c < cards.Length; c++)
+            {
+                SpriteRenderer card = cards[c];
+                if (card == null || card.gameObject == part.visual.gameObject)
+                    continue;   // the stem's own picture: the canvas lives on the Visual itself
+                string cn = card.gameObject.name;
+                bool cone = cn.StartsWith("Cone", System.StringComparison.Ordinal)
+                    || cn.StartsWith("Taper", System.StringComparison.Ordinal);
+                if (cone)
+                {
+                    coneCards++;
+                    if (card.enabled)
+                        stillOn++;
+                    else
+                        hiddenCards++;
+                }
+                else if (card.enabled)
+                    chipsKept++;      // Frost* / WinterBud*: the chips on the cane
+                else
+                    chipsOff++;
+                if (card.GetComponent<Collider2D>() != null
+                    || card.GetComponent<Rigidbody2D>() != null)
+                    bodies++;
+            }
+        }
+
+        float err = canvasAspect > 0.0001f && boxAspect > 0.0001f
+            ? Mathf.Max(boxAspect / canvasAspect, canvasAspect / boxAspect) : 0f;
+        Debug.Log("ART-1A-CHECK INFO stem " + kind + " " + season + " stems=" + stems
+            + " withCanvas=" + withCanvas + " canvas=" + (want ?? "none")
+            + " boxAspect=" + boxAspect.ToString("0.0000") + " canvasAspect="
+            + canvasAspect.ToString("0.0000") + " aspectError=" + err.ToString("0.000") + "x"
+            + " stemBox=" + stemWorld.x.ToString("0.0000") + "x" + stemWorld.y.ToString("0.0000") + "m"
+            + " onScreenYard=" + (stemWorld.x * 414.21f).ToString("0") + "x"
+            + (stemWorld.y * 414.21f).ToString("0") + "px"
+            + " cardsHidden=" + hiddenCards + " coneCards=" + coneCards
+            + " chipsKept=" + chipsKept + " chipsOff=" + chipsOff);
+
+        Report("flower " + kind + " " + season + " has one stem part (" + stems + ")", stems == 1);
+        Report("flower " + kind + " " + season + " the stem carries Art/" + want + ".png",
+            withCanvas == stems && stems == 1);
+        Report("flower " + kind + " " + season + " the stem draws the canvas its box aspect asks for",
+            badFamily == 0);
+        Report("flower " + kind + " " + season + " the stem keeps its own box (Sliced, size == box)",
+            badBox == 0);
+        Report("flower " + kind + " " + season + " the stem keeps the kind colour (tint not white)",
+            whiteTint == 0);
+        Report("flower " + kind + " " + season + " every cone card the rig built stepped aside ("
+            + hiddenCards + " of " + coneCards + " off, " + stillOn + " still on)",
+            coneCards > 0 && stillOn == 0 && hiddenCards == coneCards);
+        Report("flower " + kind + " " + season + " the rig's chips on the cane survive ("
+            + chipsKept + " on, " + chipsOff + " off)",
+            chipsOff == 0 && (season == PlantSeason.Winter ? chipsKept > 0 : chipsKept == 0));
+        Report("flower " + kind + " " + season + " the rest of the plant is there (" + others
+            + " other parts" + (season == PlantSeason.Winter ? "; winter is the cane alone" : "")
+            + ")", withCanvas > 0 && (others > 0 || season == PlantSeason.Winter));
+        Report("flower " + kind + " " + season + " stem dressing moves no localScale",
+            go.transform.localScale == scale);
+        Report("flower " + kind + " " + season + " stem renderers carry no body (rule zero)",
+            bodies == 0);
+
+        // The gallery's toggle, in reverse: the cone cards come back, the canvas goes.
+        ArtParts.DressFlower(go.transform, false);
+        int backOn = 0, canvasOff = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.visual == null || part.sprite == null)
+                continue;
+            if (!string.Equals(part.gameObject.name, "Stem", System.StringComparison.Ordinal))
+                continue;
+            if (!part.sprite.enabled)
+                canvasOff++;
+            SpriteRenderer[] cards = part.visual.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int c = 0; c < cards.Length; c++)
+            {
+                if (cards[c] != null && cards[c].enabled
+                    && cards[c].gameObject != part.visual.gameObject)
+                    backOn++;
+            }
+        }
+        Debug.Log("ART-1A-CHECK INFO stem " + kind + " " + season + " restore: canvasOff="
+            + canvasOff + " cardsBackOn=" + backOn);
+        Report("flower " + kind + " " + season + " real=false puts the cone cards back",
+            canvasOff == stems && backOn == coneCards + chipsKept);
+
+        SpriteRenderer[] all = go.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < all.Length; i++)
+            ArtParts.Forget(all[i]);
+        Object.DestroyImmediate(go);
+    }
+
+    // The stem pass is scoped by the HOST COMPONENT (`GetComponentInParent<PlantFlower>`), like
+    // the bloom, the foliage and the head: a `Stem` part that belongs to another rig must take no
+    // canvas at all.
+    private static void CheckForeignStem()
+    {
+        GameObject go = new GameObject("Art1CheckForeignStem");
+        HumanSegment seg = go.AddComponent<HumanSegment>();
+        seg.InitializeVisualOnly("Stem", new Vector2(0.018f, 0.22f),
+            new Color(0.22f, 0.46f, 0.20f, 1f), go.transform, 0, HumanVisualShape.Box);
+        bool wasOn = seg.sprite.enabled;
+        int dressed = ArtParts.DressFlower(go.transform, true);
+        Report("a Stem part outside a PlantFlower takes no canvas (host scoping)",
+            dressed == 0 && seg.sprite.enabled == wasOn);
+        SpriteRenderer[] all = go.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < all.Length; i++)
+            ArtParts.Forget(all[i]);
+        Object.DestroyImmediate(go);
+    }
+
+    // Rule zero, MEASURED instead of argued: build the same flower rig twice - once with real art
+    // off, once with it on - and compare everything the simulation can feel: the number of
+    // Collider2D / Rigidbody2D under the plant, every HumanSegment's localPosition and localScale,
+    // and its collider's size. The dress is allowed to move pictures, nothing else. (The 24th pass
+    // argued this from timestamps of the headless player; that argument is not always available -
+    // another lane rebuilt `Build/Headless` during this cycle - so the picture layer carries its own
+    // instrument for it.)
+    private static void CheckStemPhysics()
+    {
+        HumanSegment[] partsOff = BuildPhysRig(false, out GameObject off);
+        HumanSegment[] partsOn = BuildPhysRig(true, out GameObject on);
+
+        int bodiesOff = off.GetComponentsInChildren<Collider2D>(true).Length
+            + off.GetComponentsInChildren<Rigidbody2D>(true).Length;
+        int bodiesOn = on.GetComponentsInChildren<Collider2D>(true).Length
+            + on.GetComponentsInChildren<Rigidbody2D>(true).Length;
+
+        int moved = 0, scaled = 0, collidersDiffer = 0, names = 0;
+        int n = Mathf.Min(partsOff.Length, partsOn.Length);
+        for (int i = 0; i < n; i++)
+        {
+            if (partsOff[i].gameObject.name != partsOn[i].gameObject.name)
+            {
+                names++;
+                continue;
+            }
+            if ((partsOff[i].transform.localPosition - partsOn[i].transform.localPosition)
+                .sqrMagnitude > 1e-12f)
+                moved++;
+            if ((partsOff[i].transform.localScale - partsOn[i].transform.localScale)
+                .sqrMagnitude > 1e-12f)
+                scaled++;
+            Collider2D a = partsOff[i].GetComponent<Collider2D>();
+            Collider2D b = partsOn[i].GetComponent<Collider2D>();
+            if ((a == null) != (b == null))
+            {
+                collidersDiffer++;
+                continue;
+            }
+            BoxCollider2D ba = a as BoxCollider2D, bb = b as BoxCollider2D;
+            if (ba != null && bb != null && ba.size != bb.size)
+                collidersDiffer++;
+        }
+
+        Debug.Log("ART-1A-CHECK INFO rule0 flower rig real=off bodies=" + bodiesOff
+            + " parts=" + partsOff.Length + " | real=on bodies=" + bodiesOn + " parts="
+            + partsOn.Length + " moved=" + moved + " scaled=" + scaled + " collidersDiffer="
+            + collidersDiffer + " nameMismatch=" + names);
+        Report("rule zero: a dressed flower rig has the same bodies as an undressed one ("
+            + bodiesOff + " == " + bodiesOn + ")", bodiesOff == bodiesOn);
+        Report("rule zero: no flower part moves or scales when the picture is dressed ("
+            + n + " parts compared, moved " + moved + ", scaled " + scaled + ", scaled colliders "
+            + collidersDiffer + ")", partsOff.Length == partsOn.Length && names == 0 && moved == 0
+            && scaled == 0 && collidersDiffer == 0);
+
+        ArtParts.ResetSkips();
+        ArtLibrary.RealArtEnabled = true;
+        foreach (SpriteRenderer sr in off.GetComponentsInChildren<SpriteRenderer>(true))
+            ArtParts.Forget(sr);
+        foreach (SpriteRenderer sr in on.GetComponentsInChildren<SpriteRenderer>(true))
+            ArtParts.Forget(sr);
+        Object.DestroyImmediate(off);
+        Object.DestroyImmediate(on);
+    }
+
+    private static HumanSegment[] BuildPhysRig(bool real, out GameObject go)
+    {
+        ArtLibrary.RealArtEnabled = real;
+        go = new GameObject("Art1CheckPhys_" + real);
+        PlantFlower plant = (PlantFlower)go.AddComponent(PlantFlower.ComponentType(FlowerKind.Rose));
+        plant.seed = 11;
+        plant.season = PlantSeason.Summer;
+        plant.BuildFlower();
+        return go.GetComponentsInChildren<HumanSegment>(true);
     }
 
     private static bool HasSpentCard(Transform root)

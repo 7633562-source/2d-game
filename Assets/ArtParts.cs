@@ -79,6 +79,41 @@ public static class ArtParts
     public const string FlowerSpikeKey = "Flower/spike";
     public const string FlowerHipKey = "Flower/hip";
 
+    // --- The STEM (ART-0 gap 3b's last flat element, 25th pass) -------------------------
+    // `PlantFlower` line 128 builds ONE `HumanSegment` named "Stem" per plant and paints it with
+    // `PlantTree.PaintVisualTaper(stem, stemWidth, stemHeight, stemColor, 0.62f, 1)` - one band,
+    // so `PaintVisualConeFill` switches the part's own sprite OFF and draws six flat cards
+    // (`ConeCore`, `ConeCoreTip`, `ConeEdgeL`, `ConeEdgeLTip`, `ConeEdgeR`, `ConeEdgeRTip`).
+    // That cane is the last thing in the plant made of boxes (the 24th pass' 4x read named it
+    // without being asked: "a perfectly straight, single-colour strip with no texture, shadow,
+    // curve or detail"), and the canvas takes the part's own sprite slot back.
+    //
+    // This key is the only one of the family that needs TWO canvases: `ApplyKind` gives the twelve
+    // kinds 0.012-0.028 m by 0.09-0.42 m, and the box the dress reads (`BoxOf` -> the placeholder
+    // sprite's own size, `HumanSegment.CreateBodySprite`'s 64 px short-side boost) has an aspect
+    // from 0.049 (Lavender) to 0.174 (Crocus) - a factor 3.5. One canvas there is the leaf set's
+    // 1.364x compromise multiplied by 1.8, so the family splits the way `LeafFamilyWide` does, at
+    // the two CORM kinds (Crocus 0.09 m, Violet 0.10 m: stubs on a corm, and the only boxes above
+    // the 1.02-1.15x gap): stalk 1.521x worst (Daffodil), corm 1.228x worst.
+    // The rig's WINTER chips (`Frost*`, `WinterBud*`) STAY: they are painted, tilted chips sitting
+    // ON the cane, not the cane.
+    public const string FlowerStemKey = "Flower/stem";
+    public const string FlowerStemStoutKey = "Flower/stem_stout";
+
+    // The family split by BOX ASPECT, at the only clean gap in the set: the twelve boxes run
+    // 0.0492 (Lavender) .. 0.0980 (Daisy) .. 0.1087 (Daffodil) | 0.1153 (Violet) .. 0.1739
+    // (Crocus), i.e. the threshold sits between Daffodil and Violet with a 2.9% margin on each
+    // side in log space (sqrt(0.1087 * 0.1153) = 0.1120). The two kinds it catches are the CORM
+    // ones - a stub peduncle on a corm, a drawing of its own - and the same factor-1.6 separation
+    // `LeafFamilyWide` 0.8 uses. A box aspect that drifts across it only swaps one cane canvas for
+    // the other.
+    public const float StemFamilyStout = 0.112f;
+
+    public static string StemKeyFor(float boxAspect)
+    {
+        return boxAspect >= StemFamilyStout ? FlowerStemStoutKey : FlowerStemKey;
+    }
+
     public static readonly string[] FlowerKeys =
     {
         FlowerPetalKey, FlowerTipKey, FlowerCupKey, FlowerCalyxKey, FlowerDiskKey,
@@ -225,6 +260,7 @@ public static class ArtParts
 
         dressed += DressFlowerLeaves(root, real);
         dressed += DressFlowerHeads(root, real);
+        dressed += DressFlowerStems(root, real);
 
         if (real && dressed > 0)
             Debug.Log("ART-PARTS flowers dressed=" + dressed + "/" + renderers.Length
@@ -435,6 +471,88 @@ public static class ArtParts
         }
         Debug.Log("ART-PARTS head " + part.gameObject.name + " canvas=" + key
             + " cardsHidden=" + hidden + " kept=Sepal*/Disk");
+    }
+
+    // --- the stem (ART-0 gap 3b's last flat element, 25th pass) -------------------------
+    // The part is one `HumanSegment` named exactly "Stem" (PlantFlower.AddPart, line 128); its
+    // picture lives on the child object `Visual` (HumanSegment.InitializeVisualOnly) and the rig
+    // switched it OFF behind six cone cards. Unlike the leaf and the head, the leaves and the
+    // bloom are CHILDREN of this part (`leaf.transform.SetParent(stem.transform, false)`), so the
+    // cards this pass hides are read from `part.visual` - NOT from the part, which would switch
+    // the whole plant off - and only the cone cards are touched: the winter `Frost*` / `WinterBud*`
+    // chips stay, they are painted chips lying on the cane.
+    private static int DressFlowerStems(Transform root, bool real)
+    {
+        if (!real)
+            RestoreHiddenCards("stem");
+
+        HumanSegment[] parts = root.GetComponentsInChildren<HumanSegment>(true);
+        int dressed = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.visual == null || part.sprite == null)
+                continue;
+            if (!string.Equals(part.gameObject.name, "Stem", System.StringComparison.Ordinal))
+                continue;
+            // Scoped by the HOST COMPONENT, exactly like the bloom, the foliage and the head:
+            // PlantStrawberry and PlantTree build their own parts and the names collide.
+            if (part.GetComponentInParent<PlantFlower>() == null)
+                continue;
+
+            SpriteRenderer sr = part.sprite;
+            Vector2 box = BoxOf(sr);
+            if (box.x <= 0.0001f || box.y <= 0.0001f)
+                continue;
+
+            string key = StemKeyFor(box.x / box.y);
+            if (string.IsNullOrEmpty(key) || ArtLibrary.Albedo(key) == null)
+                continue;   // no canvas: the caller shows a labelled ArtMissing tile
+
+            // enable: the rig switched this renderer off on purpose, and the canvas is what takes
+            // that slot back. Dress() remembers the state it found (see Saved.enabled), so
+            // real=false puts the part back to a switched-off box behind its cone cards.
+            if (!Dress(sr, key, 0f, real, true, true))
+                continue;
+            if (!real)
+                continue;   // restoring: Dress() has put the part's own sprite back and the cards
+                            // were switched on by the block above. Nothing else to do.
+            dressed++;
+            HideStemCards(part.visual, key);
+        }
+        return dressed;
+    }
+
+    // The rig's cone cards: `ConeCore` / `ConeCoreTip` / `ConeEdgeL|LTip` / `ConeEdgeR|RTip` from
+    // PaintVisualConeFill, or the `Taper*` band cards if the rig is ever given more than one band.
+    // Nothing else under the stem's Visual is touched - the frost and the winter bud keep their
+    // place on the cane.
+    private static void HideStemCards(Transform visual, string key)
+    {
+        SpriteRenderer[] cards = visual.GetComponentsInChildren<SpriteRenderer>(true);
+        int hidden = 0, kept = 0;
+        for (int i = 0; i < cards.Length; i++)
+        {
+            SpriteRenderer card = cards[i];
+            if (card == null || card.gameObject == visual.gameObject)
+                continue;   // the stem's own picture: the canvas lives on the Visual itself
+            string n = card.gameObject.name;
+            bool cone = n.StartsWith("Cone", System.StringComparison.Ordinal)
+                || n.StartsWith("Taper", System.StringComparison.Ordinal);
+            if (!cone)
+            {
+                if (card.enabled)
+                    kept++;     // Frost* / WinterBud*: the chips on the cane
+                continue;
+            }
+            if (!card.enabled)
+                continue;
+            card.enabled = false;
+            HiddenCards.Add(card);
+            hidden++;
+        }
+        Debug.Log("ART-PARTS stem " + visual.parent.name + " canvas=" + key
+            + " cardsHidden=" + hidden + " kept=Frost*/WinterBud* (" + kept + ")");
     }
 
     private static string FlowerKeyDeep(SpriteRenderer sr)
