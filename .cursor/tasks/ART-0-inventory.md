@@ -177,3 +177,14 @@ crop differ). Still open in this family: the bole's ~33 flat `Tiled` bark cards 
 measured backdrop pockets (a single painted bole canvas would close both - a bigger art
 decision), and the two shoulder runs the silhouette probe still reports (9 / 11 columns inside
 a 2 px band; the instrument's own floor for a 4.8 px envelope is ~10-12, so no curve wins it).
+
+**Import contract, re-checked offline (33rd pass, 20.09)** - `Tools/art0-import-contract-audit.py`
+(new, no Unity, exit 1 on any problem): `ART-0-IMPORT-CONTRACT end problems=0` on today's bytes.
+27 key literals, 24 resolve, 3 negative probes correctly absent, 0 missing; **85** pictures in 12
+folders green on `textureType 8 / spriteMode 1 / spriteMeshType 0 / wrap 1/1 /
+fallbackPhysicsShape 0`, `isReadable 1` on the 81 `Art/*` and 0 on the four `Level/*`; 340 `.meta`,
+340 distinct guids, 0 duplicates; the seven materials 17826.9 KB -> 3331.3 KB (5.35x). This is the
+coverage the engine gate (`art1-gate.sh`) cannot give while the editor holds the project - its own
+guard refuses (`Temp/UnityLockfile`), and the engine run plus every frame therefore stays PENDING
+for the next cycle that finds Unity closed. No picture changed in this pass:
+`Trials/Runs/art-0-import-contract-33rd-report.md`.

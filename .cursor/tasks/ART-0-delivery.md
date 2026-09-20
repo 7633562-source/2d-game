@@ -1481,4 +1481,56 @@ bole (`x 859..861 y 861..890`, 80% exact backdrop; `x 901..903 y 831..885`) are 
 between cards. The change that closes both is one painted bole canvas taking the base part's own slot
 with the cards stepping aside - the mechanism the flower's leaf and this tree's leaf cards already use -
 and it is a bigger art decision than this pass was scoped for. Full numbers:
-`Trials/Runs/art-0-bolefoot-31st-report.md`.
+`Trials/Runs/art-0-bolefoot-31st-report.md`. (The 32nd pass - the same canvas repainted so the toes
+are cut by the bark's own grain, `md5 beca2d01b8edffe63785729e2906c390` - is recorded in
+`Trials/Runs/art-0-bolefoot-32nd-report.md`; its section 4 re-ran this card's five items on its own
+bytes. The journal entry for it was not written; the report is the record.)
+
+## Thirty-third pass 20.09 (artist) - the import contract is a gate that runs with the editor open
+
+No picture changed, nothing under `Assets/` written. The editor held the project
+(`Temp/UnityLockfile` 09:31:12, `Unity.exe` pid 27456), so `art1-gate.sh` refused by its own guard
+(line 14-16, `exit 3`) and per the brief's item 5 no Unity run was attempted. The one thing the ART-0
+brief asks for that had no offline answer is item 4, and its coverage was thin: the project's only
+offline import check (`Tools/art0-meta-audit.py`) names **20 keys** while the manifest holds **85
+pictures**. The 65 it never touched are exactly the part canvases ART-2/ART-3 and the tree rig will
+bind.
+
+**New: `Tools/art0-import-contract-audit.py`** (offline, no Unity, exit 1 on any problem). It (1)
+scans every `.cs` under `Assets/` for the literals handed to `Albedo(`/`Tiled(`/`Dress(`/
+`ApplyPicture(`/`Load(` and the `…Key = "…"` constants and resolves each the way the loader would -
+`Level/*` through `LevelArt.PathsFor`, everything else to `Art/<key>.png`; a key only `Art1Check`
+asks for is treated as a NEGATIVE probe and must be ABSENT, which is the gate's own assertion that a
+missing key draws the labelled MISSING-ART tile; (2) reads every picture's import fields out of its
+own `.meta`; (3) prints the seven material tiles `LegacyArt/` -> shipped with KB and md5; (4) checks
+guid uniqueness.
+
+**Result on today's bytes: `ART-0-IMPORT-CONTRACT end problems=0`, exit 0.** 27 key literals, **24
+resolve, 3 negative probes, 0 missing** (the four level keys resolve through `PathsFor`:
+`ground_fill` -> `Level/ground_fill.png`, `ground_cap` -> `Level/ground_cap.png`, `sky` ->
+`Level/sky.png`, `sign_finish` -> `Level/sign_finish.png`). **85 pictures** in 12 folders (`Art` 7,
+`Apple` 2, `Campfire` 4, `Chicken` 9, `Crow` 9, `Dog` 10, `Flower` 13, `Hedgehog` 12, `Human` 10,
+`Level` 4, `Strawberry` 3, `Tree` 2), every one `textureType 8 / spriteMode 1 / spriteMeshType 0 /
+wrap 1/1 / fallbackPhysicsShape 0`, `isReadable 1` on the 81 `Art/*` and `0` on the four `Level/*`
+sprites (correct - only `ArtLibrary` samples CPU pixels), all `filterMode 1` (Bilinear, the 7th pass'
+open look item - recorded, not changed), 340 `.meta` with 340 distinct guids, 0 duplicates. The seven
+materials: 1024x1024, 17826.9 KB -> 512x512, 3331.3 KB, 5.35x, md5 `a5f78f7e0bad` (skin) /
+`877064281666` (fabric) / `992e1103ee0f` (denim) / `a9b1f44ad195` (dirt) / `d4a498f65127` (grass) /
+`788a5c818001` (bark) / `23803dbe1d76` (leaf). Cross-check: the older `art0-meta-audit.py` prints
+`problems=0` with the same md5s on the 20 keys it names. Side note measured, nothing changed: the
+`Dog`/`Crow`/`Chicken` parts are imported as one padded 512x341 / 341x512 canvas per part while the
+`Hedgehog`'s twelve keep their crop aspects (`quill` 64x240, `chest` 512x228, `front_lower` 112x200) -
+the hedgehog has not had the `pad_to_aspect` pass the human parts got on 19.09; that binding is
+ART-2/ART-3's lane.
+
+**Rule zero.** `git status --porcelain Assets/` lists five files and none is this pass':
+`ArmDrive.cs` (arm lane), `GalleryCapture.cs` + `GalleryScene.cs` (level lane),
+`PoseDriveController.cs` + `TrialRecorder.cs` (walk lane), all in flight before it started. This pass
+wrote `Tools/art0-import-contract-audit.py`, `Logs/art0-contract33.out`, its report and these two
+card lines; no `.cs`/`.png`/`.meta`/scene, no build, no trial.
+
+**Still open, unchanged:** the bole canvas (~33 flat cards + two measured backdrop pockets), `bark`
+still a macro photograph (autocorrelation < 0.5 at 2 px across, 6 px down - the 22nd pass' number),
+the 1480 leaf/bark parts under 0.02 m, `UI / HUD icons` (out of scope), the human clothing layer, and
+the engine gates themselves (they need a free editor). Report:
+`Trials/Runs/art-0-import-contract-33rd-report.md`.
