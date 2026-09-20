@@ -912,3 +912,54 @@ an explicit OK/FAILED line), `impact-closing-grid.sh`, `impact-closing-table.py`
 `impact-closing-accept.sh`. Report `Trials/Runs/impact-closing-report.md`. **This lane's grid-audit
 list (5a-5f) is now empty**: L1 (latency keyed on the collision) and L3 (no active-reaction-off
 switch) remain the walk stream's, in `Assets/BalanceController.cs`.
+
+## ARENA genome box could not express the step band it was searching (programmer cycle, 20.09 ~07:50)
+
+`build-status.txt` read `OK at 06:45` while `Assets/PoseDriveController.cs` (06:51/07:03) and
+`Assets/TrialRecorder.cs` were newer than the line that certified them - the stale-OK class this
+lane closed on 20.09 06:43. A gate run was forced after the edits below (Unity closed, no
+`trial.lock`) and wrote `OK at 07:50` off a real compile: `CompileScripts: 5696.900ms`, **0**
+`error CS` lines, `TRIAL_BUILD_OK .../Build/Headless/BalanceTrial.exe`, with both edited sources
+(`ArenaGenome.cs` 07:49:03, `PoseDriveController.cs` 07:48:57) OLDER than the run's own start
+(07:49:52). The player now carries the edited compiler output, not the 06:45 one.
+
+Found in the two Assets files changed in the hour, and it is the failure class this lane flagged on
+19.09: **the arena genome's box and its apply path could not express the walk band the tree
+ships.** `Tools/arena-genome-box-audit.py` (the offline contract audit) read **BROKEN - 2 breaks**
+on the live tree:
+
+1. `stepMinMeters` shipped **-0.45** (`PoseDriveController.cs` field, WALK CYCLE 6r: the band is
+   one step either side of the stance foot "so the law can put the pivot behind a CoM that is
+   falling backwards") against `ArenaGenome.Min[8] = 0f` - the shipped value was OUTSIDE the box.
+2. `ApplyArenaGenome` read `stepMinMeters = Mathf.Max(0f, g[8])`, the ONE clamp `ReadSwitches` does
+   not have (`-poseStepMin` passes its value through bare). The clamp BINDS the shipped value, so
+   through the genome path **every negative sample landed on 0**, the gene read as a constant, and
+   no row can show it: `Trials/Runs/arena-param-log.csv` stores the gene it SAMPLED, not the value
+   the body received. Half the band was unreachable and the log would have called it a null.
+
+Fix, three numbers and a doc: `ArenaGenome.Min[8] 0f -> -0.45f`, `Defaults[8] 0.02f -> -0.45f` (the
+reference genome now reproduces the walk the tree ships, not the pre-6r +0.02 band), the apply floor
+removed so the genome's clamp IS the switches' clamp (the header promise), and the box now carries
+the invariant in-line (every shipped initialiser lies inside `[Min[i], Max[i]]`).
+
+The audit tool itself was lying about the fix: its statement splitter cut on `;` without stripping
+comments, so the semicolon in the new comment's prose split the assignment in half and the field
+read as "ApplyArenaGenome never assigns it (gene order broken?)" on a tree that assigns it plainly.
+Splitter now strips `//` comments and string literals before splitting. Its `--selftest` was also
+leans-on-the-tree (it asserted the live tree is BROKEN), so after the fix it would have printed
+FAILED for the wrong reason; it now rebuilds each break synthetically from the live text and passes
+**4/4** - `live tree passes`, `box Min[8] = 0 is caught`, `apply floor at 0 is caught`, `the fixed
+box still accepts the +0.02 arm`. Audit live: `OK - every shipped default is inside its box; 0
+latent clamp drift(s)`.
+
+Rule-zero on the walk lane's in-flight 6s/6t/6w publication (the reason the two files were new):
+the new `capturePose*` columns are **live**, not dead - 15 of 15 move on `c6w_walk.csv` (217
+columns, header == row per `Tools/impact-json-lint.py --selftest`, `OK` at cycle start), and read 0
+only where the sentinel means it (stand runs carry no pose ask). The 6w height datum is a real
+latch, not the 6v mirror: the request is CONSTANT within each step (0.9582 / 0.9463 / 0.9499 /
+0.2758 m) while the live hip moves, bit-equal on **6 of 604** driving rows - the latch frame - with
+`max|request - live| = 0.6679 m` (step 3 held the ask at 0.9499 while the hip sank to 0.2820 and the
+CoM rolled back to -0.7272 m). Swap reasons exercised: 2 (CoM led) for steps 1-2, 1 (clock) for
+step 3, 3 (planted timeout) for step 4, `driveState` 2 -> 0 as the gait relaxed - the lead rule
+holds twice and the clock then takes over the step that sinks.
+

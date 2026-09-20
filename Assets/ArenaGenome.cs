@@ -45,9 +45,19 @@ public static class ArenaGenome
 
     // The search box. Every value written into a body is clamped to it, so a
     // jittered copy can never leave the box the command-line switches accept.
+    // INVARIANT, checked offline by Tools/arena-genome-box-audit.py: every
+    // Defaults[i] below AND every shipped initialiser of the same field in
+    // PoseDriveController lies INSIDE [Min[i], Max[i]] - a box that cannot
+    // express the value the tree ships is not a search box, it is a wall, and
+    // the influence log cannot show the difference.
+    // WALK CYCLE 6r: Min[8] was 0f while the shipped band became -0.45 .. +0.45
+    // (PoseDriveController.cs stepMinMeters), so the genome could only ever place
+    // the step pivot IN FRONT of the stance foot - the negative half of the band,
+    // the half the law now needs to put the pivot behind a CoM falling backwards,
+    // was unreachable through this path. Signed genes get a signed box.
     public static readonly float[] Min =
     {
-        0.15f, 0.15f, 0.05f, 0.40f, 100f, 0f, 0f, 0.05f, 0f, 0.20f, 0f, 0.2f, 0.2f,
+        0.15f, 0.15f, 0.05f, 0.40f, 100f, 0f, 0f, 0.05f, -0.45f, 0.20f, 0f, 0.2f, 0.2f,
     };
 
     public static readonly float[] Max =
@@ -56,10 +66,12 @@ public static class ArenaGenome
     };
 
     // Defaults are the values the walk was verified on, so generation 0 is never
-    // an unexplored corner of the box.
+    // an unexplored corner of the box. WALK CYCLE 6r: Defaults[8] was 0.02 (the
+    // pre-6r floor), so the reference genome did not reproduce the walk the tree
+    // ships - it reproduced the old +0.02 band. It follows the field.
     public static readonly float[] Defaults =
     {
-        0.35f, 0.45f, 0.22f, 0.80f, 400f, 25f, 0.04f, 0.16f, 0.02f, 0.45f, 22f, 1.0f, 1.0f,
+        0.35f, 0.45f, 0.22f, 0.80f, 400f, 25f, 0.04f, 0.16f, -0.45f, 0.45f, 22f, 1.0f, 1.0f,
     };
 
     // Appended tail of the influence-log contract: nothing. The CSV keeps the

@@ -887,7 +887,66 @@ public class TrialRecorder
             //    (the capture walker and every layer before it; also the sentinel
             //    written by ResetCaptureWalk), 1 = the level 2 pose library held
             //    the joints on this row. Recorder only; no NaN.
-            .Append("captureWalkPath").AppendLine();
+            .Append("captureWalkPath").Append(';')
+            // ─── WALK CYCLE 6s (append-only, indices stable) ───
+            // 6q said WHICH path wrote the leg joints on a row; nothing said what
+            // the LEVEL 2 path ASKED FOR. The reversal that costs the walk its
+            // row (c6r2_walk: comX 0.508 at 6.4 s, 0.497 at 7.0, comVelX -0.599,
+            // fell 7.255 s) was therefore readable only through the library's
+            // numbers AFTER the PD had them (hip*/knee*/ankle*) and the torques
+            // it applied (appTorque*) - and those two cannot be told apart in the
+            // reversal. These 15 columns are the request itself: the six joint
+            // angles the library handed the PD on this step, the hip height it
+            // was asked to hold against the height it had, the pelvis pitch it
+            // targets, the step clock's swap decision, and whether the pose gait
+            // is driving at all. Appended at the END so every column before it
+            // keeps its index. 0 is the sentinel for "the pose gait is not
+            // driving the WALK on this step" (the -poseDrive switch is off, the
+            // gait is standing, or its own down test relaxed the body), never NaN
+            // — see the publication block in PoseDriveController.cs.
+            // capturePoseTargetHipLDeg / KneeL / AnkleL / HipR / KneeR / AnkleR —
+            //    the pose library's own joint angle requests for this step, deg,
+            //    per RIG side, rig convention (hip minus = flexion, knee plus =
+            //    flexion, ankle plus = toe down). The swing leg is the one whose
+            //    knee target is the folded one; the stance leg's hip target is the
+            //    one the trunk hold is spent on.
+            .Append("capturePoseTargetHipLDeg").Append(';')
+            .Append("capturePoseTargetKneeLDeg").Append(';')
+            .Append("capturePoseTargetAnkleLDeg").Append(';')
+            .Append("capturePoseTargetHipRDeg").Append(';')
+            .Append("capturePoseTargetKneeRDeg").Append(';')
+            .Append("capturePoseTargetAnkleRDeg").Append(';')
+            // capturePoseHipHeightRequestM — the hip height the balance layer
+            //    asked the gait to hold, m (the stand frame's height).
+            // capturePoseHipHeightLiveM — the hip height the body had, m.
+            //    Request minus live is the height loop's own error, in metres.
+            // capturePosePelvisTiltTargetDeg — the pelvis world tilt the pose in
+            //    force owns, deg, minus = forward (the row's pelvisTilt sign);
+            //    subtract it from the row's pelvisTilt for the pose's pitch error,
+            //    whose bounded answer is the trunk correction on the stance hip.
+            .Append("capturePoseHipHeightRequestM").Append(';')
+            .Append("capturePoseHipHeightLiveM").Append(';')
+            .Append("capturePosePelvisTiltTargetDeg").Append(';')
+            // capturePoseStepIndex — the index of the step in force: the number of
+            //    swaps the pose gait has fired (the same number walkSwap carries,
+            //    published inside the pose block so the block reads alone).
+            // capturePoseMaySwap / ClockDone / LedOut — the three inputs of the
+            //    swap decision as the pose gait computed them on this step, 0/1.
+            // capturePoseSwapReason — which of them fired the swap on the step a
+            //    swap happened: 0 none, 1 the half cycle ran out, 2 the CoM led
+            //    the stance foot, 3 the planted timeout (a swing that never
+            //    landed). Frozen codes.
+            .Append("capturePoseStepIndex").Append(';')
+            .Append("capturePoseMaySwap").Append(';')
+            .Append("capturePoseClockDone").Append(';')
+            .Append("capturePoseLedOut").Append(';')
+            .Append("capturePoseSwapReason").Append(';')
+            // capturePoseDriveState — 0 the pose gait is stopped (the switch is
+            //    off, or its own down test relaxed the body), 1 it is driving the
+            //    STAND pose, 2 it is driving the WALK. The column that answers the
+            //    post-fall runaway: `down` = 1 with this at 2 is a pose gait still
+            //    driving a body already on the slab.
+            .Append("capturePoseDriveState").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -1366,6 +1425,34 @@ public class TrialRecorder
         // through unchanged, so the sentinel never becomes a NaN and never a
         // second meaning.
         float j6qWalkPath = FiniteOrZero(balance != null ? balance.captureWalkPath : 0f);
+        // ─── WALK CYCLE 6s (append-only): THE POSE GAIT'S OWN ASKS ───
+        // 6q published WHICH path wrote the leg joints; nothing published what
+        // the LEVEL 2 path ASKED FOR, so the 6.4-7.0 s reversal of c6r2_walk
+        // (comX 0.508 at 6.4 s, 0.497 at 7.0, comVelX -0.599, fell 7.255 s) could
+        // only be read through the library's numbers AFTER the PD had them
+        // (hip*/knee*/ankle*) and the torques it applied (appTorque*). Read once
+        // per row like the 6j..6q blocks above, same FiniteOrZero discipline; the
+        // pose drive's own 0 sentinel (the pose gait is not driving the WALK on
+        // this step: the switch is off, the gait is standing, or its own down test
+        // relaxed the body) passes through unchanged, never NaN.
+        float j6sPoseHipLDeg = FiniteOrZero(pose != null ? pose.capturePoseTargetHipLDeg : 0f);
+        float j6sPoseKneeLDeg = FiniteOrZero(pose != null ? pose.capturePoseTargetKneeLDeg : 0f);
+        float j6sPoseAnkleLDeg = FiniteOrZero(pose != null ? pose.capturePoseTargetAnkleLDeg : 0f);
+        float j6sPoseHipRDeg = FiniteOrZero(pose != null ? pose.capturePoseTargetHipRDeg : 0f);
+        float j6sPoseKneeRDeg = FiniteOrZero(pose != null ? pose.capturePoseTargetKneeRDeg : 0f);
+        float j6sPoseAnkleRDeg = FiniteOrZero(pose != null ? pose.capturePoseTargetAnkleRDeg : 0f);
+        float j6sPoseHipHeightRequestM =
+            FiniteOrZero(pose != null ? pose.capturePoseHipHeightRequestM : 0f);
+        float j6sPoseHipHeightLiveM =
+            FiniteOrZero(pose != null ? pose.capturePoseHipHeightLiveM : 0f);
+        float j6sPosePelvisTiltTargetDeg =
+            FiniteOrZero(pose != null ? pose.capturePosePelvisTiltTargetDeg : 0f);
+        float j6sPoseStepIndex = FiniteOrZero(pose != null ? pose.capturePoseStepIndex : 0f);
+        float j6sPoseMaySwap = FiniteOrZero(pose != null ? pose.capturePoseMaySwap : 0f);
+        float j6sPoseClockDone = FiniteOrZero(pose != null ? pose.capturePoseClockDone : 0f);
+        float j6sPoseLedOut = FiniteOrZero(pose != null ? pose.capturePoseLedOut : 0f);
+        float j6sPoseSwapReason = FiniteOrZero(pose != null ? pose.capturePoseSwapReason : 0f);
+        float j6sPoseDriveState = FiniteOrZero(pose != null ? pose.capturePoseDriveState : 0f);
 
         // The same column set, without new[] and Join on every 200 Hz step.
         rows.Append(F(time)).Append(';')
@@ -1610,7 +1697,27 @@ public class TrialRecorder
             .Append(F(j6pPostureBiasDeg)).Append(';')
             // WALK CYCLE 6q — which path held the joints, appended LAST so every
             // column before it keeps its index (0 = level 1, 1 = the pose library).
-            .Append(F(j6qWalkPath)).AppendLine();
+            .Append(F(j6qWalkPath)).Append(';')
+            // WALK CYCLE 6s — the pose gait's own asks, appended LAST in the same
+            // order as the header block above so every column before them keeps
+            // its index: the six joint requests, the hip-height request and live
+            // height, the pelvis pitch target, the step clock's swap decision and
+            // whether the pose gait is driving at all.
+            .Append(F(j6sPoseHipLDeg)).Append(';')
+            .Append(F(j6sPoseKneeLDeg)).Append(';')
+            .Append(F(j6sPoseAnkleLDeg)).Append(';')
+            .Append(F(j6sPoseHipRDeg)).Append(';')
+            .Append(F(j6sPoseKneeRDeg)).Append(';')
+            .Append(F(j6sPoseAnkleRDeg)).Append(';')
+            .Append(F(j6sPoseHipHeightRequestM)).Append(';')
+            .Append(F(j6sPoseHipHeightLiveM)).Append(';')
+            .Append(F(j6sPosePelvisTiltTargetDeg)).Append(';')
+            .Append(F(j6sPoseStepIndex)).Append(';')
+            .Append(F(j6sPoseMaySwap)).Append(';')
+            .Append(F(j6sPoseClockDone)).Append(';')
+            .Append(F(j6sPoseLedOut)).Append(';')
+            .Append(F(j6sPoseSwapReason)).Append(';')
+            .Append(F(j6sPoseDriveState)).AppendLine();
     }
 
     private static float WatchAngle(JointDampingWatch watch, int index)
