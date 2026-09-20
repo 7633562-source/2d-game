@@ -1178,6 +1178,197 @@ row; the fill's remaining 5.22x residual on the 32 m plate (a 16 m native tile w
 count and change the Sliced path of every slab <= 8 m, i.e. every scene - the level lane's call, not a
 one-change cycle).
 
+## Nineteenth pass 20.09 (artist) - the campfire's logs stop being half-transparent boxes
+
+**The five brief items, re-proved on today's bytes before anything was written.** The loader contract
+quoted from the files (not guessed): `LevelArt.FillKey/CapKey/SkyKey/SignKey` = `ground_fill`,
+`ground_cap`, `sky`, `sign_finish`; `Load` walks `PathsFor(key)` (`{"Level/<key>"}`, plus `Art/<key>`
+for sky and sign) and `LoadAt` asks `Resources.Load<Sprite>(path)` then `Resources.LoadAll<Sprite>`,
+so the four level pictures are **Sprite** assets under `Assets/Resources/Level/`; `ArtLibrary.Albedo`
+is `Resources.Load<Texture2D>("Art/" + key)` (line 139) and `Tiled` derives its own ppu from
+`tex.width` (line 165), so a material/part key is a **readable Texture2D** under `Assets/Resources/Art/`
+and a missing key returns null - the caller then shows the labelled MISSING tile. Materials: seven
+1024x1024 originals (2003.7-3096.3 KB) -> 512x512 (158.1-664.6 KB), 17826.9 -> 3330.4 KB, `LegacyArt`
+still unbundled. Level pictures unchanged and present: `ground_fill` 1024x256 ppu 128, `ground_cap`
+128x14 ppu 100, `sky` 512x128 ppu 32, `sign_finish` 64x320 ppu 100. Import re-read on the `.meta`
+bytes: `python Tools/art0-meta-audit.py` **problems=0** for all **15** shipped pictures (textureType 8
+Sprite, spriteMode 1 Single, spriteMeshType 0 Full Rect, wrapU/V 1, fallback-physics-shape 0,
+`isReadable 1` exactly where the loader needs CPU pixels, ppu as the loader expects), **321** `.meta`
+under `Assets/` and **321** distinct guids, 0 duplicates.
+
+**The defect.** The FIRE row's logs were `Campfire.BuildLogs` -> `HumanSegment.ApplyPicture` ->
+`CreateBodySprite(size)` (a collider-sized white rectangle) tinted `LogWood = (0.50, 0.25, 0.00, 0.5)`:
+one colour, half transparent. A crop read of the shipped `gallery7_fire.png` named it exactly -
+*"absolutely flat, single-colour semi-transparent rectangles with hard straight edges, they read as
+placeholders, and the ground and the grass show through them"* - which is Yury's complaint in
+miniature, in the first scene a player sees.
+
+**The picture.** Three canvases, one per log box in that box's OWN aspect (a Sliced sprite maps the
+whole canvas onto the box, so one shared canvas would squash LogC, aspect 2.50, by 1.77x against LogA,
+4.43): `Art/Campfire/log_a.png` 248x56 ppu 400 for 0.62 x 0.14 m, `log_b` 216x52 ppu 400 for
+0.54 x 0.13, `log_c` 90x36 ppu 300 for 0.30 x 0.12 m - painted by `Tools/gen-fire-textures.py`
+(`paint_log`), an opaque wood cylinder with a bark top, a sawn end face with rings and a cut rim,
+grain, splits and knots, in 11 flat tones three to four steps apart (the flat language; the flame's
+ramp stays this file's only gradient). `LOG-PICTURE OK canvases=3 aspect_error_max=0.0000
+coverage_min=91.4% opaque_min=90.0% tones_min=11` (`Tools/art0-log-probe.py`, its own gate). The
+shipped box is the thing replaced: one colour, alpha 0.5.
+
+**The code path is picture only.** `Campfire.LogArtKeys` (new) -> `Campfire.DressLog(sr, index)` ->
+`ArtParts.Dress(sr, key, 0f, true)`: a zero tile period means "one repeat across the part", so
+`Tiled` recomputes ppu and the canvas lands Sliced on the box the log already has - size stays on
+`sprite.size`/`sr.size`, `localScale` untouched, `LogWood`'s translucent tint dropped for white
+because the canvas carries the colour. `BuildLogs` (the yard, `LevelGenerator.EnsureOnYard`) and
+`GalleryScene.BuildFireRow` (the catalogue) call the same function, so the catalogue cannot show a
+different pile from the yard; a missing PNG leaves today's box (no hole in the fire), and a headless
+run without visual capture refuses the dress because there `ApplyPicture` puts an 8 x 8 placeholder on
+the log whose box is 1 x 1 m. `Campfire.LogBox(i)` / `LogIndex(name)` read `LogRow`, so no box or name
+is retyped; `Art1Check.CheckFireLogs` asserts, with Unity, that each key resolves, that the canvas
+aspect equals the log's own box aspect, that `Tiled` maps onto the box, and that `DressLog` really
+turns a log renderer Sliced with `size` = that box and white tint. The fire's numbers did not move:
+`python Tools/art0-fire-stack-check.py <HEAD Campfire.cs> Assets/Campfire.cs none` -> **PASS 1** (92
+distinct / 247 total float literals, added none, removed none), PASS 2/2b/3/4 - the tool gained the
+optional expectation argument that only "none" needs.
+
+**The blind reads.** Two independent reads preferred the painted logs: the labelled box sheet at
+340 px/m (LEFT = the engine's flat box, RIGHT = the canvas) and the generator's randomised pair
+(`logs_blind_pair.png`, same moment, same camera, sides shuffled, map opened after the pick) where the
+pick was RIGHT and the map says RIGHT = painted logs. The small-scale check matters most because the
+yard camera (ortho 4.6 -> 117 px/m) draws a log about 73 x 16 px: at that scale the read picked the
+painted side too and reported *"texture does not turn to mush, the bark microcontrast and the pale cut
+ends carry the shape"*, while the flat side was *"not noise, but readable only as flat chocolate
+bars"*. **On the record:** a 4x magnified absolute read of the canvases alone was negative ("blobby
+shading, no fibres around the knots, would not ship") - recorded and rejected, because the form this
+card has twice found unreliable is the absolute verdict, the scale it judged (4x = 224 px tall) is
+four times any lens the game shows, and it contradicts both pairwise reads. What it did earn is the
+correction pass inside this cycle: finer mottle, bark grooves, a knot on two logs, the cylinder taper
+cut to 2% and a shadowed cut rim at the far end.
+
+**ADDED-AFTER-BUILD (closed 20.09, 21st pass).** This pass shipped without a frame of its own; the
+level worker's `gallery9` (01:35, player `f27c21ab…`, `realItems 29 / missingItems 11 / dressed 5567`)
+captured it and the numbers say the canvases are drawn: the FIRE row's note reads
+`logs dressed 3/3 by Campfire.DressLog` (after their own counter fix), both flat `LogWood` blends of
+the pile window fall to exactly 0 px (`[106,73,65]` 7319 -> 0, `[117,68,45]` 2469 -> 0) while three
+textured bark browns appear (1837 / 1198 / 869 px) and the window's distinct colours go 5024 -> 7204
+(`Trials/Runs/level-gallery9-report.md`). This cycle's build (`art0scale21`, `debd785b…`) put the same
+lens against that frame: **4787 of 2 073 600 px differ, all inside x 845-1073 y 732-839** (= the pile)
+with maxdelta 37, which is the 21st pass's dress-order change and not the logs (the log canvases have
+the box's own aspect, so their geometry is the one thing that did not move). The 19th pass now has its
+frame, and it is the level worker's, unchanged.
+
+**Physics.** No simulation file touched. The three compiled files of the pass are
+`Assets/Campfire.cs` (keys, `DressLog`, the two `LogRow` readers, one call in `BuildLogs`),
+`Assets/GalleryScene.cs` (the FIRE row dresses its logs through the same function; its inventory text
+now names the three canvases) and `Assets/Editor/Art1Check.cs` (the new check + inventory rows). The
+campfire has no collider and no `Rigidbody2D`, `LogRow`'s boxes were not edited, and the trial player
+is `SampleScene`, which contains no campfire. `Build/Headless` was neither rebuilt nor re-run.
+
+## Twentieth pass 20.09 (artist) - ART-0 gap 3: the flower's bloom is painted
+
+`PlantFlower` drew every petal, the distal lip, a tulip's cup, the sepals and the head plate as the
+collider rectangle - the last object in the game with no art. Five luminance canvases (grey form, the
+shape in the alpha channel, so the kind's own colour multiplies them and one canvas serves all twelve
+kinds) are now in `Assets/Resources/Art/Flower/`, painted by `Tools/gen-flower-textures.py`:
+
+```
+petal      40x64  role box 0.0384 x 0.0615 m  aspect 1.0010  89 tones  2724 B  ppu 1042
+petal_tip  44x34  role box 0.0184 x 0.0142 m  aspect 0.9987  95 tones  2002 B  ppu 2391
+cup        40x52  role box 0.0725 x 0.0850 m  aspect 0.9019  53 tones  2753 B  ppu  552
+calyx      26x40  role box 0.0253 x 0.0373 m  aspect 0.9583  85 tones  1359 B  ppu 1028
+disk       56x56  role box 0.0345 x 0.0363 m  aspect 1.0522  78 tones  4328 B  ppu 1623
+```
+
+`aspect` = canvas aspect / the role box's aspect (1.000 = drawn in the box's own aspect). Binding:
+`ArtParts.FlowerKeyForName` (Sepal/PetalTip/Petal/Disk/Bloom -> the five keys, deliberately not in
+`KeyForName`) and `ArtParts.DressFlower(root, real)`, which dresses only renderers with a `PlantFlower`
+above them so a scene root cannot repaint a tree; `PlantFlower.BuildFlower` calls it when
+`ArtLibrary.RealArtEnabled || HeadlessTrial.VisualCapture` (the flag defaults OFF, so a headless trial
+keeps its boxes). The gallery draws the row for real (four kinds, labels on level anchors, its own lens
+`flower` = ortho 0,88) and the two labelled flower gaps left the missing row.
+
+Gate (`art1-gate.sh`, editor closed): `ART-1A-CHECK end failures=0` with the five new key checks, the
+per-kind rig numbers (`Rose renderers=58 petals=6 withCanvas=6 tips=6 sepals=4 parts=4`, `Daisy 82/8/8/8/4`),
+`every petal keeps its own box (Sliced, size == box)`, `keeps the kind colour`, `dressing moves no
+localScale`, `dressed renderers carry no body (rule zero)` and `real=false restores the flat box`.
+`python Tools/art0-meta-audit.py` (extended to the five keys) -> **20 shipped pictures OK, problems=0,
+327 `.meta` / 327 distinct guids**. Determinism: a generator rerun leaves all 10 files byte-identical.
+
+Frames: `flower-20th` (`buildGuid 55be038d…`, 10 stills, 165-frame / 16.5 s 1080p pan, `real=30
+missing=7 dressed=5634`); its `flower`/`flowerbox` pair is **byte-identical** to the level worker's
+`gallery10` lens (`md5 39279ba7…` / `77dde836…`), so the catalogue the level worker delivered IS this
+pass's frame. Tones per plant, real vs flat box (same camera, `Tools/art0-flower-frame-probe.py`):
+37/55/41/54 against 5/5/6/5. Blind pairwise reads, sides shuffled, map opened after the pick, two
+sheets with opposite orders: **both named the real canvases** (seed 53 BOTTOM, seed 71 TOP).
+
+Left as labelled gaps (ART-0 gap 3b): the foliage (`Leaflet*`/`Leaf_*` - the 12 kinds' boxes span
+aspect 0.21-1.8, one canvas cannot serve them), the lavender spike and the autumn hip (`Spent`); plus
+`UI icons` as before. Full numbers: `Trials/Runs/art-0-flower-20th-report.md`.
+
+## Twenty-first pass 20.09 (artist) - the gate caught a real look bug: tiled parts drew up to 5x too big
+
+Editor closed, bash only. The cycle started as bookkeeping for the two passes above and found their
+gate red: `art1-gate.sh` -> `ART-1A-CHECK end failures=3`, all of them
+`fire log Campfire/log_{a,b,c} dressing moves no localScale`, with the new INFO line printing
+`localScale (1, 1, 1) -> (1, 0.99849, 1)` / `1.0081` / `0.99375`.
+
+**The cause, measured** (`Art1Check.ScaleAudit`, a new `-executeMethod` entry): Unity keeps the current
+world box when a `Simple` renderer is converted to `Sliced`/`Tiled`, and it does that by writing the
+TRANSFORM's scale, `scale = world box at the conversion / the size property at the conversion`.
+`ArtParts.Dress` read the box first, assigned `size` while the renderer was still `Simple`, swapped the
+picture, and switched the mode last - so the factor came out as the new canvas' natural size over the
+old placeholder's box. On the logs that is 0.15-0.8 %; on a limb it is the whole picture:
+
+```
+limb  box 0.100 x 0.300 m, key bark, tileMeters 0.50
+  old order (picture, size, mode): scale (5.00000, 1.68421)  drawn WorldBox 0.50000 x 0.50000 m
+  new order (mode, picture, size): scale (1.00000, 1.00000)  drawn WorldBox 0.10000 x 0.29688 m
+petal box 0.029 x 0.036 m, key Flower/petal
+  old order: scale (1.28125, 1.60000)  drawn 0.03716 x 0.05945 m
+  new order: scale (1.00000, 1.00000)  drawn 0.02900 x 0.03716 m
+```
+
+So every tiled part was drawn at the **canvas' own natural size** - a 0.5 m bark slab on a 0.1 m limb -
+and only the longest side was ever right; where the canvas aspect equals the box aspect (the padded
+human parts, the three logs) the factor was ~1, which is why no earlier pass saw it.
+
+**The change** is one block of `Assets/ArtParts.cs`: the draw mode is assigned BEFORE the picture and
+the size, so the conversion happens while the renderer still carries its own placeholder and the factor
+is exactly 1. The dress then writes `sprite`, `size` and `color` and nothing else.
+
+**The frames, one build, bash only** (`art-gallery-capture.sh art0scale21`): `PREVIEW_BUILD_OK
+scenes=12 errors=0`, 10 stills + 165-frame / 16.5 s 1080p pan, 0 capture failures,
+`real=30 missing=7 dressed=6833`, `buildGuid debd785b465247f9a62decc985cc8d51`. Between this build and
+the level worker's `gallery10` exactly one shipping file changed (`Assets/ArtParts.cs`, plus the
+Editor-only `Art1Check.cs`), so every moved pixel is this change: **tree 45.06 % of the frame, apple
+5.65 %, flower 1.27 %, flowerbox 0.81 %, photo 0.58 %, placeholder 0.52 %, fire 0.23 %, and
+human/level/materials pixel-identical**. The oak's ink area at the same lens goes 889 226 px -> 103 527 px
+(bbox x 410-1919 -> x 589-1330) and the trunk run at the base 1236 px -> 85 px: the old frame's "trunk"
+was the pile of half-metre plates. Two blind pairwise reads of the same camera (seeds 17, 29, sides
+swapped) each named the NEW build as the coherent oak, on opposite sides.
+
+**Rule zero.** No simulation file touched (a sprite swap plus `size`/`drawMode`/`color`), and the gate
+now asserts it per part: `dressed renderer carries no body (rule zero)` is OK for all three logs and
+both flower rigs, i.e. no `Collider2D`/`Rigidbody2D` sits on a dressed transform; the dressed renderers
+are visual children by construction (`PlantTree.cs:3743` `InitializeVisualOnly`, `Campfire.MakeBox`,
+the flowers), and the headless path refuses the dress (`DressLog` false without visual capture,
+`PlantFlower` gated on the flag that defaults OFF). `Build/Headless` was neither rebuilt nor re-run.
+
+Gates after the change: `art1-gate.sh` -> `unity exit=0`, `failures=0` (3 FAIL -> OK, +6 rule-zero
+assertions); `art0-import-gate.sh` -> `unity exit=0`, `failures=0`, the four `Level/*` through
+`Load<Sprite>` (1024x256 ppu=128, 128x14 ppu=100, 512x128 ppu=32, 64x320 ppu=100), the seven
+`Art/<key>` `512x512 readable=True`, `TILE ground_cap 0,0083 -> REPEATS`, `TILE ground_fill 0,0000 ->
+REPEATS`; `art0-meta-audit.py` `problems=0`.
+
+**Left open, with a number on it.** With the drawn box finally equal to the box, a limb of
+0.10 x 0.30 m takes ONE whole 0.5 m `bark` canvas Sliced onto it, so the grain is compressed ~5x
+across the limb; the Tiled branch would repeat the tile at its natural scale and needs a period at or
+below the limb's smaller side (`ArtParts.BarkTileMeters` 0.5 m, `TileMetersFor` per part name) - an art
+decision for the next pass. Also unchanged: `ArtParts.BoxOf` reads the placeholder's pixel-snapped box
+(`size` lands 0.21-1.09 mm off the declared box), the 3b flower gaps, the crowns' cut planes, the
+fire's sparks/smoke/embers. **Cross-lane note:** the plant lane's accepted species stills were captured
+on the pre-fix behaviour (oversized bark/leaf plates); a re-capture after this pass will move, and the
+new geometry is the one the rule describes. Full numbers:
+`Trials/Runs/art-0-dressorder-21st-report.md`.
+
 
 
 

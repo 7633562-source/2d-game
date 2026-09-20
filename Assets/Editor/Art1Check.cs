@@ -42,6 +42,8 @@ public static class Art1Check
         CheckStubsWired();
         CheckMissingContract();
         CheckFlameCore();
+        CheckFireLogs();
+        CheckFlowerParts();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
         CheckSlabStretch(6f);
@@ -207,6 +209,340 @@ public static class Art1Check
         }
     }
 
+    // ART-0 (nineteenth pass): the campfire's three logs are painted art. The check
+    // follows the code path the way CheckFlameCore does: `Campfire.LogArtKeys` is the
+    // list `Campfire.DressLog` asks `ArtParts.Dress` -> `ArtLibrary.Tiled` for, the
+    // canvas must be readable (Sprite.Create), its ASPECT must match the log's own box
+    // (ArtParts.Dress maps the whole canvas Sliced onto it - a mismatched canvas is a
+    // stretched log), and dressing a real log renderer must land the canvas on that
+    // box with `localScale` untouched and the flat LogWood tint dropped.
+    private static void CheckFireLogs()
+    {
+        for (int i = 0; i < Campfire.LogArtKeys.Length; i++)
+        {
+            string key = Campfire.LogArtKeys[i];
+            Vector2 box = Campfire.LogBox(i);
+
+            Texture2D tex = ArtLibrary.Albedo(key);
+            Report("fire log Art/" + key + ".png (Albedo, Campfire.DressLog)", tex != null);
+            if (tex == null)
+                continue;
+
+            Debug.Log("ART-1A-CHECK INFO Art/" + key + " " + tex.width + "x" + tex.height
+                + " readable=" + tex.isReadable + " box=" + box.x.ToString("0.00") + "x"
+                + box.y.ToString("0.00") + "m");
+            Report("fire log Art/" + key + " readable (Sprite.Create needs CPU pixels)", tex.isReadable);
+
+            float canvasAspect = tex.width / (float)tex.height;
+            float boxAspect = box.x / box.y;
+            Report("fire log " + key + " canvas aspect " + canvasAspect.ToString("0.000")
+                + " vs log box " + boxAspect.ToString("0.000"),
+                Mathf.Abs(canvasAspect - boxAspect) < 0.01f);
+
+            // The sprite ArtParts.Dress builds for a Sliced log: tile period = the
+            // part's own longest side, so one repeat spans the log and the imported
+            // sprite IS the box.
+            Sprite sprite = ArtLibrary.Tiled(key, Mathf.Max(box.x, box.y));
+            Report("fire log " + key + " Sliced sprite maps onto the box", sprite != null
+                && Mathf.Abs(sprite.bounds.size.x - box.x) < 0.01f
+                && Mathf.Abs(sprite.bounds.size.y - box.y) < 0.01f);
+
+            // End to end, on a renderer built exactly like BuildLogs builds one.
+            GameObject go = new GameObject("Art1CheckLog_" + i);
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            HumanSegment.ApplyPicture(sr, box, HumanVisualShape.Box, null,
+                Campfire.LogWood, Campfire.LogOrder);
+            Vector3 scale = go.transform.localScale;
+            bool dressed = Campfire.DressLog(sr, i);
+            Report("fire log " + key + " DressLog puts the canvas on a log renderer",
+                dressed && sr.sprite != null && sr.drawMode == SpriteDrawMode.Sliced
+                && Mathf.Abs(sr.size.x - box.x) < 0.01f && Mathf.Abs(sr.size.y - box.y) < 0.01f
+                && sr.color == Color.white);
+            Report("fire log " + key + " dressing moves no localScale", go.transform.localScale == scale);
+            // Rule zero, per part: whatever the dress does to a picture, the transform it
+            // writes to must not carry the body. A Collider2D / Rigidbody2D on a dressed
+            // renderer would make every picture change a physics change.
+            Report("fire log " + key + " dressed renderer carries no body (rule zero)",
+                sr.GetComponent<Collider2D>() == null && sr.GetComponent<Rigidbody2D>() == null);
+            // ... and if it does move, say by how much: the assertion above was failing on
+            // 20.09 with the logs dressing correctly (Sliced, right size, white tint), which
+            // is a check that tells its reader nothing about the cause.
+            if (go.transform.localScale != scale)
+                Debug.Log("ART-1A-CHECK INFO fire log " + key + " localScale "
+                    + scale.ToString("0.#####") + " -> " + go.transform.localScale.ToString("0.#####"));
+            if (dressed && sr.sprite != null)
+                Debug.Log("ART-1A-CHECK INFO fire log " + key + " dressed sprite=" + sr.sprite.name
+                    + " mode=" + sr.drawMode + " size=" + sr.size.x.ToString("0.000") + "x"
+                    + sr.size.y.ToString("0.000") + "m tint=" + sr.color.r.ToString("0.00") + ","
+                    + sr.color.g.ToString("0.00") + "," + sr.color.b.ToString("0.00") + ","
+                    + sr.color.a.ToString("0.00"));
+
+            ArtParts.Forget(sr);
+            Object.DestroyImmediate(go);
+        }
+
+        // The flat box the logs fall back to must stay the old picture: LogWood is a
+        // half-transparent brown, which is the defect this pass replaced.
+        Report("fire log fallback tint is still LogWood alpha 0.5",
+            Mathf.Abs(Campfire.LogWood.a - 0.5f) < 0.001f);
+    }
+
+    // ─── diagnostic entry (ART-0 21st pass) ──────────────────────────────────────
+    // The fire-log check reported `dressing moves no localScale` FAIL on all three logs
+    // while every other assertion about them passed, so this walks the same mutations one
+    // at a time on scratch renderers and logs the transform after each. Finding (20.09):
+    // Unity keeps the current world box when a Simple renderer is converted to
+    // Sliced/Tiled, and it does that by writing the TRANSFORM's scale. Sequence A (the
+    // audit's own order) never touches `size`, so the factor is 1; sequence C (the order
+    // ArtParts.Dress used to write: picture, size, then mode) writes 0.99849 / 1.00810 /
+    // 0.99375 = the new canvas' own height over the height the old placeholder reported;
+    // sequence B (mode first, then picture, then size) is the order the dress writes now
+    // and leaves the scale at 1. Run:
+    //   Unity.exe -batchmode -projectPath <proj> -executeMethod Art1Check.ScaleAudit -quit
+    public static void ScaleAudit()
+    {
+        Debug.Log("ART-SCALE-AUDIT begin");
+        for (int i = 0; i < Campfire.LogArtKeys.Length; i++)
+        {
+            string key = Campfire.LogArtKeys[i];
+            Vector2 box = Campfire.LogBox(i);
+            Debug.Log("ART-SCALE-AUDIT === log " + i + " key=" + key + " LogBox="
+                + box.x.ToString("0.00000") + "x" + box.y.ToString("0.00000") + "m");
+
+            // A: the order ArtParts.Dress really uses - sprite, size, then drawMode.
+            GameObject a = new GameObject("ScaleAuditA_" + i);
+            SpriteRenderer sa = a.AddComponent<SpriteRenderer>();
+            HumanSegment.ApplyPicture(sa, box, HumanVisualShape.Box, null, Campfire.LogWood,
+                Campfire.LogOrder);
+            LogScale("A0 after ApplyPicture", sa, box);
+            sa.sprite = ArtLibrary.Tiled(key, Mathf.Max(box.x, box.y));
+            LogScale("A1 after sprite = Tiled(canvas)", sa, box);
+            sa.size = ArtParts.BoxOf(sa);
+            LogScale("A2 after size = BoxOf(sr)", sa, box);
+            sa.drawMode = SpriteDrawMode.Sliced;
+            LogScale("A3 after drawMode = Sliced", sa, box);
+            sa.transform.localScale = Vector3.one;
+            LogScale("A4 after localScale = one", sa, box);
+            Object.DestroyImmediate(a);
+
+            // B: drawMode first, then the sprite, then the size - the same end state
+            // without ever assigning `size` while the renderer is Simple.
+            GameObject b = new GameObject("ScaleAuditB_" + i);
+            SpriteRenderer sb = b.AddComponent<SpriteRenderer>();
+            HumanSegment.ApplyPicture(sb, box, HumanVisualShape.Box, null, Campfire.LogWood,
+                Campfire.LogOrder);
+            sb.drawMode = SpriteDrawMode.Sliced;
+            LogScale("B1 after drawMode = Sliced", sb, box);
+            sb.sprite = ArtLibrary.Tiled(key, Mathf.Max(box.x, box.y));
+            LogScale("B2 after sprite = Tiled(canvas)", sb, box);
+            sb.size = ArtParts.BoxOf(sb);
+            LogScale("B3 after size = BoxOf(sr)", sb, box);
+            Object.DestroyImmediate(b);
+
+            // C: the real ArtParts.Dress order - the box is read BEFORE the sprite swap,
+            // so `size` is assigned while drawMode is still Simple and the sprite on the
+            // renderer is the tile, not the placeholder the size came from.
+            GameObject c = new GameObject("ScaleAuditC_" + i);
+            SpriteRenderer sc = c.AddComponent<SpriteRenderer>();
+            HumanSegment.ApplyPicture(sc, box, HumanVisualShape.Box, null, Campfire.LogWood,
+                Campfire.LogOrder);
+            Vector2 pre = ArtParts.BoxOf(sc);
+            Debug.Log("ART-SCALE-AUDIT ScaleAuditC_" + i + " pre-swap BoxOf="
+                + pre.x.ToString("0.00000") + "x" + pre.y.ToString("0.00000"));
+            sc.sprite = ArtLibrary.Tiled(key, Mathf.Max(pre.x, pre.y));
+            LogScale("C1 after sprite = Tiled(canvas)", sc, box);
+            sc.size = pre;
+            LogScale("C2 after size = pre-swap BoxOf", sc, box);
+            sc.drawMode = SpriteDrawMode.Sliced;
+            LogScale("C3 after drawMode = Sliced", sc, box);
+            Object.DestroyImmediate(c);
+
+            // D: the candidate fix - the box is still read before the swap, but `size` is
+            // assigned AFTER the renderer is Sliced, so nothing is written to the transform.
+            GameObject d = new GameObject("ScaleAuditD_" + i);
+            SpriteRenderer sd = d.AddComponent<SpriteRenderer>();
+            HumanSegment.ApplyPicture(sd, box, HumanVisualShape.Box, null, Campfire.LogWood,
+                Campfire.LogOrder);
+            Vector2 preD = ArtParts.BoxOf(sd);
+            sd.sprite = ArtLibrary.Tiled(key, Mathf.Max(preD.x, preD.y));
+            sd.drawMode = SpriteDrawMode.Sliced;
+            LogScale("D1 after sprite + drawMode = Sliced", sd, box);
+            sd.size = preD;
+            LogScale("D2 after size = pre-swap BoxOf", sd, box);
+            Object.DestroyImmediate(d);
+        }
+        Debug.Log("ART-SCALE-AUDIT context HeadlessTrial.Active=" + HeadlessTrial.Active
+            + " VisualCapture=" + HeadlessTrial.VisualCapture);
+
+        // E: the case the tree/apple/flower rows are. A limb box is NOT the tile's own size,
+        // so the two orders cannot end in the same place: the old order (size assigned while
+        // Simple) let Unity preserve the world box of the TILE CANVAS, which is
+        // tex.width/meters wide - 0.5 x 0.5 m for `bark` at the tree's 0.5 m period - while
+        // the new order lands the canvas on the limb's own box. Measured, not argued.
+        LimbAudit("bark", new Vector2(0.10f, 0.30f), ArtParts.BarkTileMeters);
+        LimbAudit(ArtParts.FlowerPetalKey, new Vector2(0.029f, 0.036f), 0f);
+
+        Debug.Log("ART-SCALE-AUDIT end");
+        EditorApplication.Exit(0);
+    }
+
+    // One limb, both orders, end to end, on the real key and the real tile period.
+    private static void LimbAudit(string key, Vector2 box, float tileMeters)
+    {
+        Debug.Log("ART-SCALE-AUDIT === limb key=" + key + " box=" + box.x.ToString("0.000")
+            + "x" + box.y.ToString("0.000") + "m tileMeters=" + tileMeters.ToString("0.00"));
+
+        GameObject oldGo = new GameObject("LimbAuditOld");
+        SpriteRenderer oldSr = oldGo.AddComponent<SpriteRenderer>();
+        HumanSegment.ApplyPicture(oldSr, box, HumanVisualShape.Box, null, Color.white, 0);
+        Vector2 preOld = ArtParts.BoxOf(oldSr);
+        float localOld = tileMeters > 0.01f ? tileMeters : Mathf.Max(preOld.x, preOld.y);
+        oldSr.sprite = ArtLibrary.Tiled(key, localOld);                  // old order: picture
+        oldSr.size = preOld;                                             // size
+        oldSr.drawMode = SpriteDrawMode.Sliced;                          // mode last
+        LogScale("E-old (picture, size, mode)", oldSr, box);
+        Object.DestroyImmediate(oldGo);
+
+        GameObject newGo = new GameObject("LimbAuditNew");
+        SpriteRenderer newSr = newGo.AddComponent<SpriteRenderer>();
+        HumanSegment.ApplyPicture(newSr, box, HumanVisualShape.Box, null, Color.white, 0);
+        Vector2 preNew = ArtParts.BoxOf(newSr);
+        float localNew = tileMeters > 0.01f ? tileMeters : Mathf.Max(preNew.x, preNew.y);
+        newSr.drawMode = SpriteDrawMode.Sliced;                          // new order: mode
+        newSr.sprite = ArtLibrary.Tiled(key, localNew);                  // picture
+        newSr.size = preNew;                                             // size
+        LogScale("E-new (mode, picture, size)", newSr, box);
+        Object.DestroyImmediate(newGo);
+    }
+
+    private static void LogScale(string step, SpriteRenderer sr, Vector2 box)
+    {
+        Vector2 local = ArtParts.BoxOf(sr);
+        Vector2 world = ArtParts.WorldBoxOf(sr);
+        Debug.Log("ART-SCALE-AUDIT " + sr.gameObject.name + " " + step
+            + " scale=" + sr.transform.localScale.x.ToString("0.00000") + ","
+            + sr.transform.localScale.y.ToString("0.00000")
+            + " sr.size=" + sr.size.x.ToString("0.00000") + "x" + sr.size.y.ToString("0.00000")
+            + " BoxOf=" + local.x.ToString("0.00000") + "x" + local.y.ToString("0.00000")
+            + " WorldBox=" + world.x.ToString("0.00000") + "x" + world.y.ToString("0.00000")
+            + " mode=" + sr.drawMode
+            + " LogBox=" + box.x.ToString("0.00000") + "x" + box.y.ToString("0.00000"));
+    }
+
+    // ART-0 gap 3 (20.09): the flower's bloom is painted art. The check follows the code
+    // path the way CheckFlameCore / CheckFireLogs do: the five keys PlantFlower's petals
+    // ask ArtParts.DressFlower for must resolve, be readable (Sprite.Create on the
+    // Albedo path), and a real rig must end up carrying them - on the petal's own box,
+    // with localScale untouched and the KIND's colour kept, because the canvases are grey
+    // and the tint is what makes a rose red and a daisy white.
+    private static void CheckFlowerParts()
+    {
+        // The rig is built here, in the editor, so arm real art for this check: the same
+        // switch the gallery flips.
+        ArtLibrary.RealArtEnabled = true;
+
+        for (int i = 0; i < ArtParts.FlowerKeys.Length; i++)
+        {
+            string key = ArtParts.FlowerKeys[i];
+            Texture2D tex = ArtLibrary.Albedo(key);
+            Report("flower art Art/" + key + ".png (Albedo, ArtParts.DressFlower)", tex != null);
+            if (tex == null)
+                continue;
+            Debug.Log("ART-1A-CHECK INFO Art/" + key + " " + tex.width + "x" + tex.height
+                + " readable=" + tex.isReadable + " canvasAspect="
+                + (tex.width / (float)tex.height).ToString("0.000"));
+            Report("flower art Art/" + key + " readable (Sprite.Create needs CPU pixels)", tex.isReadable);
+        }
+
+        // A rose is an open fan (5 petals + the far-half PetalR + sepals, no disk); a daisy
+        // is an 8-petal ring with a head plate. Two shapes, both matter.
+        CheckFlowerRig(FlowerKind.Rose, 6);
+        CheckFlowerRig(FlowerKind.Daisy, 8);
+
+        // No silent fallback: a key that is not there must stay null.
+        Report("flower art has no silent fallback (Albedo(\"Flower/no_such\") == null)",
+            ArtLibrary.Albedo("Flower/no_such") == null);
+    }
+
+    private static void CheckFlowerRig(FlowerKind kind, int expectPetals)
+    {
+        GameObject go = new GameObject("Art1CheckFlower_" + kind);
+        PlantFlower plant = (PlantFlower)go.AddComponent(PlantFlower.ComponentType(kind));
+        plant.seed = 5;
+        plant.BuildFlower();      // BuildFlower dresses itself while real art is armed
+        Vector3 scale = go.transform.localScale;
+
+        SpriteRenderer[] srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+        int petals = 0, realPetals = 0, badBox = 0, whiteTint = 0, tips = 0, sepals = 0, others = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            string key = ArtParts.FlowerKeyForName(sr.gameObject.name);
+            if (key == ArtParts.FlowerPetalKey)
+            {
+                petals++;
+                string want = key.Substring(key.LastIndexOf('/') + 1);
+                bool carriesCanvas = sr.sprite != null && sr.sprite.texture != null
+                    && sr.sprite.texture.name == want;
+                if (!carriesCanvas)
+                    continue;
+                realPetals++;
+                if (sr.drawMode != SpriteDrawMode.Sliced)
+                    badBox++;
+                Vector2 box = ArtParts.BoxOf(sr);
+                if (Mathf.Abs(sr.size.x - box.x) > 0.001f || Mathf.Abs(sr.size.y - box.y) > 0.001f)
+                    badBox++;
+                if (sr.color == Color.white)
+                    whiteTint++;    // the kind's petal colour must survive the swap
+            }
+            else if (key == ArtParts.FlowerTipKey)
+                tips++;
+            else if (key == ArtParts.FlowerCalyxKey)
+                sepals++;
+            else
+                others++;
+        }
+
+        Debug.Log("ART-1A-CHECK INFO flower " + kind + " renderers=" + srs.Length
+            + " petals=" + petals + " withCanvas=" + realPetals + " tips=" + tips
+            + " sepals=" + sepals + " other(spot/stem/leaf)=" + others
+            + " parts=" + plant.PartCount + " stem=" + plant.StemHeight.ToString("0.00") + " m");
+        Report("flower " + kind + " has its petal renderers (" + petals + ")", petals == expectPetals);
+        Report("flower " + kind + " every petal carries Art/Flower/petal.png", realPetals == petals);
+        Report("flower " + kind + " every petal keeps its own box (Sliced, size == box)", badBox == 0);
+        Report("flower " + kind + " every petal keeps the kind colour (tint not white)", whiteTint == 0);
+        Report("flower " + kind + " dressing moves no localScale", go.transform.localScale == scale);
+        // Rule zero: a dressed flower renderer must not carry the body either (the plant is
+        // decorative - a Collider2D here would make the petal canvas a physics object).
+        int bodies = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            if (srs[i].GetComponent<Collider2D>() != null || srs[i].GetComponent<Rigidbody2D>() != null)
+                bodies++;
+        }
+        Report("flower " + kind + " dressed renderers carry no body (rule zero)", bodies == 0);
+
+        // The gallery's comparison toggle has to be symmetric for flowers too: real=false
+        // puts the flat collider box back, exactly as it was built.
+        int restored = ArtParts.DressFlower(go.transform, false);
+        int backToBox = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr != null && ArtParts.FlowerKeyForName(sr.gameObject.name) == ArtParts.FlowerPetalKey
+                && sr.sprite != null && sr.sprite.texture != null
+                && sr.sprite.texture.name != "petal")
+                backToBox++;
+        }
+        Debug.Log("ART-1A-CHECK INFO flower " + kind + " restore touched " + restored + " renderers, "
+            + backToBox + " back on a box sprite");
+        Report("flower " + kind + " real=false restores the flat box", backToBox == petals);
+
+        for (int i = 0; i < srs.Length; i++)
+            ArtParts.Forget(srs[i]);
+        Object.DestroyImmediate(go);
+    }
+
     // The ART-0 finding: a wide slab stretched the fill. Spawn the slab through
     // the real code path and ask the pixels whether the fill repeats at its
     // native 8 m period.
@@ -345,9 +681,19 @@ public static class Art1Check
         Row(sb, "sky", "Level/sky.png");
         Row(sb, "finish sign", "Level/sign_finish.png");
         Row(sb, "campfire flame core", "Art/Campfire/core.png");
+        Row(sb, "campfire log A (long)", "Art/Campfire/log_a.png");
+        Row(sb, "campfire log B (medium)", "Art/Campfire/log_b.png");
+        Row(sb, "campfire log C (short)", "Art/Campfire/log_c.png");
         sb.AppendLine("  campfire tongues -> procedural soft discs (intent: painted ones lost"
             + " the blind A/B, not a gap)");
-        Row(sb, "flower", "MISSING (procedural)");
+        Row(sb, "flower petal", "Art/Flower/petal.png");
+        Row(sb, "flower petal tip (distal lip)", "Art/Flower/petal_tip.png");
+        Row(sb, "flower cup (tulip/lily/crocus/daffodil vessel)", "Art/Flower/cup.png");
+        Row(sb, "flower calyx (sepal + sepal tip)", "Art/Flower/calyx.png");
+        Row(sb, "flower disk (daisy/sunflower head plate)", "Art/Flower/disk.png");
+        sb.AppendLine("  flower foliage (Leaflet*/Leaf_*) -> flat box: the boxes of the 12 kinds"
+            + " span aspect 0.21-1.8, one canvas cannot serve them (ART-0 gap 3b)");
+        sb.AppendLine("  flower lavender spike, autumn hip (Spent) -> flat box, no canvas yet (ART-0 gap 3b)");
         Row(sb, "UI icons", "MISSING");
         Debug.Log(sb.ToString());
     }

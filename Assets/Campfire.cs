@@ -101,6 +101,21 @@ public class Campfire : MonoBehaviour
     // The gallery's fire row (GalleryScene.BuildFireRow) reads the same key, the
     // same box and the same tint, so the catalogue cannot drift from the fire the
     // game actually shows.
+    //
+    // ART-0 nineteenth pass: the three LOGS are painted art too, keyed the same way
+    // (Art/Campfire/log_*.png). BuildLogs drew each log as a collider-sized white
+    // rectangle tinted LogWood = (0.50, 0.25, 0.00, 0.5) - a flat HALF-TRANSPARENT
+    // brown box - and a read of the shipped FIRE frame named exactly that ("flat
+    // semi-transparent rectangles, no bark, no cut ends, you can see their
+    // intersections"): the original complaint in miniature. One canvas per log, in
+    // that log's own box aspect (LogRow), because a Sliced sprite maps the whole
+    // canvas onto the box and a shared canvas would stretch the short log against
+    // the long one. A missing PNG leaves today's box, so the fire never has a hole.
+    public static readonly string[] LogArtKeys =
+    {
+        "Campfire/log_a", "Campfire/log_b", "Campfire/log_c"
+    };
+
     public const string CoreArtKey = "Campfire/core";
     public const float CoreBoxWidth = 0.16f;
     public const float CoreBoxHeight = 0.38f;
@@ -848,8 +863,51 @@ public class Campfire : MonoBehaviour
             Vector3 local;
             float tilt;
             LogRow(i, out name, out size, out local, out tilt);
-            MakeBox(name, size, local, tilt, LogWood, LogOrder);
+            SpriteRenderer log = MakeBox(name, size, local, tilt, LogWood, LogOrder);
+            DressLog(log, LogIndex(name));
         }
+    }
+
+    // LogA -> 0, LogB -> 1, LogC -> 2: the order LogRow, BuildLogs and FrozenStack
+    // already use, so the picture cannot land on the wrong log.
+    public static int LogIndex(string name)
+    {
+        if (name == "LogB")
+            return 1;
+        if (name == "LogC")
+            return 2;
+        return 0;
+    }
+
+    // One log's box, in metres (LogRow is the single source of it). The catalogue
+    // and the import check read this instead of retyping the three boxes.
+    public static Vector2 LogBox(int index)
+    {
+        LogRow(index, out string name, out Vector2 size, out Vector3 local, out float tilt);
+        return size;
+    }
+
+    // The painted canvas on an already-sized log renderer. `ArtParts.Dress` with a
+    // zero tile period means "one repeat across the part": the whole canvas is
+    // mapped Sliced onto the box the log already has, size stays on `sprite.size`,
+    // and `localScale` is untouched. Returns false - leaving today's flat box - when
+    // the canvas is not in the build. Not gated by `ArtLibrary.RealArtEnabled`:
+    // the flame core beside it is painted everywhere, and the catalogue must draw
+    // the same pile the yard draws.
+    public static bool DressLog(SpriteRenderer sr, int index)
+    {
+        if (sr == null || index < 0 || index >= LogArtKeys.Length)
+            return false;
+
+        // In a headless run without visual capture ApplyPicture puts an 8x8
+        // placeholder on the log, so the renderer's own box is 1 x 1 m and not the
+        // log's - dressing there would map the canvas onto the wrong rectangle.
+        // A headless trial therefore keeps the flat box, exactly as it keeps the
+        // procedural disc beside the painted core.
+        if (HeadlessTrial.Active && !HeadlessTrial.VisualCapture)
+            return false;
+
+        return ArtParts.Dress(sr, LogArtKeys[index], 0f, true);
     }
 
     // The three logs, one row each: the box, where the yard stands it and its

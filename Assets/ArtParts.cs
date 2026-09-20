@@ -19,6 +19,26 @@ public static class ArtParts
     public const string StrawberryLeafKey = "Strawberry/leaf";
     public const string StrawberryStemKey = "Strawberry/stem";
 
+    // --- Flower parts (ART-0 gap 3, 20.09) --------------------------------------------
+    // The one object that had no art at all: PlantFlower drew every petal, the distal
+    // lip, the cup of a tulip, the sepals and the head plate as the flat collider box.
+    // The canvases are LUMINANCE canvases (grey RGB, the shape lives in alpha), so the
+    // part's own kind colour multiplies them: one canvas serves all twelve kinds, the
+    // way one grass tile serves every tree. Canvas aspects match the BOX of a
+    // representative kind (petal 0.63 = the rose/daisy petal box), and the box's own
+    // aspect is what the part draws - a flower is 0.02-0.09 m, i.e. 10-30 px at the
+    // gallery lens, so the silhouette and the shading ramp are what the eye gets.
+    public const string FlowerPetalKey = "Flower/petal";
+    public const string FlowerTipKey = "Flower/petal_tip";
+    public const string FlowerCupKey = "Flower/cup";
+    public const string FlowerCalyxKey = "Flower/calyx";
+    public const string FlowerDiskKey = "Flower/disk";
+
+    public static readonly string[] FlowerKeys =
+    {
+        FlowerPetalKey, FlowerTipKey, FlowerCupKey, FlowerCalyxKey, FlowerDiskKey
+    };
+
     // A drawn part bigger than this is a unit mix-up, not a plant part.
     public const float MaxPartMeters = 40f;
 
@@ -88,6 +108,77 @@ public static class ArtParts
     private static bool Has(string name, string token)
     {
         return name.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    // Name -> flower art key. Deliberately NOT part of KeyForName: that table answers for
+    // the tree/berry family, where "Bloom" means a leaf and "Disk" means nothing, and the
+    // yard's decor flowers (YardAmbient.AddHousePart builds PetalL/PetalUp/Disk of its own)
+    // must not be caught here. `Spent` (autumn hip), `Spike_i` (lavender) and the leaflets
+    // `Leaf_i` are not in this table: the bloom is this pass, the foliage is its own.
+    public static string FlowerKeyForName(string objectName)
+    {
+        if (string.IsNullOrEmpty(objectName))
+            return null;
+
+        if (Has(objectName, "Sepal"))
+            return FlowerCalyxKey;
+        if (Has(objectName, "PetalTip"))
+            return FlowerTipKey;
+        if (Has(objectName, "Petal"))
+            return FlowerPetalKey;
+        if (Has(objectName, "Disk"))
+            return FlowerDiskKey;
+        if (Has(objectName, "Bloom"))
+            return FlowerCupKey;
+        return null;
+    }
+
+    // Real art for the flower rigs under root. Scoped by the HOST COMPONENT, not by the
+    // name: a renderer is dressed only when a PlantFlower sits above it, so calling this on
+    // a scene root (GalleryScene.SetRealArt does) cannot repaint a tree, a berry or the
+    // yard's decor flowers, whose part names collide. Returns the number of parts redrawn.
+    public static int DressFlower(Transform root, bool real)
+    {
+        if (root == null)
+            return 0;
+
+        SpriteRenderer[] renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
+        int dressed = 0;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            SpriteRenderer sr = renderers[i];
+            if (sr == null || !sr.enabled)
+                continue;   // an open kind switches its bloom box off on purpose: leave it
+            if (sr.GetComponentInParent<PlantFlower>() == null)
+                continue;
+
+            string key = FlowerKeyDeep(sr);
+            if (string.IsNullOrEmpty(key))
+                continue;
+
+            // keepColor: the canvas is grey and the part keeps the kind's own petal /
+            // sepal / disk colour. Nothing else about the part changes.
+            if (Dress(sr, key, 0f, real, true))
+                dressed++;
+        }
+
+        if (real && dressed > 0)
+            Debug.Log("ART-PARTS flowers dressed=" + dressed + "/" + renderers.Length
+                + " root=" + root.name);
+        return dressed;
+    }
+
+    private static string FlowerKeyDeep(SpriteRenderer sr)
+    {
+        Transform t = sr.transform;
+        for (int depth = 0; depth < 6 && t != null; depth++)
+        {
+            string key = FlowerKeyForName(t.gameObject.name);
+            if (!string.IsNullOrEmpty(key))
+                return key;
+            t = t.parent;
+        }
+        return null;
     }
 
     // Real art on/off for every part under root. Returns the number of parts
@@ -182,8 +273,11 @@ public static class ArtParts
         return 0f;
     }
 
-    // One renderer. real=false restores the built sprite.
-    public static bool Dress(SpriteRenderer sr, string key, float tileMeters, bool real)
+    // One renderer. real=false restores the built sprite. keepColor=true leaves the
+    // renderer's own tint in place: the flower canvases carry the shading as grey and the
+    // part's kind colour is the tint, so whiting it out would drop the kind (and the
+    // canvas comes back through it). Every other caller keeps the old behaviour.
+    public static bool Dress(SpriteRenderer sr, string key, float tileMeters, bool real, bool keepColor = false)
     {
         if (sr == null)
             return false;
@@ -244,9 +338,17 @@ public static class ArtParts
         if (sprite == null)
             return false;
 
-        sr.sprite = sprite;
-        sr.color = Color.white;
-        sr.size = box;
+        // Draw mode FIRST (ART-0 21st pass). Unity keeps the current world box when a
+        // Simple renderer is converted to Sliced/Tiled, and it does that by writing the
+        // TRANSFORM's scale. With the old order (picture, size, mode) that factor came out
+        // as the new canvas' own size over the size the old placeholder had reported -
+        // log_a 0.14 / 0.14021 = 0.99849, log_b 1.00810, log_c 0.99375 - so the picture sat
+        // on the box only because of a scale the dress never asked for, and the check
+        // "dressing moves no localScale" failed on all three logs. Converting while the
+        // renderer still carries its own placeholder (its world box equals its reported
+        // size there) makes that factor exactly 1: nothing about the part moves, and
+        // `sprite` / `size` / `color` are the only things the dress writes.
+        // Evidence: Art1Check.ScaleAudit sequence B, gate assertion on every log.
         if (box.x > tile + 0.0001f || box.y > tile + 0.0001f)
         {
             sr.drawMode = SpriteDrawMode.Tiled;
@@ -256,6 +358,11 @@ public static class ArtParts
         {
             sr.drawMode = SpriteDrawMode.Sliced;
         }
+
+        sr.sprite = sprite;
+        if (!keepColor)
+            sr.color = Color.white;
+        sr.size = box;
 
         // NOTE: sr.bounds read here is not trustworthy - Unity rebuilds the
         // sprite mesh on the next frame, so a Sliced/Tiled conversion still

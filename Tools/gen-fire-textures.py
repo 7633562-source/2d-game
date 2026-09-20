@@ -16,6 +16,17 @@ What this tool paints
     and its licked crown, which is what the procedural soft disc cannot give it:
     a defined top.
 
+    SHIPPED since the nineteenth pass: `log_a/b/c` (0.62 x 0.14, 0.54 x 0.13,
+    0.30 x 0.12 m - `Campfire.LogRow`). `BuildLogs` draws each log through
+    `HumanSegment.ApplyPicture`, i.e. a collider-sized white rectangle tinted
+    `LogWood` = (0.50, 0.25, 0.00, 0.5): a flat HALF-TRANSPARENT brown box. A
+    read of the shipped FIRE frame named exactly that - "flat semi-transparent
+    brown rectangles, no bark, no cut ends, you can see their intersections" -
+    which is the original complaint in miniature. Each canvas is the log's own
+    box aspect and is dressed Sliced onto that box by `Campfire.DressLog`, one
+    repeat across the part, so nothing is stretched and size never comes from
+    `localScale`. A missing PNG leaves today's box untouched.
+
     The crown is a COMPOSITION (eleventh pass): the body (`CORE_BODY`) plus the
     licks of `CORE_LICKS`, unioned with `np.maximum`. The first core was one
     dome; a real frame read it as "a smooth light spindle - no flame tongues".
@@ -79,11 +90,22 @@ BOXES = {
     "tongue_b": (0.080, 0.38),
     "tongue_c": (0.110, 0.30),
     "core": (0.160, 0.38),
+    # The three logs (Campfire.LogRow, read by BuildLogs and by FrozenStack). One
+    # canvas each, in that box's OWN aspect: a Sliced sprite maps the whole canvas
+    # onto the box, so one shared canvas would squash LogC (aspect 2.50) by 1.77x
+    # against LogA (4.43).
+    "log_a": (0.62, 0.14),
+    "log_b": (0.54, 0.13),
+    "log_c": (0.30, 0.12),
 }
 # Canvas heights. The tallest box is 0.46 m: at the gallery's closest lens
 # (orthoSize 1.304 -> 414 px/m) that is 190 px on screen, so 256 px of canvas is
 # the last useful step before the picture costs bytes and buys nothing.
-CANVAS_H = {"tongue_a": 256, "tongue_b": 224, "tongue_c": 192, "core": 192}
+CANVAS_H = {"tongue_a": 256, "tongue_b": 224, "tongue_c": 192, "core": 192,
+            # 56 / 52 / 36 px give the exact box aspect (4.4286 / 4.1538 / 2.5000)
+            # and put the log 48 px tall on screen at the gallery's FIRE lens
+            # (orthoSize 1.59 -> 340 px/m), so the canvas is drawn at about 1:1.
+            "log_a": 56, "log_b": 52, "log_c": 36}
 
 # ─── shape parameters per canvas ───
 # half      max half-width as a fraction of the canvas half-width
@@ -388,6 +410,149 @@ def core_heat(alpha):
     return np.clip(CORE_HEAT_MIN + (CORE_HEAT_MAX - CORE_HEAT_MIN) * q, 0.0, 1.0)
 
 
+# ─── the logs (ART-0, nineteenth pass) ───────────────────────────────────────
+# BuildLogs draws each log through HumanSegment.ApplyPicture: a collider-sized
+# white rectangle tinted LogWood = (0.50, 0.25, 0.00, 0.5) - a flat
+# HALF-TRANSPARENT brown box. A fresh read of the shipped FIRE row named exactly
+# that ("flat semi-transparent brown rectangles, no bark, no cut ends, you can see
+# their intersections"), which is Yury's original complaint in miniature. The
+# canvases below are the logs' picture: an opaque wood cylinder with a bark top, a
+# sawn end face and grain, in tones three to four steps apart (the flat language;
+# the flame's ramp is the only gradient in this file).
+LOG_CHAR = (48, 30, 20)         # the top the fire has eaten
+LOG_BARK = (84, 54, 32)
+LOG_BARK_DARK = (64, 40, 25)
+LOG_WOOD_DARK = (106, 66, 36)
+LOG_WOOD = (142, 92, 48)
+LOG_WOOD_LIT = (180, 124, 70)
+LOG_GRAIN = (74, 45, 25)
+LOG_END = (198, 162, 112)       # the sawn face
+LOG_END_RING = (156, 114, 66)
+LOG_END_RIM = (104, 70, 42)
+LOG_CRACK = (44, 26, 16)
+
+# The engine's OWN log picture, for the A/B sheets: HumanSegment.CreateBodySprite
+# is a hard white rectangle tinted this colour at this alpha - not the soft disc
+# this tool drew into the sheets before the nineteenth pass.
+LOG_WOOD_FRAC = (0.50, 0.25, 0.00)
+LOG_WOOD_ALPHA = 0.50
+
+
+def hard_box(rgb, alpha, px=96):
+    """HumanSegment.CreateBodySprite + SpriteRenderer.color: a flat hard rectangle."""
+    return Image.new("RGBA", (px, px),
+                     (int(round(rgb[0] * 255)), int(round(rgb[1] * 255)),
+                      int(round(rgb[2] * 255)), int(round(alpha * 255))))
+
+
+def paint_log(w, h, key):
+    """One log, side view: body, bark, sawn end face, grain.
+
+    The canvas is the log's own box aspect, so the Sliced mapping (ArtParts.Dress
+    with tileMeters 0 = one repeat across the part) puts it on the box without
+    stretching it.
+
+    Judged at game scale (340 px/m, `logs_ab_box.png`) and at the gallery's closest
+    lens, then corrected once on the read: the first version's wood was a coarse
+    bicubic mottle (soapy blobs), the grain lines were near-black wires, the bark
+    was three flat bands with no grooves and the 5 % taper made the far end a
+    pencil point. Now: a two-lattice mottle quantised to three tones, grain grooves
+    that are a 38-level step with a lit lip, bark with grooves and a few knots, and
+    a cut end that ends square.
+    """
+    rng = random.Random(20260920 + sum(ord(c) for c in key))
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    u = xx / float(max(1, w - 1))
+    cy = 0.5 * (h - 1)
+
+    # the cylinder: 2 % thinner at the far end (a log, not a pencil), ends rounded
+    half = (0.5 * h - 0.7) * (1.0 - 0.02 * u)
+    half = half * np.minimum(np.clip(u / 0.045, 0.0, 1.0) ** 0.55,
+                             np.clip((1.0 - u) / 0.030, 0.0, 1.0) ** 0.55)
+    dy = np.abs(yy - cy)
+    alpha = np.clip(half - dy + 0.5, 0.0, 1.0)
+    # 0 at the log's underside, 1 at its top
+    across = ((cy + half) - yy) / np.maximum(2.0 * half, 1e-6)
+
+    # the wood: a fine lattice for the grain and a coarse one for the tone, summed
+    # and quantised into three flat steps (the flat language: no gradient in a
+    # silhouette). One lattice alone gave ~10 px blobs that read as airbrush.
+    def lattice(nx, ny):
+        im = Image.new("L", (nx, ny))
+        im.putdata([int(255 * rng.random()) for _ in range(nx * ny)])
+        return np.asarray(im.resize((w, h), Image.BICUBIC), dtype=np.float64) / 255.0
+
+    m = 0.62 * lattice(48, 12) + 0.38 * lattice(12, 3)
+    rgb = np.zeros((h, w, 3), dtype=np.float64)
+    rgb[:, :] = LOG_WOOD
+    rgb[m < 0.43] = LOG_WOOD_DARK
+    rgb[m > 0.61] = LOG_WOOD_LIT
+
+    # grain: four grooves along the length, each a soft step with a lit lip
+    for a_at, cells, ph, lip in ((0.30, 1.7, 0.4, True), (0.45, 2.3, 2.1, True),
+                                 (0.60, 1.3, 3.7, False), (0.74, 2.9, 5.0, True)):
+        line = cy + half * (1.0 - 2.0 * a_at) + 1.1 * np.sin(2.0 * math.pi * cells * u + ph)
+        near = np.abs(yy - line)
+        rgb[near <= 0.55] = LOG_GRAIN
+        if lip:
+            rgb[(near > 0.55) & (near <= 1.15)] = LOG_WOOD_LIT
+
+    # two splits (checks): short, dark, not a scratch down the whole log
+    for a_at, u0, u1 in ((0.62, 0.13, 0.44), (0.36, 0.56, 0.92)):
+        line = cy + half * (1.0 - 2.0 * a_at) + 1.1 * np.sin(2.0 * math.pi * 2.2 * u + 1.3)
+        rgb[(u >= u0) & (u <= u1) & (np.abs(yy - line) <= 0.75)] = LOG_CRACK
+
+    # bark: an irregular top band, charred at the very top, shadow underneath
+    bark_from = (0.68 + 0.055 * np.sin(2.0 * math.pi * 1.9 * u + 0.7)
+                 + 0.030 * np.sin(2.0 * math.pi * 4.1 * u + 2.2))
+    rgb[across > bark_from] = LOG_BARK
+    rgb[across > bark_from + 0.14] = LOG_BARK_DARK
+    rgb[across > bark_from + 0.30] = LOG_CHAR
+    rgb[across < 0.13] = LOG_BARK_DARK
+    rgb[across < 0.05] = LOG_CHAR
+
+    # bark grooves and knots: 1 px ticks in the band and one ringed knot, dealt at
+    # random positions (seeded), because bark is the one thing a flat band cannot say
+    ticks = max(6, w // 16)
+    for _ in range(ticks):
+        tx = rng.randrange(2, max(3, w - 2))
+        ty = int(round(cy - half[0, tx] * (0.80 + 0.16 * rng.random())))
+        tl = 2 + rng.randrange(3)
+        rgb[max(0, ty):ty + tl, max(0, tx - 1):tx + 1] = LOG_BARK_DARK
+    for kx, ky in ((0.42, 0.52), (0.71, 0.40)):
+        kxc = kx * (w - 1)
+        kyc = cy + (0.5 * h) * (0.5 - ky) * 0.9
+        e = ((xx - kxc) / max(1.6, 0.016 * w)) ** 2 + ((yy - kyc) / max(1.6, 0.10 * h)) ** 2
+        rgb[e <= 1.0] = LOG_GRAIN
+        rgb[e <= 0.55] = LOG_CRACK
+        rgb[e <= 0.22] = LOG_WOOD_LIT
+
+    # the sawn end face: rings, the cut bark edge, two or three radial checks
+    fx = 0.058 * (w - 1)
+    rx = max(1.2, (0.5 * h - 0.7) * 0.30)
+    ry = max(1.2, (0.5 * h - 0.7) * 0.94)
+    e = ((xx - fx) / rx) ** 2 + ((yy - cy) / ry) ** 2
+    face = e <= 1.0
+    r = np.sqrt(np.clip(e, 0.0, 1.0))
+    rgb[face] = LOG_END
+    rgb[face & ((np.floor(r * 5.0) % 2.0) == 1.0)] = LOG_END_RING
+    rgb[face & (r > 0.80)] = LOG_END_RIM
+    for deg in (34.0, -58.0, 128.0):
+        rad = math.radians(deg)
+        s = (xx - fx) * math.sin(rad) - (yy - cy) * math.cos(rad)
+        along = (xx - fx) * math.cos(rad) + (yy - cy) * math.sin(rad)
+        rgb[face & (np.abs(s) < 0.6) & (along > 0.6)] = LOG_CRACK
+
+    # the far end is a cut, not a point: a dark rim on the last columns
+    rgb[:, max(0, w - 2):] = LOG_BARK_DARK
+    rgb[:, max(0, w - 1):] = LOG_CRACK
+
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[:, :, :3] = np.round(np.clip(rgb, 0.0, 255.0)).astype(np.uint8)
+    rgba[:, :, 3] = np.round(alpha * 255.0).astype(np.uint8)
+    return Image.fromarray(rgba, "RGBA")
+
+
 def paint(key):
     """The canvas: the shape in alpha, and - for the core - the heat ramp in RGB.
 
@@ -397,6 +562,8 @@ def paint(key):
     written either (see `main`).
     """
     w, h = canvas_size(key)
+    if key.startswith("log_"):
+        return paint_log(w, h, key)
     a = core_mask(w, h) if key == "core" else flame_mask(w, h, FLAME[key])
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     if key == "core" and CORE_HEAT_RAMP:
@@ -611,13 +778,18 @@ def render_fire(t_state, paint_keys, painted_sprites, px_per_m=300.0, pad=0.62):
             return tinted(painted_sprites[key], (255, 255, 255), 1.0), key
         return tinted(disc, (255, 255, 255), 1.0), "disc"
 
-    # logs (BuildLogs): three translucent wood boxes, unchanged by this cycle
-    for name, (bw, bh), (lx, ly), tilt in (
-            ("LogA", (0.62, 0.14), (-0.04, 0.07), -18.0),
-            ("LogB", (0.54, 0.13), (0.07, 0.065), 16.0),
-            ("LogC", (0.30, 0.12), (0.00, 0.16), 7.0)):
-        wood = tinted(disc, soften(WOOD_COLOR), WOOD_ALPHA)
-        paste_scaled(frame, wood, bw, bh, (lx, ly), origin, px_per_m, tilt)
+    # logs (BuildLogs), and the two pictures a log can have: the engine's own - a
+    # HARD rectangle in LogWood at alpha 0.5 (HumanSegment.CreateBodySprite; the
+    # soft translucent disc this sheet drew before the nineteenth pass was not the
+    # picture the build shows) - and the painted canvas, keyed log_a/log_b/log_c
+    # and mapped Sliced onto the same box.
+    for key, (bw, bh), (lx, ly), tilt in (
+            ("log_a", (0.62, 0.14), (-0.04, 0.07), -18.0),
+            ("log_b", (0.54, 0.13), (0.07, 0.065), 16.0),
+            ("log_c", (0.30, 0.12), (0.00, 0.16), 7.0)):
+        carrier = (painted_sprites[key] if key in paint_keys
+                   else hard_box(LOG_WOOD_FRAC, LOG_WOOD_ALPHA))
+        paste_scaled(frame, carrier, bw, bh, (lx, ly), origin, px_per_m, tilt)
 
     # ember bed (0.18 x 0.24 at y 0.18) - kept procedural, a coal bed HAS no silhouette
     ember = tinted(disc, soften(EMBER_COLOR), 1.0)
@@ -663,23 +835,31 @@ def main():
     # delivery (ART-0 brief: "a labelled MISSING-ART tile is better than a bad
     # texture pretending to be final"). The core is one sprite in front: there the
     # silhouette has room to read, and the review picked it as the best of four.
-    shipped = ("core",)
+    shipped = ("core", "log_a", "log_b", "log_c")
     rows = []
     for key in shipped:
         img = paint(key)
         path = os.path.join(FIRE_DIR, key + ".png")
-        size = save(img, path, img.width, True, True, rng)
-        a = np.asarray(img)[:, :, 3].astype(np.float64) / 255.0
         bw, bh = BOXES[key]
+        # The core becomes a 1 m sprite (Campfire.CoreSprite: ppu = tex.width) and
+        # is scaled to its box by localScale. A log is dressed Sliced onto its own
+        # box (ArtParts.Dress with tileMeters 0 -> ArtLibrary.Tiled recomputes
+        # ppu = width / box.x), so the .meta carries the log's own px/m and the
+        # imported sprite is exactly the log box.
+        ppu = img.width if key == "core" else int(round(img.width / bw))
+        size = save(img, path, ppu, True, True, rng)
+        a = np.asarray(img)[:, :, 3].astype(np.float64) / 255.0
         rows.append((key, img.width, img.height, bw, bh,
-                     img.width / float(img.height) / (bw / bh), 100.0 * a.mean(), size))
+                     img.width / float(img.height) / (bw / bh), 100.0 * a.mean(),
+                     100.0 * (a >= 0.999).mean(), size))
     wrote_folder = ensure_folder_meta(FIRE_DIR, rng)
 
     print("painted canvases written to Resources/Art/Campfire/")
-    print("  %-9s %-9s %-13s %-9s %-9s %s" % ("key", "canvas", "box m", "aspect", "coverage", "bytes"))
-    for key, w, h, bw, bh, aspect, cov, size in rows:
-        print("  %-9s %-9dx%d %-13s %-9.4f %-9.1f %d"
-              % (key, w, h, "%.3f x %.3f" % (bw, bh), aspect, cov, size))
+    print("  %-9s %-9s %-13s %-9s %-9s %-9s %s"
+          % ("key", "canvas", "box m", "aspect", "coverage", "opaque", "bytes"))
+    for key, w, h, bw, bh, aspect, cov, opaque, size in rows:
+        print("  %-9s %-9dx%d %-13s %-9.4f %-9.1f %-9.1f %d"
+              % (key, w, h, "%.3f x %.3f" % (bw, bh), aspect, cov, opaque, size))
     print("  folder meta written: %s" % wrote_folder)
     print("  rejected, evidence only, NOT written: tongue_a tongue_b tongue_c")
 
@@ -688,14 +868,15 @@ def main():
     painted_sprites = {k: paint(k) for k in BOXES}
     all_keys = set(BOXES)
     core_only = {"core"}
+    logs_only = {"log_a", "log_b", "log_c"}
     nothing = set()
     sheets = []
 
-    # three variants of the same moment: 1 = procedural (shipped),
-    # 2 = core painted only, 3 = all four canvases painted
+    # four variants of the same moment: 1 = procedural (shipped until the 13th
+    # pass), 2 = core painted only, 3 = logs painted only, 4 = everything painted
     for pxm in (300.0, 150.0):
         tiles = [render_fire(t0, keys, painted_sprites, pxm)
-                 for keys in (nothing, core_only, all_keys)]
+                 for keys in (nothing, core_only, logs_only, all_keys)]
         sheet = Image.new("RGBA", (sum(t.width for t in tiles), tiles[0].height),
                           NIGHT_BG + (255,))
         x = 0
@@ -726,11 +907,37 @@ def main():
               newline="\n") as fh:
         for k in labels:
             fh.write("%s = %s %s\n" % (k, mapping[k][0], mapping[k][1]))
+
+    # The logs' own pair: ONE moment, ONE camera, two panels - the engine's flat
+    # translucent boxes on one side and the painted logs on the other. Which side
+    # is which is random and goes to a separate map file the reader opens AFTER
+    # the pick: a named panel hands the reader the answer it is expected to find
+    # (the lesson of the thirteenth pass, kept in this tool on purpose).
+    side_rng = random.Random(20260921)
+    left_keys, right_keys = (nothing, logs_only)
+    if side_rng.random() < 0.5:
+        left_keys, right_keys = right_keys, left_keys
+    pair = [render_fire(t0, left_keys, painted_sprites, 220.0),
+            render_fire(t0, right_keys, painted_sprites, 220.0)]
+    pw = pair[0].width
+    ph = pair[0].height
+    gap = 8
+    sheet = Image.new("RGBA", (pw * 2 + gap, ph), (128, 128, 128, 255))
+    sheet.alpha_composite(pair[0], (0, 0))
+    sheet.alpha_composite(pair[1], (pw + gap, 0))
+    sheet.convert("RGB").save(os.path.join(OUT_DIR, "logs_blind_pair.png"))
+    with open(os.path.join(OUT_DIR, "logs_blind_pair_map.txt"), "w", encoding="utf-8",
+              newline="\n") as fh:
+        fh.write("t=%.2f  camera=220 px/m  gap=%d px\n" % (t0, gap))
+        fh.write("LEFT  = %s\n" % ("painted logs" if left_keys is logs_only else "flat wood boxes"))
+        fh.write("RIGHT = %s\n" % ("painted logs" if right_keys is logs_only else "flat wood boxes"))
+    sheets.append(os.path.join(OUT_DIR, "logs_blind_pair.png"))
+
     # native resolution strip
-    strip = Image.new("RGBA", (sum(p.width for p in painted_sprites.values()) + 30,
+    strip = Image.new("RGBA", (sum(p.width for p in painted_sprites.values()) + 70,
                                max(p.height for p in painted_sprites.values())), (0, 0, 0, 0))
     x = 0
-    for k in ("tongue_a", "tongue_b", "tongue_c", "core"):
+    for k in ("tongue_a", "tongue_b", "tongue_c", "core", "log_a", "log_b", "log_c"):
         strip.alpha_composite(painted_sprites[k], (x, 0))
         x += painted_sprites[k].width + 10
     strip.convert("RGB").save(os.path.join(OUT_DIR, "canvases_native.png"))

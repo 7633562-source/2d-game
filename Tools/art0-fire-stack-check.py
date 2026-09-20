@@ -10,15 +10,22 @@ so the geometry and the pose were MOVED into three shared functions
 This reads the file and fails if that stops being true:
 
   1. the multiset of float literals of the whole file differs from the given
-     previous version by EXACTLY the two frozen-stack constants - so the move
-     changed no number anywhere in the file (the bands, the heats, the lives,
+     previous version by EXACTLY the literals this pass is allowed to add - so the
+     move changed no number anywhere in the file (the bands, the heats, the lives,
      the leans, the flicker weights, the log boxes, the ember and core boxes);
   2. `FrozenStack` contains no float literal of its own;
   3. the live methods and the frozen stack really call the same three rows.
 
 Usage (from the project root):
 
-    python Tools/art0-fire-stack-check.py <previousCampfire.cs> [current.cs]
+    python Tools/art0-fire-stack-check.py <previousCampfire.cs> [current.cs] [expect]
+
+`expect` is what this pass may add: "none" (the default meaning of the file's own
+history is "0.70f:1,0.50f:1", the two frozen-stack constants), so a pass that only
+adds code - the nineteenth pass adds the painted logs, and no number at all - is
+checked with "none":
+
+    python Tools/art0-fire-stack-check.py <previousCampfire.cs> Assets/Campfire.cs none
 
 Take the previous version out of git with:
 
@@ -37,6 +44,19 @@ def literals(text):
     return collections.Counter(FLOAT.findall(text))
 
 
+def parse_expected(spec):
+    """What this pass may add. Default: the two frozen-stack constants."""
+    if spec is None:
+        return collections.Counter({"0.70f": 1, "0.50f": 1})
+    if spec.strip().lower() in ("none", ""):
+        return collections.Counter()
+    out = collections.Counter()
+    for chunk in spec.split(","):
+        key, _, count = chunk.partition(":")
+        out[key.strip()] += int(count) if count.strip() else 1
+    return out
+
+
 def method(text, signature):
     start = text.find(signature)
     if start < 0:
@@ -52,6 +72,7 @@ def main():
     old_path = sys.argv[1]
     new_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Assets", "Campfire.cs")
+    expected = parse_expected(sys.argv[3] if len(sys.argv) > 3 else None)
 
     old = open(old_path, "rb").read().decode("utf-8").replace("\r\n", "\n")
     new = open(new_path, "rb").read().decode("utf-8").replace("\r\n", "\n")
@@ -67,13 +88,13 @@ def main():
     print("  added   %s" % (sorted(added.items()) if added else "none"))
     print("  removed %s" % (sorted(removed.items()) if removed else "none"))
 
-    expected = collections.Counter({"0.70f": 1, "0.50f": 1})
+    expected = parse_expected(sys.argv[3] if len(sys.argv) > 3 else None)
     if added != expected or removed:
-        print("FAIL 1: the literal set moved further than the two frozen constants")
+        print("FAIL 1: the literal set moved further than %s" % (sorted(expected.items()) or "nothing"))
         failures += 1
     else:
-        print("PASS 1: exactly FrozenStackTime 0.70f and FrozenStackFlicker 0.50f are new, "
-              "no literal was removed or changed")
+        print("PASS 1: the float literals moved by exactly %s, no literal was removed or changed"
+              % (sorted(expected.items()) or "nothing"))
 
     stack = method(new, "    public static FirePiece[] FrozenStack()")
     if stack is None:

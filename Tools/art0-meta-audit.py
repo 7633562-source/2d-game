@@ -17,9 +17,22 @@ import sys
 PROJ = r"E:/Games/2D Game/My project"
 LEVEL = ["ground_fill", "ground_cap", "sky", "sign_finish"]
 MATERIALS = ["skin", "fabric", "denim", "dirt", "grass", "bark", "leaf"]
-EXTRA = [("Art/Campfire/core.png", "Campfire/core")]
+EXTRA = [("Art/Campfire/core.png", "Campfire/core"),
+         ("Art/Campfire/log_a.png", "Campfire/log_a"),
+         ("Art/Campfire/log_b.png", "Campfire/log_b"),
+         ("Art/Campfire/log_c.png", "Campfire/log_c"),
+         # ART-0 gap 3 (20.09): the flower's bloom. Luminance canvases (shape in alpha),
+         # read through Albedo -> Tiled -> Sprite.Create, so they must be readable.
+         ("Art/Flower/petal.png", "Flower/petal"),
+         ("Art/Flower/petal_tip.png", "Flower/petal_tip"),
+         ("Art/Flower/cup.png", "Flower/cup"),
+         ("Art/Flower/calyx.png", "Flower/calyx"),
+         ("Art/Flower/disk.png", "Flower/disk")]
 EXPECT_PPU = {"ground_fill": 128, "ground_cap": 100, "sky": 32, "sign_finish": 100}
+# Everything on the Albedo path needs CPU pixels (Sprite.Create / GetPixelBilinear); the
+# four Level pictures are only ever taken as Sprites, so they are not readable on purpose.
 EXPECT_READABLE = {k: "1" for k in MATERIALS}
+EXPECT_READABLE.update({key: "1" for _, key in EXTRA})
 
 
 def meta_fields(path):

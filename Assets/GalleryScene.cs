@@ -223,6 +223,11 @@ public class GalleryScene : MonoBehaviour
                 continue;
             dressed += ArtParts.DressAll(t.root, on, t.wood, t.leaf, t.fruit, t.stem);
         }
+
+        // Flowers are not dress targets: a petal is not a tree part and its host is the
+        // PlantFlower itself, so one scoped call covers every flower row (and cannot touch
+        // a tree, whose part names collide with the flower's).
+        dressed += ArtParts.DressFlower(transform, on);
         DressedRendererCount = dressed;
     }
 
@@ -461,16 +466,42 @@ public class GalleryScene : MonoBehaviour
         Add(root, "strawberry", "Art/Strawberry/berry.png + leaf.png + stem.png",
             ArtLibrary.HasArt(ArtParts.BerryKey), "PlantStrawberry.BuildBush, " + bush.BerryCount + " berries");
 
-        // Flowers have no real texture yet: one labelled gap, no silent box.
-        Vector2 flowerSize = new Vector2(1.1f, 1.5f);
-        MissingTile(root, "flower (rose)", "no real texture yet - procedural only",
-            flowerSize, new Vector2(x + 2.4f, 0.75f));
-        MissingTile(root, "flower (tulip)", "no real texture yet - procedural only",
-            flowerSize, new Vector2(x + 3.8f, 0.75f));
-        Add(root, "flower", "MISSING", false, "gap list ART-0 item 3 - PlantFlower is procedural");
+        // Real flower art (ART-0 gap 3, 20.09): four kinds at real size, the same bloom
+        // the shipping scene draws. Until this pass every petal was the flat collider box,
+        // so this row was two labelled gaps; PlantFlower now dresses its own petals from
+        // Resources/Art/Flower/ (grey canvases - the kind's colour multiplies them) and
+        // the row is the catalogue's own flower bed, one step right of the berry.
+        FlowerKind[] flowerRow = { FlowerKind.Rose, FlowerKind.Daisy, FlowerKind.Tulip, FlowerKind.Sunflower };
+        int flowerParts = 0;
+        for (int i = 0; i < flowerRow.Length; i++)
+        {
+            GameObject flower = new GameObject("Flower_" + flowerRow[i]);
+            flower.transform.SetParent(root, false);
+            flower.transform.position = new Vector2(x + 2.30f + i * 0.85f, PlantFlower.RootY(groundTopY));
+            PlantFlower plant = (PlantFlower)flower.AddComponent(PlantFlower.ComponentType(flowerRow[i]));
+            plant.seed = 11 + i;   // a different lean and height per kind, as the yard gives them
+            plant.BuildFlower();
+            Unlit(flower);
+            // The label rides a LEVEL anchor, not the flower: the flower's own transform
+            // carries the picture lean (stemLean), and text parented to it came out tilted
+            // and ran into the next flower's label.
+            GameObject labelHost = new GameObject("FlowerLabel_" + flowerRow[i]);
+            labelHost.transform.SetParent(root, false);
+            labelHost.transform.position = flower.transform.position;
+            ItemLabel(labelHost.transform, flowerRow[i].ToString().ToLowerInvariant());
+            flowerParts += ArtParts.DressFlower(flower.transform, true);
+        }
+        Add(root, "flower bed  (rose, daisy, tulip, sunflower)",
+            "Art/Flower/petal.png + petal_tip.png + cup.png + calyx.png + disk.png",
+            ArtLibrary.HasArt(ArtParts.FlowerPetalKey),
+            "PlantFlower.BuildFlower dresses its own petals, " + flowerParts + " parts on the row"
+            + " (foliage, lavender spike and the autumn hip are still boxes: ART-0 gap 3b)");
 
         ScaleBarAt(root, x - 1.4f, "berry");
-        RowBounds["berry"] = new Bounds(new Vector3(x + 1.1f, 0.8f, 0f), new Vector3(7f, 3.4f, 0f));
+        RowBounds["berry"] = new Bounds(new Vector3(x + 1.35f, 0.8f, 0f), new Vector3(7.6f, 3.4f, 0f));
+        // The flower bed gets its own, tighter bound: at the berry lens a 0.03 m petal is
+        // 3 px, and the whole point of this pass is what those 10-30 px look like.
+        RowBounds["flower"] = new Bounds(new Vector3(x + 3.58f, 0.34f, 0f), new Vector3(2.95f, 1.05f, 0f));
     }
 
     private void BuildHumanRow(Transform root)
@@ -676,10 +707,10 @@ public class GalleryScene : MonoBehaviour
 
         // Campfire is no longer in this row: Art/Campfire/core.png landed in
         // ART-0 gap 2 and the fire is drawn for real in BuildFireRow.
-        MissingTile(root, "flower bed", "procedural, no texture", new Vector2(1.1f, 1.2f),
-            new Vector2(x, 0.6f));
+        // The flower bed left this row on 20.09: ART-0 gap 3 is delivered as
+        // Resources/Art/Flower/* and the bed is drawn for real in BuildBerryRow.
         MissingTile(root, "UI / HUD icons", "no art", new Vector2(1.1f, 1.2f),
-            new Vector2(x + 1.3f, 0.6f));
+            new Vector2(x, 0.6f));
         Add(root, "UI icons", "MISSING", false, "out of scope for the gallery (ART-0 item 5)");
 
         ScaleBarAt(root, x - 1.5f, "missing");

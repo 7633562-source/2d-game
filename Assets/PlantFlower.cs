@@ -247,6 +247,14 @@ public class PlantFlower : MonoBehaviour
                 }
             }
         }
+
+        // Real petal art (ART-0 gap 3, 20.09). Picture only: no part is added, no box
+        // changes, no collider and no size is touched - ArtParts.Dress swaps the sprite
+        // and keeps the kind's colour through the grey canvas. A headless run without
+        // visual capture is not drawing a picture anyway, so it keeps the flat boxes; the
+        // gallery's own toggle moves them back and forth (GalleryScene.SetRealArt).
+        if (ArtLibrary.RealArtEnabled || HeadlessTrial.VisualCapture)
+            ArtParts.DressFlower(transform, true);
     }
 
     // Flat petal fan around the bloom box. Not a HumanSegment — PartCount
