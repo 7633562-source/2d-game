@@ -4,8 +4,11 @@ using UnityEngine;
 // decoration. This component owns the six arm muscle activations (flexor and
 // extensor on both shoulders and both elbows) and writes them once per physics
 // step: after BalanceController (order 0), before ActuatorDriver applies the
-// muscles (order 50). Every other joint, and the wrist, stays with the balance
-// controller.
+// muscles (order 50). Every other joint stays with the balance controller --
+// including the wrist, EXCEPT while a press is running on that side, where the
+// hand's own pair is taken over too (arms cycle 12: the press loads the palm
+// through a joint with 12x the hand's authority, and the grip is measurably lost
+// exactly then).
 //
 // Two jobs:
 //
@@ -255,6 +258,24 @@ public class ArmDrive : MonoBehaviour
     // what the walk has always had at scale 1; 0 = the former behaviour, kept as
     // the control on the same build.
     public float pressDamperFromBase = 1f;
+    // ARM cycle 12. The press loads the palm through the ELBOW, whose ceiling the
+    // press raises to elbowMuscleTorque x pressTorqueScale = 120 N.m, while the
+    // pair that actually holds the contact -- the HAND's two muscles, 10 N.m --
+    // is driven by the balance controller and never sees the boost. The grip is
+    // measurably lost exactly when the press arrives, on one build, one switch
+    // apart (`Tools/arm-wrist-hold-check.py`, all numbers from the stored runs):
+    //
+    //     p_arms70 (press ON)   armHandContactFraction 0.9258/0.7503
+    //     p_arms71 (press OFF)  armHandContactFraction 0.9755/0.9589   <- control
+    //
+    // and the palm sits +0.0408/+0.0506 m ABOVE the point the drive latched for
+    // it while the press holds (its own CSV). 1 = the press owns the hand too:
+    // the wrist is driven onto its own angle at the latch with the same stable PD
+    // and the same base-ceiling damper as the shoulder and the elbow, and the
+    // hand's ceiling is scaled with the press the way theirs is. 0 = the wrist is
+    // left to the balance controller exactly as before, the control on the same
+    // build.
+    public float pressWristHold = 1f;
     public float pressPGainScale = 2f;
     public float pressDriveSlewPerSecond = 60f;
     // Same rate limit for the ELBOW target, deg/s. The shoulder had one from
@@ -351,6 +372,15 @@ public class ArmDrive : MonoBehaviour
     // starts from, i.e. the room the press has to extend into.
     public float PressPlantFoldL { get; private set; }
     public float PressPlantFoldR { get; private set; }
+    // The hand's own hold (arms cycle 12), read-only so the hand can be measured
+    // at all: no p_arms* record carries a wrist column today, and the recorder is
+    // the walk worker's file. Angle and latch in degrees, activation 0..1.
+    public float PressWristAngleL { get { return wrist[SideL] != null ? wrist[SideL].jointAngle : 0f; } }
+    public float PressWristAngleR { get { return wrist[SideR] != null ? wrist[SideR].jointAngle : 0f; } }
+    public float PressWristHoldL { get { return wristHold[SideL]; } }
+    public float PressWristHoldR { get { return wristHold[SideR]; } }
+    public float PressWristActL { get { return wrFlex[SideL] != null ? wrFlex[SideL].activation : 0f; } }
+    public float PressWristActR { get { return wrFlex[SideR] != null ? wrFlex[SideR].activation : 0f; } }
     // Shoulder pivot height and the latched palm height, metres. The gap between
     // them is what the arm has to span, so a press that cannot reach the slab is
     // told from one that reaches it and is not loaded.
@@ -423,6 +453,13 @@ public class ArmDrive : MonoBehaviour
     private readonly Muscle[] shExt = new Muscle[2];
     private readonly Muscle[] elFlex = new Muscle[2];
     private readonly Muscle[] elExt = new Muscle[2];
+    // The hand's own pair (arms cycle 12): the joint that keeps the palm's contact
+    // patch flat while the elbow presses through it.
+    private readonly HingeJoint2D[] wrist = new HingeJoint2D[2];
+    private readonly Muscle[] wrFlex = new Muscle[2];
+    private readonly Muscle[] wrExt = new Muscle[2];
+    private readonly float[] wristInertia = new float[2];
+    private readonly float[] wristHold = new float[2];
     private readonly Transform[] upper = new Transform[2];
     private readonly Transform[] hand = new Transform[2];
     private readonly Collider2D[] handCol = new Collider2D[2];
@@ -477,6 +514,10 @@ public class ArmDrive : MonoBehaviour
     private readonly float[] outSlew = new float[2];
 
     private float shTorqueBase = 40f, elTorqueBase = 30f;
+    // The hand's own ceiling as the human build set it (Human.wristMuscleTorque,
+    // 10 N.m). Kept separate for the same reason the other two are: the press
+    // boost must be able to restore it, and the damper must be read from it.
+    private float wrTorqueBase = 10f;
     private float hipSpeedHold;
     private float walkBlend;
     // Filled lazily from the human's own walk driver. The swing must follow the
@@ -508,6 +549,7 @@ public class ArmDrive : MonoBehaviour
     private const string ArgPush = "-armPush";
     private const string ArgPushScale = "-armPushScale";
     private const string ArgDamperBase = "-armDamperBase";
+    private const string ArgWristHold = "-armWristHold";
     private const string ArgFallTilt = "-armFallTilt";
     private const string ArgPlantSide = "-armPlantSide";
     private const string ArgPlantShare = "-armPlantShare";
@@ -557,6 +599,8 @@ public class ArmDrive : MonoBehaviour
             string side = i == SideL ? "Left" : "Right";
             MuscleFlexorPair(side + "ArmUpper", out shFlex[i], out shExt[i]);
             MuscleFlexorPair(side + "ArmLower", out elFlex[i], out elExt[i]);
+            MuscleFlexorPair(side + "ArmHand", out wrFlex[i], out wrExt[i]);
+            wrist[i] = JointOn(side + "ArmHand");
             upper[i] = transform.Find(side + "ArmUpper");
             hand[i] = transform.Find(side + "ArmHand");
             handCol[i] = hand[i] != null ? hand[i].GetComponent<Collider2D>() : null;
@@ -582,6 +626,7 @@ public class ArmDrive : MonoBehaviour
 
         if (shFlex[SideL] != null) shTorqueBase = shFlex[SideL].maxTorque;
         if (elFlex[SideL] != null) elTorqueBase = elFlex[SideL].maxTorque;
+        if (wrFlex[SideL] != null) wrTorqueBase = wrFlex[SideL].maxTorque;
 
         pelvisBody = transform.Find("Pelvis");
         if (pelvisBody != null) pelvisStartY = pelvisBody.position.y;
@@ -1162,11 +1207,14 @@ public class ArmDrive : MonoBehaviour
                 "[ARM] t={0:F2} {1} ph={2} age={3:F2} touch={4} lost={5:F2} " +
                 "pivot=({6:F2},{7:F2}) palm=({8:F2},{9:F2}) hand=({10:F2},{11:F2}) " +
                 "sh={12:F1}[{13:F0},{14:F0}] el={15:F1}[{16:F0}] plantFold={17:F1} " +
-                "tgt=({18:F1},{19:F1})", Time.fixedTime, i == SideL ? "L" : "R",
+                "tgt=({18:F1},{19:F1}) wr={20:F1}->{21:F1} act={22:F2}", Time.fixedTime, i == SideL ? "L" : "R",
                 phase[i], phaseAge[i], (i == SideL ? HandContactL : HandContactR) ? 1 : 0,
                 lostContactTime[i], pivot.x, pivot.y, palm.x, palm.y, handPos.x, handPos.y,
                 sh, shLo, shHi, el, elLo,
-                i == SideL ? PressPlantFoldL : PressPlantFoldR, outShoulder[i], outElbow[i]));
+                i == SideL ? PressPlantFoldL : PressPlantFoldR, outShoulder[i], outElbow[i],
+                i == SideL ? PressWristAngleL : PressWristAngleR,
+                i == SideL ? PressWristHoldL : PressWristHoldR,
+                i == SideL ? PressWristActL : PressWristActR));
         }
     }
 
@@ -1336,6 +1384,12 @@ public class ArmDrive : MonoBehaviour
             side = hand[i].position.x >= pivot.x ? 1f : -1f;
         plantX[i] = pivot.x + side * offset;
         plantY[i] = palmY;
+        // The hand's own orientation is part of the plant (arms cycle 12). The
+        // palm is a flat contact patch and the wrist is the joint that keeps it
+        // flat; the angle the instant the point is taken is the angle that had the
+        // palm on the slab, so it is latched with the point and not recomputed --
+        // the same reason the point itself is latched.
+        wristHold[i] = wrist[i] != null ? wrist[i].jointAngle : 0f;
     }
 
     // Running vote of how this side's world direction moves with its joint angle.
@@ -1470,6 +1524,22 @@ public class ArmDrive : MonoBehaviour
                 shFlex[i], shExt[i], ref shoulderInertia[i], outSlew[i], shTorqueBase);
             Drive(elbow[i], outElbow[i], elP, elD, elRef,
                 elFlex[i], elExt[i], ref elbowInertia[i], outSlew[i], elTorqueBase);
+            // The press loads the palm through the ELBOW; the hand's own pair is
+            // the only thing holding that contact, and it is 12x weaker (10 N.m
+            // against the elbow's boosted 120). Driven here, while the press owns
+            // this side, with the same stable PD and the same base-ceiling damper
+            // as the other two joints: a boosted ceiling must buy authority, never
+            // damping (arms cycle 11). The target is the hand's own angle at the
+            // latch, so this holds the contact patch, it does not aim the arm.
+            if (armPress && pressWristHold > 0.5f && wrist[i] != null)
+            {
+                float wrP = (balance != null ? balance.wristPGain : 1f) * pScale;
+                float wrD = balance != null ? balance.wristDGain : 0.4f;
+                float wrRef = balance != null ? balance.wristErrorReferenceDegrees : 25f;
+                Drive(wrist[i], wristHold[i], wrP, wrD, wrRef,
+                    wrFlex[i], wrExt[i], ref wristInertia[i],
+                    pressElbowSlewPerSecond, wrTorqueBase);
+            }
         }
 
         // A press stroke needs authority over the palm's friction; outside the
@@ -1479,6 +1549,12 @@ public class ArmDrive : MonoBehaviour
         {
             SetPair(shFlex[i], shExt[i], shTorqueBase * scale);
             SetPair(elFlex[i], elExt[i], elTorqueBase * scale);
+            // The hand gets the same authority while the press is on, and its own
+            // base ceiling when it is not. Nothing else in the tree writes a
+            // muscle's maxTorque at run time (Human.cs sets it at build, Bind reads
+            // it back), so restoring the base is exact and the walk is untouched.
+            if (pressWristHold > 0.5f)
+                SetPair(wrFlex[i], wrExt[i], wrTorqueBase * scale);
         }
     }
 
@@ -1667,6 +1743,7 @@ public class ArmDrive : MonoBehaviour
         pushEnabled = ReadFloat(args, ArgPush, pushEnabled);
         pressTorqueScale = ReadFloat(args, ArgPushScale, pressTorqueScale);
         pressDamperFromBase = ReadFloat(args, ArgDamperBase, pressDamperFromBase);
+        pressWristHold = ReadFloat(args, ArgWristHold, pressWristHold);
         fallTiltDeg = ReadFloat(args, ArgFallTilt, fallTiltDeg);
         plantSideMax = ReadFloat(args, ArgPlantSide, plantSideMax);
         plantLateralShare = ReadFloat(args, ArgPlantShare, plantLateralShare);
