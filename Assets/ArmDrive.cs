@@ -160,6 +160,22 @@ public class ArmDrive : MonoBehaviour
     // (p_arms70 = the old rig, press on, 0.03): a stroke opened the elbow 40-80
     // deg and moved the shoulder pivot 0.005 m while shoving the body 2.08 m.
     public float plantReachMargin = 0.03f;
+    // ARM cycle 13. The chord rule above computes the latch from the posture on
+    // the frame the latch happens -- and that frame is the SAGGED one, because a
+    // new point is taken when a stroke ended and the palm was unloaded. Measured
+    // on p_arms70 (build 559e2e50, press on against its own press-off control
+    // p_arms71): the palm's own chord grew 0.267 -> 0.506 m inside one stroke
+    // while the shoulder pivot went DOWN 0.09 m and the body travelled
+    // comTravelX 3.58 m against the control's 1.63 m -- the elbow's extension
+    // walked the palm along the slab and lifted nothing (pelvisY mean -1.838
+    // against the control's -1.840, its best height LOWER than the control's:
+    // -1.654 against -1.619). 1 = the latch is computed from the highest pivot
+    // this side has held WITH the palm on the slab during the stroke it just
+    // finished, so the drop is the posture the side has proven, and the offset
+    // sqrt(reach^2 - drop^2) collapses to 0 (palm straight under the shoulder,
+    // push line vertical) as soon as that drop reaches the arm's own reach.
+    // 0 = the stored behaviour (the sagged frame), the same-build control.
+    public float plantHighLatch = 1f;
     // How much of the latched point's lateral offset is filled by the chord rule.
     // 0 = the palm goes under the shoulder (the press posture); 1 = the former
     // lateral-fill rule, kept so the two can be compared on one build.
@@ -372,6 +388,16 @@ public class ArmDrive : MonoBehaviour
     // starts from, i.e. the room the press has to extend into.
     public float PressPlantFoldL { get; private set; }
     public float PressPlantFoldR { get; private set; }
+    // The drop and the push line the LAST latch was computed from (arms cycle 13):
+    // drop = the height the latch measured the shoulder pivot at above the palm's
+    // own centre, tilt = the push line's angle off vertical, degrees. The pair is
+    // read against the palm-ground friction cone -- sqrt(handFriction x
+    // groundFriction), both recorded per run -- because a push line outside that
+    // cone cannot load the slab at all, it slides.
+    public float PressPlantDropL { get; private set; }
+    public float PressPlantDropR { get; private set; }
+    public float PressPlantTiltL { get; private set; }
+    public float PressPlantTiltR { get; private set; }
     // The hand's own hold (arms cycle 12), read-only so the hand can be measured
     // at all: no p_arms* record carries a wrist column today, and the recorder is
     // the walk worker's file. Angle and latch in degrees, activation 0..1.
@@ -537,6 +563,10 @@ public class ArmDrive : MonoBehaviour
     private readonly float[] linkL2 = new float[2];
     private readonly float[] plantX = new float[2];
     private readonly float[] plantY = new float[2];
+    // Highest shoulder pivot this side has held with the palm on the slab during
+    // the stroke in flight (arms cycle 13); seeded from the current pivot at every
+    // latch, so it never carries a posture from an older stroke or from the fall.
+    private readonly float[] plantPivotYBest = new float[2];
 
     private const string ArgShoulderSwing = "-armSwing";
     private const string ArgElbowAmp = "-armElbowSwing";
@@ -555,6 +585,7 @@ public class ArmDrive : MonoBehaviour
     private const string ArgPlantShare = "-armPlantShare";
     private const string ArgPlantStop = "-armPlantStop";
     private const string ArgPlantReach = "-armPlantReach";
+    private const string ArgHighLatch = "-armHighLatch";
     private const string ArgPressDepth = "-armPressDepth";
     private const string ArgPressMode = "-armPressMode";
     private const string ArgDepthExtra = "-armDepthExtra";
@@ -933,6 +964,17 @@ public class ArmDrive : MonoBehaviour
                 if (realContact) lostContactTime[i] = 0f;
                 else lostContactTime[i] += dt;
 
+                // ARMS cycle 13: the highest shoulder pivot this side holds WITH the
+                // palm on the slab is the posture the next latch is computed from.
+                // Tracked only while the side is really loaded (Press/Hold AND a real
+                // contact), so a pivot from the fall or from an unloaded lift can
+                // never raise it.
+                if (realContact && (phase[i] == PhasePress || phase[i] == PhaseHold))
+                {
+                    float pivotYNow = ShoulderPivotWorld(i).y;
+                    if (pivotYNow > plantPivotYBest[i]) plantPivotYBest[i] = pivotYNow;
+                }
+
                 if (phase[i] == PhaseIdle)
                 {
                     // A fall just latched: latch a plant point from the pose the
@@ -1207,14 +1249,16 @@ public class ArmDrive : MonoBehaviour
                 "[ARM] t={0:F2} {1} ph={2} age={3:F2} touch={4} lost={5:F2} " +
                 "pivot=({6:F2},{7:F2}) palm=({8:F2},{9:F2}) hand=({10:F2},{11:F2}) " +
                 "sh={12:F1}[{13:F0},{14:F0}] el={15:F1}[{16:F0}] plantFold={17:F1} " +
-                "tgt=({18:F1},{19:F1}) wr={20:F1}->{21:F1} act={22:F2}", Time.fixedTime, i == SideL ? "L" : "R",
+                "tgt=({18:F1},{19:F1}) wr={20:F1}->{21:F1} act={22:F2} drop={23:F3} tilt={24:F1}", Time.fixedTime, i == SideL ? "L" : "R",
                 phase[i], phaseAge[i], (i == SideL ? HandContactL : HandContactR) ? 1 : 0,
                 lostContactTime[i], pivot.x, pivot.y, palm.x, palm.y, handPos.x, handPos.y,
                 sh, shLo, shHi, el, elLo,
                 i == SideL ? PressPlantFoldL : PressPlantFoldR, outShoulder[i], outElbow[i],
                 i == SideL ? PressWristAngleL : PressWristAngleR,
                 i == SideL ? PressWristHoldL : PressWristHoldR,
-                i == SideL ? PressWristActL : PressWristActR));
+                i == SideL ? PressWristActL : PressWristActR,
+                i == SideL ? PressPlantDropL : PressPlantDropR,
+                i == SideL ? PressPlantTiltL : PressPlantTiltR));
         }
     }
 
@@ -1318,7 +1362,15 @@ public class ArmDrive : MonoBehaviour
         Vector2 pivot = ShoulderPivotWorld(i);
         aimBranch[i] = -1;   // a new latched point is a fresh posture
         float palmY = PalmCentreHeight(i);
-        float drop = Mathf.Max(0.02f, pivot.y - palmY);
+        // ARMS cycle 13: the drop the chord rule below is computed from is the
+        // posture this side has PROVEN it can hold with the palm on the slab, not
+        // the sagged frame the latch lands on (a latch is taken when a stroke ended
+        // and the palm was unloaded). Everything downstream -- the offset, the
+        // plant fold, the push line -- follows from this one number.
+        float latchPivotY = pivot.y;
+        if (plantHighLatch > 0.5f && plantPivotYBest[i] > latchPivotY)
+            latchPivotY = plantPivotYBest[i];
+        float drop = Mathf.Max(0.02f, latchPivotY - palmY);
         float foldMin = (elbow[i] != null && elbow[i].useLimits ? elbow[i].limits.min : -150f);
         float interiorMin = Mathf.Clamp(180f + foldMin + plantStopMarginDeg, 10f, 170f);
         float chordStart = ChordForInterior(i, interiorMin);
@@ -1384,6 +1436,24 @@ public class ArmDrive : MonoBehaviour
             side = hand[i].position.x >= pivot.x ? 1f : -1f;
         plantX[i] = pivot.x + side * offset;
         plantY[i] = palmY;
+        // The push line this latch was computed from, read-only (arms cycle 13).
+        // 0 deg = the palm is straight under the shoulder; the palm-ground friction
+        // cone is atan(sqrt(handFriction x groundFriction)) = 36.9 deg on the
+        // recorded 1.4 / 0.4, so a tilt beyond it slides instead of pressing.
+        float tiltDeg = Mathf.Atan2(Mathf.Abs(offset), Mathf.Max(0.001f, drop)) * Mathf.Rad2Deg;
+        if (i == SideL)
+        {
+            PressPlantDropL = drop;
+            PressPlantTiltL = tiltDeg;
+        }
+        else
+        {
+            PressPlantDropR = drop;
+            PressPlantTiltR = tiltDeg;
+        }
+        // The next latch measures its own stroke: the running best starts again
+        // from the pivot of the frame the point was taken on.
+        plantPivotYBest[i] = pivot.y;
         // The hand's own orientation is part of the plant (arms cycle 12). The
         // palm is a flat contact patch and the wrist is the joint that keeps it
         // flat; the angle the instant the point is taken is the angle that had the
@@ -1749,6 +1819,7 @@ public class ArmDrive : MonoBehaviour
         plantLateralShare = ReadFloat(args, ArgPlantShare, plantLateralShare);
         plantStopMarginDeg = ReadFloat(args, ArgPlantStop, plantStopMarginDeg);
         plantReachMargin = ReadFloat(args, ArgPlantReach, plantReachMargin);
+        plantHighLatch = ReadFloat(args, ArgHighLatch, plantHighLatch);
         pressDepth = ReadFloat(args, ArgPressDepth, pressDepth);
         pressStrokeMode = ReadFloat(args, ArgPressMode, pressStrokeMode);
         pressDepthExtra = ReadFloat(args, ArgDepthExtra, pressDepthExtra);
