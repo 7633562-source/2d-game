@@ -1,8 +1,8 @@
 # Engine channel 6.6 — deferred upgrade record
 
 Status: **DEFERRED**. Do not start without Hermes/Yury. Owner: Hermes (orchestrator).
-Lanes tracked here: 6.5 patch (6000.5.11f1), 6.6 (6000.6.1f1), 6.7 beta (6000.7.0b1/b2). Everything
-below is verified against unity.com or the project files on the date named.
+Lanes tracked here: 6.5 patch (6000.5.11f1), 6.6 (6000.6.2f1 - best in branch), 6.7 beta
+(6000.7.0b1/b2). Everything below is verified against unity.com or the project files on the date named.
 Created 2026-09-17 from the H_Scout "Unity 2D" digest (cron `58988890f9e7`, run 03:04).
 
 ## Why deferred
@@ -78,6 +78,24 @@ Verified against unity.com on 2026-09-17 (whats-new/6000.5.11 answers HTTP 200; 
   which invalidates the stance/walk baselines the burn campaign is measuring until 2026-09-29. It is
   the lower-risk lane of the two: same minor, URP and packages untouched, no asset upgrade pass.
   After the campaign: 6.5.11 first, re-run the baselines, then decide 6.6 on its own.
+
+## 6.6 lane update (2026-09-19): use 6000.6.2f1, not 6.6.1
+
+`6000.6.2f1` (2026-09-18, revision 770e33f6875c) is out and is now the pick inside the 6.6 branch.
+Verified: whats-new/6000.6.2 = HTTP 200; 6000.6.3, 6000.7.0b2 and 6000.5.12 all 404.
+
+- It ships the item we would otherwise have waited for 6.7 to get: "2D: Fixed Light2D memory leak when
+  unloading scenes - the runtime-created light mesh is now properly destroyed when the component is
+  destroyed" (UUM-143650). With 9 scenes and 8 files referencing Light2D, that is the concrete
+  measurable reason to prefer 6.6.2 over 6.6.1.
+- Still open in 6.6.2 per its own Known Issues: UUM-150232 (our Bloom + 2D Renderer black screen; root
+  fix announced for 6000.7.0b2 only) and UUM-149540 (`Resources.UnloadUnusedAssets()` slow in Player
+  builds, 6000.5.0b2+).
+- Also in 6.6.2 and relevant to our WebGL/IL2CPP path: WebGPU render_attachment usage flags
+  (UUM-150892), cube-texture shaders (UUM-150746), batchmode builds with NameFilesAsHashes
+  (UUM-149003), IL2CPP direct codegen for ldind/stind restored (UUM-129900).
+- No new patches in the 6.5 branch: 6000.5.11f1 is still the top there, so the 6.5 lane is unchanged.
+- Decision unchanged: install waits for the burn campaign to close. Within 6.6, prefer 6.6.2.
 
 ## 6.7 beta lane (6000.7.0b1, 2026-09-17)
 

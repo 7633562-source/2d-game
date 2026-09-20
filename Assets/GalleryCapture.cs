@@ -156,11 +156,18 @@ public class GalleryCapture : MonoBehaviour
         yield return Still("materials", RowBoundsOr(gallery, "materials"), label + "_materials.png", fits, stillPause);
         yield return Still("ground / sky / sign", RowBoundsOr(gallery, "level"), label + "_level.png", fits, stillPause);
         yield return Still("campfire flame core", RowBoundsOr(gallery, "fire"), label + "_fire.png", fits, stillPause);
+        // The flower bed (ART-0 gap 3, 20.09) has its own tighter lens: the berry row's
+        // lens draws a 0.03 m petal 3 px wide, which is not a picture to judge.
+        yield return Still("flower bed", RowBoundsOr(gallery, "flower"), label + "_flower.png", fits, stillPause);
 
         // The comparison toggle, on the same lens: the difference is the whole point.
         gallery.SetRealArt(false);
         yield return Still("whole gallery, placeholder art", gallery.ContentBounds,
             label + "_placeholder.png", fits, stillPause);
+        // ... and the same flower bed with the flat collider boxes back: one build, one
+        // lens, the only difference is the art. This pair is what the blind read judges.
+        yield return Still("flower bed, placeholder boxes", RowBoundsOr(gallery, "flower"),
+            label + "_flowerbox.png", fits, stillPause);
         gallery.SetRealArt(true);
 
         // The pan: >= 15 s of the whole strip at the capture frame rate.

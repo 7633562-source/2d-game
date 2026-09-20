@@ -318,6 +318,45 @@ public class TrialRecorder
     private float lastSoleBottomY;
     private bool hasComSample;
 
+    // ─── A2/A3/A4 columns (append-only, 19.09.2026) ───
+    // A2: the geometric support state, published twice - once as the controller
+    // itself computes it (BalanceController.GeometricFallState) and once from
+    // this recorder's own measured loaded-plate hull. A4: the pelvis vertical
+    // velocity and its one-step difference (the squat test's output channel).
+    private Rigidbody2D pelvisBody;
+    private float pelvisVelY;
+    private float pelvisAccY;
+    private float lastPelvisVelYSample;
+    private bool hasPelvisVelSample;
+    private int ctrlFallState;
+    private int hullFallState;
+    private float ctrlFallFirstTime = -1f;
+    private int ctrlFallFirstCode;
+    private float ctrlFallenFirstTime = -1f;
+    private float hullFallFirstTime = -1f;
+    private float hullFallenFirstTime = -1f;
+    private int samplesCtrlCritical;
+    private int samplesCtrlFallen;
+    private int samplesHullCritical;
+    private int samplesHullFallen;
+    private float maxAbsPelvisAccY;
+    // A3: the IK workspace residual per leg, from the ACTUAL pelvis->ankle
+    // vector (see SampleGeometricState). Index 0 = left, 1 = right.
+    private readonly float[] ikReach = new float[2];
+    private readonly float[] ikNear = new float[2];
+    private readonly float[] ikResidKnee = new float[2];
+    private readonly int[] ikGuardDy = new int[2];
+    private readonly int[] ikGuardLen = new int[2];
+    private readonly double[] sumIkResidAbs = new double[2];
+    private readonly float[] maxIkResidAbs = new float[2];
+    private readonly int[] samplesIkGuardDy = new int[2];
+    private readonly int[] samplesIkGuardLen = new int[2];
+    // Same residual restricted to the quiet window (BASELINE_WINDOW_*, the
+    // window wSup is measured in): the upright baseline the CSV reader must
+    // subtract before calling a residual a workspace violation.
+    private readonly double[] sumIkResidQuietAbs = new double[2];
+    private readonly int[] samplesIkResidQuiet = new int[2];
+
     public TrialRecorder(Human human, string label)
         : this(human, new TrialRunInfo { Label = label })
     {
@@ -336,6 +375,12 @@ public class TrialRecorder
         head = human.headSegment != null ? human.headSegment.transform : null;
         Transform pelvisTransform = human.transform.Find("Pelvis");
         pelvis = pelvisTransform;
+        // A4: the pelvis rigid body's own velocity, so the vertical acceleration
+        // column below is the solver's velocity differenced once, not a second
+        // difference of positions (which doubles the quantisation noise).
+        pelvisBody = pelvisTransform != null
+            ? pelvisTransform.GetComponent<Rigidbody2D>()
+            : null;
         Transform leftHandT = human.transform.Find("LeftArmHand");
         Transform rightHandT = human.transform.Find("RightArmHand");
         leftHandCollider = leftHandT != null ? leftHandT.GetComponent<Collider2D>() : null;
@@ -638,7 +683,211 @@ public class TrialRecorder
             // copRejected — manifold points of this frame that were NOT on a
             //    plate (Box2D vertex-face points from the ground's corner).
             .Append("copValid").Append(';')
-            .Append("copRejected").AppendLine();
+            .Append("copRejected").Append(';')
+            // ─── A2/A3/A4 columns (append-only, 19.09.2026) ───
+            // pelvisVelY/pelvisAccY — the pelvis rigid body's vertical velocity
+            //    and its one-step difference, m/s and m/s^2 (A4: the scripted
+            //    squat-and-rise -squatRise 1 is measured on these two beside
+            //    fzTotal).
+            // ctrlFallState — the CONTROLLER's own geometric state, from
+            //    BalanceController.GeometricFallState: 0 supported, 1 critical
+            //    (the capture point is outside the support polygon, so no CoP
+            //    inside it can stop the mass), 2 fallen (the CoM itself is
+            //    outside), 3 no support (no foot grounded). Geometry only, no
+            //    timer and no latch - see Assets/BodySupportGeometry.cs.
+            // hullFallState — the same ladder computed by this recorder against
+            //    the measured loaded-plate hull already in this row
+            //    (hullMin/hullMax + comX + comVelX + supportH): "no support"
+            //    means fzTotal <= 0.2 * wSup. It is here so the state is checkable
+            //    from the columns beside it; the controller's version uses its own
+            //    ankle-referenced CoM height, ~4 % different omega.
+            // ikReachL/R — the ACTUAL pelvis->ankle chord of that leg, m, from
+            //    the pelvis centre (y - pelvisSize.y/2, the pose drive's own hip
+            //    anchor) to the foot centre the estimator publishes.
+            // ikNearL/R — the nearest reachable chord to it, m: the same vector
+            //    clamped into the pose drive's workspace [0.45*(a+b), 0.995*(a+b)]
+            //    with a, b = thighSize.y, shinSize.y (PoseDriveController.SolveLegIk).
+            // ikResidKneeL/R — the angular workspace residual, degrees:
+            //    reqKnee - the knee flexion that nearest reachable chord implies
+            //    (2*acos(near/(a+b))). 0 = the command is inside the workspace the
+            //    real leg occupies. A quiet stand does NOT floor at 0: the
+            //    measured upright chord is 0.999 of the bars (a 4.5-5.1 deg knee)
+            //    while the solver caps at 0.995 (11.46 deg), so a healthy stand
+            //    reads about -7 deg. The JSON carries the measured baseline
+            //    (ikResidKneeQuietMeanAbs*), so the floor is never a violation.
+            // ikGuardDyL/R — 1 when the pose drive's dy >= -0.12 m floor fires on
+            //    the ACTUAL vector (the ankle sits above the hip's 0.12 m floor).
+            // ikGuardLenL/R — 1 when its length clamp fires on the ACTUAL vector
+            //    (chord below 0.45*(a+b) or above 0.995*(a+b)). Those are the
+            //    solver's two guards, evaluated on both legs every frame; the
+            //    solver itself evaluates them only on the leg it is solving.
+            //    READ THE STAND BASELINE BEFORE USING THEM: the solver's upper
+            //    bar is 0.995*(a+b) = 0.8557 m on 0.86 m bars while the measured
+            //    quiet-stance chord is 0.999 of the bars (0.859 m), so a healthy
+            //    stand sits just ABOVE the bar and ikGuardLen reads 1 there by
+            //    construction - both fractions are in the JSON
+            //    (ikGuardLenFractionL/R) so the stand's own duty is always known.
+            //    The walker's own IK (SolveCaptureLegIk) uses even tighter bars
+            //    (l1+l2-0.01 = 0.85 m); both solvers are named here because the
+            //    walk path is solved by the walker, not by the pose drive.
+            .Append("pelvisVelY").Append(';')
+            .Append("pelvisAccY").Append(';')
+            .Append("ctrlFallState").Append(';')
+            .Append("hullFallState").Append(';')
+            .Append("ikReachL").Append(';')
+            .Append("ikReachR").Append(';')
+            .Append("ikNearL").Append(';')
+            .Append("ikNearR").Append(';')
+            .Append("ikResidKneeL").Append(';')
+            .Append("ikResidKneeR").Append(';')
+            .Append("ikGuardDyL").Append(';')
+            .Append("ikGuardDyR").Append(';')
+            .Append("ikGuardLenL").Append(';')
+            .Append("ikGuardLenR").Append(';')
+            // ─── WALK CYCLE 6j (append-only, indices stable) ───
+            // The DELIVERED plant geometry, published per frame by
+            // BalanceControllerCaptureWalk.DriveCaptureSwingLeg. Before these
+            // four columns the 0.43-0.75 m live ask and the ~0.18 m sole the
+            // third plant actually delivered could only be INFERRED from
+            // hullMax/soleClear/comX to ~0.03-0.04 m; with the point handed to
+            // the solver, the plan target in force, the age the swing curve was
+            // evaluated at and the swing ankle's own measured world X recorded,
+            // the clamp that owns the loss is named by measurement.
+            // captureSwingAskX — X handed to SolveCaptureLegIk this frame, m
+            //    (post reach disc, pre chord clamp).
+            // captureSwingSoleX — the swing ankle's measured world X in that
+            //    same frame, m. ask - sole is the error the leg still has to
+            //    travel; both 0 = the walker is not running.
+            // captureSwingTrackAge — the age the swing curve was evaluated at,
+            //    s, after the WALK CYCLE 6i airborne clock.
+            // capturePlanTargetX — the plan target in force that frame, m,
+            //    after the reach-disc X clamp and the live-ask floor.
+            .Append("captureSwingAskX").Append(';')
+            .Append("captureSwingSoleX").Append(';')
+            .Append("captureSwingTrackAge").Append(';')
+            .Append("capturePlanTargetX").Append(';')
+            // ─── WALK CYCLE 6k (append-only, indices stable) ───
+            // The solver's OWN answer, next to the point it was handed (6j).
+            // 6j left the 0.457 m at the plant between two owners — the
+            // solver's input-to-solution kinematics, or the drive receiving
+            // something other than the ask — because nothing recorded what the
+            // solver believes it achieved. Forward kinematics of the returned
+            // angles is that belief.
+            // captureSwingSolvedSoleX — world X of the ankle the returned
+            //    (thighWorld, kneeFlex) put the ankle at, m.
+            // captureSwingSolvedResidualX — captureSwingAskX minus
+            //    captureSwingSolvedSoleX, m; ~0 = the solver gave back the
+            //    point it was handed, so the loss is downstream of the solver.
+            // captureSwingSolveFrameX — world X of the hip hinge the chord was
+            //    measured from, m (the origin of the solve).
+            // captureSwingSolveFrameAngleDeg — the parent tilt the returned
+            //    world thigh angle is converted into a joint command against
+            //    (the plan's pelvis tilt), deg: the one body frame in a
+            //    world-space solve, and the number that lets the plant's
+            //    -22.4 deg trunk tilt be tested as the owner.
+            // All four are 0 while the walker is not running, never NaN.
+            .Append("captureSwingSolvedSoleX").Append(';')
+            .Append("captureSwingSolvedResidualX").Append(';')
+            .Append("captureSwingSolveFrameX").Append(';')
+            .Append("captureSwingSolveFrameAngleDeg").Append(';')
+            // ─── WALK CYCLE 6l (append-only, indices stable) ───
+            // The pose that was APPLIED, next to the one the solver returned
+            // (6k) and the point it was handed (6j). 6k proved the solver's own
+            // answer lands on the ask to the digit and left the 0.457 m at the
+            // plant in the DELIVERY, between two owners nothing separated: the
+            // frame the returned world angles are written into a joint command
+            // against, and the clamps/tracking that stand between those angles
+            // and the targets the joints are given. These four columns are 6k's
+            // own forward kinematics rebuilt on the MEASURED parent and on the
+            // post-clamp targets, so both halves are subtracted in the CSV:
+            //     solvedSole - appliedSole   = the clamps / tracking
+            //     appliedSole - measuredSole = the parent frame
+            // captureSwingAppliedSoleX — world X of the ankle the DRIVEN pose
+            //    puts the ankle at this frame, m (measured hinge + measured
+            //    parent tilt + post-clamp hip/knee targets). Commanded pose,
+            //    not the measured leg.
+            // captureSwingAppliedResidualX — captureSwingAskX minus
+            //    captureSwingAppliedSoleX, m; ~0 = the applied chain lands on
+            //    the ask and the parent frame is not the owner.
+            // captureSwingAppliedFrameX — world X of the measured hip hinge
+            //    the applied chain was built on, m; coincides with
+            //    captureSwingSolveFrameX by construction.
+            // captureSwingAppliedFrameAngleDeg — the MEASURED parent tilt the
+            //    applied joint command is written in, deg; subtract
+            //    captureSwingSolveFrameAngleDeg to read the frame mismatch.
+            // All four are 0 while the walker is not running, never NaN.
+            .Append("captureSwingAppliedSoleX").Append(';')
+            .Append("captureSwingAppliedResidualX").Append(';')
+            .Append("captureSwingAppliedFrameX").Append(';')
+            .Append("captureSwingAppliedFrameAngleDeg").Append(';')
+            // ─── WALK CYCLE 6n (append-only, indices stable) ───
+            // The ask's own HEIGHT, published before any number moved, and the
+            // flexion demand that ask carries in the frame it is delivered in.
+            // 6m closed the frame defect and left the plant's ask unmeasurable in
+            // one coordinate: the flexion an ask needs is a function of the
+            // sole's height as much as its X (the chord angle grows with X, the
+            // thigh-to-chord angle grows as the chord shortens, i.e. as the
+            // ankle is asked higher), so the 65 deg allowance could not be told
+            // from a Y that asks for too short a chord. The second column is the
+            // pre-bound demand, so the 6n allowance spending itself on the ask
+            // never hides the demand it refused.
+            // captureSwingAskY — world Y of the point handed to
+            //    SolveCaptureLegIk this frame, m (up is plus), the same point
+            //    captureSwingAskX is the X of: post reach disc, post
+            //    CaptureSwingAnkleYForChord, post the 6n flexion allowance.
+            // captureSwingHipDemandDeg — the hip flexion that point carries in
+            //    the frame the command is delivered in, deg, BEFORE the 6n
+            //    allowance bounds it (more negative = more flexion asked for);
+            //    frame minus the world thigh the solve returns for the ask.
+            // Both are 0 while the walker is not running, never NaN.
+            .Append("captureSwingAskY").Append(';')
+            .Append("captureSwingHipDemandDeg").Append(';')
+            // ─── WALK CYCLE 6o (append-only, indices stable) ───
+            // The frame the plan TARGET is built in. 6j..6n publish what the
+            // target is worth and what the body is doing on the frame the ask is
+            // solved, but nothing says what frame the target was COMPUTED in:
+            // the target is frozen once and delivered over a whole swing, so the
+            // measured tilt on the row it lands on is not the tilt it was built
+            // against and the reader cannot tell the plan moving the target from
+            // the body leaving the plan's frame (c6n_walk: target 0.5303 -> 0.7839 m
+            // while the measured tilt runs to −37.6 deg). Appended at the END so
+            // every column before it keeps its index.
+            // capturePlanFrameTiltDeg — the measured pelvis tilt at the freeze
+            //    that built the plan in force, deg, world frame, minus is forward
+            //    (the recorder's pelvisTilt convention); held while that plan is
+            //    in force. The reader's split is
+            //      pelvisTilt - capturePlanFrameTiltDeg
+            //    = the pitch the delivered target was not built in. 0 while the
+            //    walker is not running and before the first freeze, never NaN.
+            .Append("capturePlanFrameTiltDeg").Append(';')
+            // ─── WALK CYCLE 6p (append-only, indices stable) ───
+            // The POSTURE ANSWER the delivered command carries. 6j..6o publish what
+            // the target is worth, what the body is doing and what frame the plan
+            // was built in, and 6o pays the split out of the swing hip's flexion
+            // allowance — but nothing said what the delivered hip command does with
+            // the posture itself, so "the pitch is charged to the leg" and "the
+            // pitch is answered by the joint" could not be told apart in the row.
+            // Appended at the END so every column before it keeps its index.
+            // captureSwingPostureBiasDeg — the bounded posture error the swing hip's
+            //    delivered command carried this frame, deg of hip joint angle,
+            //    positive = the ask sits on the EXTENSION side of the IK pose (the
+            //    direction that pitches the pelvis back). Bounded by the walker's
+            //    own 45 N*m loaded-hip band in degrees (3.0). Held like the 6j-6o
+            //    set; 0 while the walker is not running or with no positive
+            //    plan-frame drift, never NaN.
+            .Append("captureSwingPostureBiasDeg").Append(';')
+            // ─── WALK CYCLE 6q (append-only, indices stable) ───
+            // 6j..6p published what the LEVEL 1 walker delivered. This cycle put a
+            // SECOND path behind -poseDrive 1 (default off): the level 2 pose
+            // library, which writes the same six leg joints from a named pose
+            // table. A row therefore has to say which path produced it, or a
+            // level 2 run and a level 1 run cannot be told apart by their rows.
+            // Appended at the END so every column before it keeps its index.
+            // captureWalkPath — code, no units, no frame: 0 = the level 1 path
+            //    (the capture walker and every layer before it; also the sentinel
+            //    written by ResetCaptureWalk), 1 = the level 2 pose library held
+            //    the joints on this row. Recorder only; no NaN.
+            .Append("captureWalkPath").AppendLine();
     }
 
     public void BindWalkDriver(StepPhaseDriver driver)
@@ -1059,6 +1308,64 @@ public class TrialRecorder
         CompleteLegRequestRecord(tap, tapActive);
         float soleClearL = state != null ? state.leftFootGroundClearance : float.NaN;
         float soleClearR = state != null ? state.rightFootGroundClearance : float.NaN;
+        // ─── A2/A3/A4 (append-only, 19.09.2026) ───
+        // Runs here, not earlier: by now the load meter (fzL/fzR/hullMin/hullMax/
+        // wSup/comVelX/supportH) and the per-joint command record (legReqOut,
+        // i.e. the req* columns) both hold THIS frame's values, so the workspace
+        // residual compares against the command that actually reached the PD on
+        // this step rather than the previous one.
+        SampleGeometricState(time, comPosition, pelvisY);
+
+        // ─── WALK CYCLE 6j (append-only): the DELIVERED plant geometry ───
+        // Read once per row from the walker's own instruments. 0 is its
+        // walker-off sentinel; a non-finite value is written as 0 so no row
+        // can carry a NaN into a consumer.
+        float j6SwingAskX = FiniteOrZero(balance != null ? balance.captureSwingAskX : 0f);
+        float j6SwingSoleX = FiniteOrZero(balance != null ? balance.captureSwingSoleX : 0f);
+        float j6SwingTrackAge = FiniteOrZero(balance != null ? balance.captureSwingTrackAge : 0f);
+        float j6PlanTargetX = FiniteOrZero(balance != null ? balance.capturePlanTargetX : 0f);
+        // ─── WALK CYCLE 6k (append-only): the solver's OWN answer ───
+        // Same read-once, FiniteOrZero discipline as the 6j block above; the
+        // walker's own 0 sentinel passes through unchanged.
+        float j6kSolvedSoleX = FiniteOrZero(balance != null ? balance.captureSwingSolvedSoleX : 0f);
+        float j6kSolvedResidualX =
+            FiniteOrZero(balance != null ? balance.captureSwingSolvedResidualX : 0f);
+        float j6kSolveFrameX = FiniteOrZero(balance != null ? balance.captureSwingSolveFrameX : 0f);
+        float j6kSolveFrameAngleDeg =
+            FiniteOrZero(balance != null ? balance.captureSwingSolveFrameAngleDeg : 0f);
+        // ─── WALK CYCLE 6l (append-only): the pose that was APPLIED ───
+        // Same read-once, FiniteOrZero discipline as the 6j and 6k blocks
+        // above; the walker's own 0 sentinel passes through unchanged.
+        float j6lAppliedSoleX =
+            FiniteOrZero(balance != null ? balance.captureSwingAppliedSoleX : 0f);
+        float j6lAppliedResidualX =
+            FiniteOrZero(balance != null ? balance.captureSwingAppliedResidualX : 0f);
+        float j6lAppliedFrameX =
+            FiniteOrZero(balance != null ? balance.captureSwingAppliedFrameX : 0f);
+        float j6lAppliedFrameAngleDeg =
+            FiniteOrZero(balance != null ? balance.captureSwingAppliedFrameAngleDeg : 0f);
+        // ─── WALK CYCLE 6n (append-only): the ask's own Y and its pre-bound
+        // flexion demand. Same read-once, FiniteOrZero discipline as the 6j/6k/
+        // 6l blocks above; the walker's own 0 sentinel passes through unchanged.
+        float j6nSwingAskY = FiniteOrZero(balance != null ? balance.captureSwingAskY : 0f);
+        float j6nHipDemandDeg =
+            FiniteOrZero(balance != null ? balance.captureSwingHipDemandDeg : 0f);
+        // ─── WALK CYCLE 6o (append-only): the frame the plan target is built
+        // in. Same read-once, FiniteOrZero discipline as the 6j/6k/6l/6n blocks
+        // above; the walker's own 0 sentinel passes through unchanged.
+        float j6oPlanFrameTiltDeg =
+            FiniteOrZero(balance != null ? balance.capturePlanFrameTiltDeg : 0f);
+        // ─── WALK CYCLE 6p (append-only): the bounded posture answer the
+        // delivered swing-hip command carried. Same read-once, FiniteOrZero
+        // discipline as the 6j..6o blocks above; the walker's own 0 sentinel
+        // passes through unchanged.
+        float j6pPostureBiasDeg =
+            FiniteOrZero(balance != null ? balance.captureSwingPostureBiasDeg : 0f);
+        // ─── WALK CYCLE 6q (append-only): WHICH PATH RAN. Read once per row like
+        // the 6j..6p blocks above; the 0 the level 1 path publishes passes
+        // through unchanged, so the sentinel never becomes a NaN and never a
+        // second meaning.
+        float j6qWalkPath = FiniteOrZero(balance != null ? balance.captureWalkPath : 0f);
 
         // The same column set, without new[] and Join on every 200 Hz step.
         rows.Append(F(time)).Append(';')
@@ -1256,7 +1563,54 @@ public class TrialRecorder
             .Append(F(comVelX)).Append(';')
             .Append(ikSaturated).Append(';')
             .Append(copValid).Append(';')
-            .Append(copRejected).AppendLine();
+            .Append(copRejected).Append(';')
+            // A2/A3/A4 - same order as the header block above.
+            .Append(F(pelvisVelY)).Append(';')
+            .Append(F(pelvisAccY)).Append(';')
+            .Append(ctrlFallState).Append(';')
+            .Append(hullFallState).Append(';')
+            .Append(F(ikReach[0])).Append(';')
+            .Append(F(ikReach[1])).Append(';')
+            .Append(F(ikNear[0])).Append(';')
+            .Append(F(ikNear[1])).Append(';')
+            .Append(F(ikResidKnee[0])).Append(';')
+            .Append(F(ikResidKnee[1])).Append(';')
+            .Append(ikGuardDy[0]).Append(';')
+            .Append(ikGuardDy[1]).Append(';')
+            .Append(ikGuardLen[0]).Append(';')
+            .Append(ikGuardLen[1]).Append(';')
+            // WALK CYCLE 6j — the delivered plant geometry, same order as the
+            // header block above (ask X, sole X, track age, plan target X).
+            .Append(F(j6SwingAskX)).Append(';')
+            .Append(F(j6SwingSoleX)).Append(';')
+            .Append(F(j6SwingTrackAge)).Append(';')
+            .Append(F(j6PlanTargetX)).Append(';')
+            // WALK CYCLE 6k — the solver's own answer, same order as the header
+            // block above (solved sole X, residual, solve frame X, frame angle).
+            .Append(F(j6kSolvedSoleX)).Append(';')
+            .Append(F(j6kSolvedResidualX)).Append(';')
+            .Append(F(j6kSolveFrameX)).Append(';')
+            .Append(F(j6kSolveFrameAngleDeg)).Append(';')
+            // WALK CYCLE 6l — the pose that was APPLIED, same order as the
+            // header block above (applied sole X, applied residual, applied
+            // frame X, applied frame angle).
+            .Append(F(j6lAppliedSoleX)).Append(';')
+            .Append(F(j6lAppliedResidualX)).Append(';')
+            .Append(F(j6lAppliedFrameX)).Append(';')
+            .Append(F(j6lAppliedFrameAngleDeg)).Append(';')
+            // WALK CYCLE 6n — the ask's own Y and its pre-bound flexion demand,
+            // same order as the header block above.
+            .Append(F(j6nSwingAskY)).Append(';')
+            .Append(F(j6nHipDemandDeg)).Append(';')
+            // WALK CYCLE 6o — the frame the plan target is built in, appended at
+            // the end so every column before it keeps its index.
+            .Append(F(j6oPlanFrameTiltDeg)).Append(';')
+            // WALK CYCLE 6p — the bounded posture answer on the delivered command,
+            // appended LAST so every column before it keeps its index.
+            .Append(F(j6pPostureBiasDeg)).Append(';')
+            // WALK CYCLE 6q — which path held the joints, appended LAST so every
+            // column before it keeps its index (0 = level 1, 1 = the pose library).
+            .Append(F(j6qWalkPath)).AppendLine();
     }
 
     private static float WatchAngle(JointDampingWatch watch, int index)
@@ -1352,6 +1706,45 @@ public class TrialRecorder
         // player's time is 4.99995 s there, and it is inside the window.)
         AppendNum(json, "wSupQuietFrames", quietFzCount);
         AppendNum(json, "ikSaturatedFraction", FractionSaturatedIk());
+        // ─── A2 geometric fall state + A3 IK workspace residual (19.09.2026) ───
+        // The state the controller never had: BalanceState stayed 0/1 in every
+        // measured run. ctrlFallStateFirstTime is the acceptance number - on
+        // walk1_load4 it must be at or before the FallCriterion time (5.865 s).
+        // hull* is the same ladder against the recorder's measured loaded-plate
+        // hull, so the switch is checkable from the CSV columns themselves.
+        AppendNum(json, "ctrlFallStateFirstTime", ctrlFallFirstTime);
+        AppendNum(json, "ctrlFallStateFirstCode", ctrlFallFirstCode);
+        AppendNum(json, "ctrlFallenFirstTime", ctrlFallenFirstTime);
+        AppendNum(json, "ctrlCriticalFraction", Fraction(samplesCtrlCritical));
+        AppendNum(json, "ctrlFallenFraction", Fraction(samplesCtrlFallen));
+        AppendNum(json, "hullFallStateFirstTime", hullFallFirstTime);
+        AppendNum(json, "hullFallenFirstTime", hullFallenFirstTime);
+        AppendNum(json, "hullCriticalFraction", Fraction(samplesHullCritical));
+        AppendNum(json, "hullFallenFraction", Fraction(samplesHullFallen));
+        AppendNum(json, "ikReachFinalL", FiniteOrZero(ikReach[0]));
+        AppendNum(json, "ikReachFinalR", FiniteOrZero(ikReach[1]));
+        AppendNum(json, "ikResidKneeMeanAbsL",
+            samples > 0 ? (float)(sumIkResidAbs[0] / samples) : 0f);
+        AppendNum(json, "ikResidKneeMeanAbsR",
+            samples > 0 ? (float)(sumIkResidAbs[1] / samples) : 0f);
+        AppendNum(json, "ikResidKneeMaxAbsL", FiniteOrZero(maxIkResidAbs[0]));
+        AppendNum(json, "ikResidKneeMaxAbsR", FiniteOrZero(maxIkResidAbs[1]));
+        // The upright floor: mean |residual| in the same 4.0-5.0 s window wSup is
+        // taken from. Quote this beside any residual so the floor is never read
+        // as a violation.
+        AppendNum(json, "ikResidKneeQuietMeanAbsL",
+            samplesIkResidQuiet[0] > 0
+                ? (float)(sumIkResidQuietAbs[0] / samplesIkResidQuiet[0]) : 0f);
+        AppendNum(json, "ikResidKneeQuietMeanAbsR",
+            samplesIkResidQuiet[1] > 0
+                ? (float)(sumIkResidQuietAbs[1] / samplesIkResidQuiet[1]) : 0f);
+        AppendNum(json, "ikGuardDyFractionL", Fraction(samplesIkGuardDy[0]));
+        AppendNum(json, "ikGuardDyFractionR", Fraction(samplesIkGuardDy[1]));
+        AppendNum(json, "ikGuardLenFractionL", Fraction(samplesIkGuardLen[0]));
+        AppendNum(json, "ikGuardLenFractionR", Fraction(samplesIkGuardLen[1]));
+        // A4: the squat run's own channel - fzTotal sits beside these in the CSV.
+        AppendNum(json, "maxAbsPelvisAccY", FiniteOrZero(maxAbsPelvisAccY));
+        AppendNum(json, "finalPelvisVelY", FiniteOrZero(pelvisVelY));
         AppendNum(json, "downFraction", Fraction(samplesDown));
         AppendNum(json, "maxAbsTorsoTilt", maxAbsTilt);
         AppendNum(json, "maxAbsLumbarAngle", maxAbsLumbarAngle);
@@ -2486,6 +2879,137 @@ public class TrialRecorder
 
         ikSaturated = ResolveIkSaturated();
         if (ikSaturated != 0) samplesIkSaturated++;
+    }
+
+    // ─── A2 GEOMETRIC SUPPORT STATE + A3 IK WORKSPACE RESIDUAL (19.09.2026) ───
+    //
+    // A2. The controller's own geometric state (BalanceController.GeometricFallState,
+    //     codes in Assets/BodySupportGeometry.cs) is published beside the same
+    //     ladder computed HERE against the measured loaded-plate hull that is
+    //     already in this CSV (hullMin/hullMax + comX + comVelX + supportH) - the
+    //     one a reader can re-derive from the columns next to it. The recorder's
+    //     capture point uses supportH; the controller's uses its own
+    //     ankle-referenced height (~0.065 m lower h, ~4 % higher omega), so the
+    //     two columns can differ on the critical frame and both are named.
+    //     "No support" = no foot carries more than 0.2 * wSup this frame, the
+    //     same bar the walk brief uses for "this foot is loaded". Nothing here
+    //     latches: every frame is classified from scratch, the first-time fields
+    //     only remember WHEN a code first appeared for the JSON summary.
+    //
+    // A3. Per leg, from the ACTUAL pelvis->ankle vector: the leg's real chord,
+    //     the nearest reachable chord to it (the pose drive's own bars,
+    //     PoseDriveController.SolveLegIk: [0.45*(a+b), 0.995*(a+b)] with a, b the
+    //     thigh and shin lengths, and a dy floor of -0.12 m), the angular
+    //     residual kneeCmd - kneeNearest in degrees, and the two solver guards
+    //     evaluated on that actual vector. The solver only evaluates its guards
+    //     on the leg it happens to be solving; here both legs are measured every
+    //     frame. The hip point is the pose drive's own anchor (pelvis centre x,
+    //     pelvis centre y - pelvisSize.y/2) and the ankle point is the foot
+    //     segment centre the estimator publishes - the same point the walker
+    //     aims at. A healthy quiet stand is NOT zero: the measured quiet chord
+    //     is 0.999 of the bars (a 4.5-5.1 deg knee) while the solver caps at
+    //     0.995 (11.46 deg of knee at those bars), so the residual floors at
+    //     about -7 deg upright, and the JSON carries that measured baseline
+    //     (ikResidKneeQuietMeanAbs*) so the floor is never read as a workspace
+    //     violation.
+    //
+    // A4. pelvisVelY / pelvisAccY: the pelvis rigid body's vertical velocity and
+    //     its one-step difference - the channel the scripted squat-and-rise
+    //     (-squatRise 1, HeadlessTrial) is judged on. fzTotal is already beside
+    //     it in the CSV.
+    private void SampleGeometricState(float time, Vector2 comPosition, float pelvisY)
+    {
+        float dt = Time.fixedDeltaTime;
+
+        // ─── A4: pelvis vertical velocity and acceleration ───
+        if (pelvisBody != null)
+        {
+            pelvisVelY = pelvisBody.linearVelocity.y;
+            pelvisAccY = hasPelvisVelSample ? (pelvisVelY - lastPelvisVelYSample) / dt : 0f;
+            lastPelvisVelYSample = pelvisVelY;
+            hasPelvisVelSample = true;
+            maxAbsPelvisAccY = Mathf.Max(maxAbsPelvisAccY, Mathf.Abs(pelvisAccY));
+        }
+        else
+        {
+            pelvisVelY = float.NaN;
+            pelvisAccY = float.NaN;
+        }
+
+        // ─── A2: the controller's state and this recorder's hull state ───
+        ctrlFallState = balance != null
+            ? balance.GeometricFallState
+            : BodySupportGeometry.NoSupport;
+        bool hullHasSupport = fzL + fzR > 0.2f * wSup;
+        hullFallState = BodySupportGeometry.Level(hullHasSupport, comPosition.x, comVelX,
+            supportHeight, hullMinX, hullMaxX);
+        if (ctrlFallState >= BodySupportGeometry.Critical)
+        {
+            if (ctrlFallFirstTime < 0f)
+            {
+                ctrlFallFirstTime = time;
+                ctrlFallFirstCode = ctrlFallState;
+            }
+            if (ctrlFallState == BodySupportGeometry.Critical) samplesCtrlCritical++;
+            else samplesCtrlFallen++;
+            if (ctrlFallState == BodySupportGeometry.Fallen && ctrlFallenFirstTime < 0f)
+                ctrlFallenFirstTime = time;
+        }
+        if (hullFallState >= BodySupportGeometry.Critical)
+        {
+            if (hullFallFirstTime < 0f) hullFallFirstTime = time;
+            if (hullFallState == BodySupportGeometry.Critical) samplesHullCritical++;
+            else samplesHullFallen++;
+            if (hullFallState == BodySupportGeometry.Fallen && hullFallenFirstTime < 0f)
+                hullFallenFirstTime = time;
+        }
+
+        // ─── A3: the IK workspace residual, per leg, from the actual vector ───
+        if (state == null || human == null)
+        {
+            for (int side = 0; side < 2; side++)
+            {
+                ikReach[side] = float.NaN;
+                ikNear[side] = float.NaN;
+                ikResidKnee[side] = float.NaN;
+                ikGuardDy[side] = 0;
+                ikGuardLen[side] = 0;
+            }
+            return;
+        }
+        float a = human.thighSize.y;
+        float b = human.shinSize.y;
+        float bars = a + b;
+        if (bars < 0.001f) return;
+        float rMin = bars * 0.45f;
+        float rMax = bars * 0.995f;
+        float hipY = pelvisY - human.pelvisSize.y * 0.5f;
+        float pelvisX = pelvis != null ? pelvis.position.x : 0f;
+        for (int side = 0; side < 2; side++)
+        {
+            Vector2 foot = side == 0 ? state.leftFootPosition : state.rightFootPosition;
+            float dx = foot.x - pelvisX;
+            float dy = foot.y - hipY;
+            float reach = Mathf.Sqrt(dx * dx + dy * dy);
+            float near = Mathf.Clamp(reach, rMin, rMax);
+            float kneeNear = 2f * Mathf.Acos(Mathf.Clamp(near / bars, -1f, 1f))
+                * Mathf.Rad2Deg;
+            float resid = legReqOut[side == 0 ? 2 : 3] - kneeNear;
+            ikReach[side] = reach;
+            ikNear[side] = near;
+            ikResidKnee[side] = resid;
+            ikGuardDy[side] = dy > -0.12f ? 1 : 0;
+            ikGuardLen[side] = reach < rMin || reach > rMax ? 1 : 0;
+            sumIkResidAbs[side] += Mathf.Abs(resid);
+            maxIkResidAbs[side] = Mathf.Max(maxIkResidAbs[side], Mathf.Abs(resid));
+            samplesIkGuardDy[side] += ikGuardDy[side];
+            samplesIkGuardLen[side] += ikGuardLen[side];
+            if (time >= BASELINE_WINDOW_START && time < BASELINE_WINDOW_END)
+            {
+                sumIkResidQuietAbs[side] += Mathf.Abs(resid);
+                samplesIkResidQuiet[side]++;
+            }
+        }
     }
 
     private float FractionSaturatedIk()

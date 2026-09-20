@@ -52,6 +52,13 @@ public class GameProcess : MonoBehaviour
     public float treeSpacing = 5f;
     [Tooltip("If on and a tree exists — camera follows the crown.")]
     public bool cameraFollowsTree = false;
+    [Tooltip("Empty — the yard gallery (KindFromGalleryIndex). \"apple\" builds an AppleTree instead: "
+        + "one species per scene (Yury 18.09), the apple lane's own rig.")]
+    public string treeSpecies = "";
+    [Tooltip("Apple crown height, m. 0 = the seed's 2–5 m. The TreeApple scene proof pins it.")]
+    public float treeAppleHeightM = 0f;
+    [Tooltip("Tree seed. -1 = 1 + i * 17 as before.")]
+    public int treeSeed = -1;
 
     [Header("Dogs")]
     [Tooltip("0 — do not spawn. Play stance is scene Dog. World may hold a few.")]
@@ -84,6 +91,7 @@ public class GameProcess : MonoBehaviour
     private List<Human> humans = new List<Human>();
     private List<Bird> birds = new List<Bird>();
     private List<PlantTree> trees = new List<PlantTree>();
+    private List<AppleTree> appleTrees = new List<AppleTree>();
     private List<PlantFlower> flowers = new List<PlantFlower>();
     private List<Dog> dogs = new List<Dog>();
     private Camera playCamera;
@@ -490,16 +498,36 @@ public class GameProcess : MonoBehaviour
         for (int i = 0; i < treeCount; i++)
         {
             TreeKind kind = PlantTree.KindFromGalleryIndex(i);
+            // One species per scene (Yury 18.09): the spawn config names the kind.
+            if (!string.IsNullOrEmpty(treeSpecies))
+                kind = PlantTree.ParseKind(treeSpecies);
+            int seed = treeSeed >= 0 ? treeSeed : 1 + i * 17;
+            float x = originX + i * treeSpacing;
+
+            if (kind == TreeKind.Apple)
+            {
+                // The apple lane's rig (AppleTree : TreeBase) with the fruit and
+                // the 2–5 m crown; 16 RB for one tree on the hero camera is the
+                // scene's own choice, Tree.unity already sways its first tree.
+                GameObject appleObject = new GameObject("Tree_" + (i + 1) + "_Apple");
+                AppleTree apple = appleObject.AddComponent<AppleTree>();
+                apple.seed = seed;
+                if (treeAppleHeightM > 0f)
+                    apple.appleHeightM = treeAppleHeightM;
+                appleObject.transform.position = new Vector2(x, PlantTree.RootY(groundY));
+                apple.Build();
+                appleTrees.Add(apple);
+                continue;
+            }
+
             GameObject treeObject = new GameObject("Tree_" + (i + 1) + "_" + kind);
             PlantTree tree = treeObject.AddComponent<PlantTree>();
             tree.kind = kind;
-            tree.seed = 1 + i * 17;
+            tree.seed = seed;
             // One Sway is a Human of bodies. A row is a gallery: first sways.
             if (treeCount > 1 && i > 0)
                 tree.rig = TreeRig.Static;
-            treeObject.transform.position = new Vector2(
-                originX + i * treeSpacing,
-                PlantTree.RootY(groundY));
+            treeObject.transform.position = new Vector2(x, PlantTree.RootY(groundY));
             tree.BuildTree();
             trees.Add(tree);
         }

@@ -115,3 +115,19 @@ is **8/3**; do not lower it "into the piggy bank". Do not drop
 | 5 solver | table | 6/2 drop 0.0034, **8/3** drop 0.0016, 10/4 drop 0.0007; `wallPerSim` 0.81→0.85→0.87; prod **8/3** |
 
 After the series: swing liftoff on walk, not a new World profile and not 100 Hz.
+
+# Mobile/WebGL memory - notes from a shipped case (18.09.2026)
+
+Reference for the memory budget, not a new rule. Source: "Optimizing Deep Rock Galactic: Survivor
+for mobile" (https://unity.com/blog/optimizing-deep-rock-galactic-survivor-for-mobile).
+
+- They hold ~1850 MB on a 3 GB iPad; Addressables decide what is resident, not what is loaded.
+- Damage numbers as a ParticleSystem + a digit sprite atlas instead of TMP text objects.
+- Enemy animation baked into a texture and animated in the vertex shader, plus GPU instancing.
+- Flow field instead of NavMesh; KD-tree instead of heavy physics queries at scale.
+- Custom batched draw for procedural geometry - the same class of problem as our procedural shapes.
+- Automated capture scenarios + Profiler runs, not eyeballing.
+
+Use these when we measure the WebGL/mobile memory budget after the burn campaign, together with
+UUM-149540 (`Resources.UnloadUnusedAssets` in players) and the Light2D scene-unload leak (fixed only
+from 6000.6.2).

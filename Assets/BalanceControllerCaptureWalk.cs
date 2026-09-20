@@ -167,6 +167,8 @@ public partial class BalanceController
     public int useCaptureWalker = 1;
     [Tooltip("Step time T of the periodic orbit, s. 0.32 let xi(T) grow past the 0.17 m freeze footprint (capwalk7 vault after 3 steps). 0.26 plants sooner so e^{ωT} is ~2.4 not ~3.")]
     public float captureStepDuration = 0.26f;
+    [Tooltip("WALK CYCLE 6d gate. 1 = the plan's step time T follows the walker's own measured CoM speed: T = captureStepDuration while |v| <= CaptureDesiredSpeed, then T = captureStepDuration * v_des / |v|, floored at CaptureSwingDurationFloorSeconds, so the travel per step stays at the walking length while the cadence follows the mass. 0 = the constant captureStepDuration of every cycle before 6d, to the bit. A measured walk has to be able to name which of the two it ran.")]
+    public int captureStepSpeedAdapt = 1;
     [Tooltip("Share of T over which the swing ankle covers its landing X. 1 = smoothstep over the whole step — the slow carry that lets the trunk dump. Below 1 the foot arrives early and waits on that X for the Y plant. Floor 0.20 so a tiny window cannot whip 16 kg of leg. 0.70 left X still travelling while CoM passed the toe.")]
     public float captureSwingXShare = 0.50f;
     [Tooltip("Desired speed v_des, m/s. The sign comes from intent.moveX.")]
@@ -318,6 +320,8 @@ public partial class BalanceController
     public float captureLeanPlantFraction = 0f;
     [Tooltip("CoM setpoint ahead of the support centre, m, along walk dir. Dual support uses the LEAD sole as that centre so the trail ankle drives CoM onto the plant (a per-foot centre left CoM parked on the rear: capwalk2). Plus is forward.")]
     public float captureCopLead = 0.015f;
+    [Tooltip("CAPTURE PLACEMENT: kLead on the CoM's own capture point xLand = xCom + vCom*sqrt(h/g), recomputed from measured state every frame, that the SWING sole is driven to. One LIPM step about the new sole keeps its speed at tanh(omega*T/2) (0.39 at omega 3.2 / T 0.26); 0.37 sits just under that, so the walk neither decays to a stop (which is what k above the neutral value does) nor runs away. 1 = full catch (the mass is arrested at the plant). 0 = off: the frozen plan target and the old fixed catch lead only (behaviour before this field, to the bit).")]
+    public float captureComLandingScale = 0.37f;
     [Tooltip("Scale on the existing ankleComP/ankleComD CoP loop. 1 = that loop unchanged.")]
     public float captureCopScale = 1f;
     [Tooltip("When CoM is already ahead, fade D braking up to this share of the current forward speed (capped at v_des), so the toes do not fight a captured step. 0 = quiet-stance D (damps all velocity). Full v_des from rest saturates the flexor (capwalk4–8); zero seek parks and chatters (capwalk5/9). Launch uses captureLaunchSpeed, not this.")]
@@ -370,6 +374,32 @@ public partial class BalanceController
     // second controller mid-air.
     private float captureLastIkThighDeg;
     private float captureLastIkKneeDeg = 20f;
+    // ─── WALK CYCLE 6i: ONE continuous airborne clock for the swing sole ───
+    // The gait's SwingAge / SwingAirAge advance ONLY inside DecideSwing, and
+    // Enter(TouchdownBlend) clears SwingLeftGround and SwingAirAge outright
+    // (GaitStateMachine.cs:665-679). An airborne landing sole driven from the
+    // blend therefore sees a STALE age. c6h_walk, third swing: frozen at
+    // walk-relative +1.795 (v 0.278, T = captureStepDuration 0.26, v < v_des),
+    // blend entered +1.820 with the sole 0.020 m off the slab and held 0.580 s
+    // until the swap at +2.400. SwingAge stopped at 0.020 s for that whole
+    // 0.580 s, so DriveCaptureSwingLeg fed the curve trackAge 0.020 of its own
+    // 0.26 s step: xEase = smoothstep(0.020 / (0.5 * 0.26)) = 0.066, i.e. the
+    // curve handed the solver startX + 6.6 % of the step. The third sole
+    // landed on the SECOND sole's X (its plate [0.1388, 0.4150] sits inside
+    // the stance plate [0.1456, 0.4121], xCopMeas stays 0.333 through the
+    // two-plate contact), while the live ask ran 0.435 -> 0.742 m and the CoM
+    // covered 0.362 m in the same single support: a null step, and the trunk
+    // answered with the -44.5 deg fold.
+    // This clock starts when the SWING sole leaves the slab and runs until it
+    // touches again, or the roles swap. It is only ever AHEAD of the gait's
+    // ages once those have stopped, so the peel, the periodic Swing and the
+    // Recovery catch keep the curve they had, to the bit.
+    private float captureAirborneAge;
+    // ─── C1 instrumentation (recorder only; the control math never reads it) ───
+    // CaptureIkSaturated is set on every SolveCaptureLegIk with whether the chord
+    // had to be clamped, CaptureIkSolveTick says when that solve happened.
+    public bool CaptureIkSaturated;
+    public int CaptureIkSolveTick = -1;
     private float captureLastCapturePointX;
     private float captureLastOmega0;
     private float captureSoleThickness;
@@ -445,6 +475,243 @@ public partial class BalanceController
     public float CaptureWalkFootTargetX => capturePlan.valid ? capturePlan.targetX : 0f;
     public float CaptureWalkBStar => capturePlan.valid ? capturePlan.bStar : 0f;
     public float CaptureWalkOmega0 => captureLastOmega0;
+
+    // ─── WALK CYCLE 6j instrumentation: the DELIVERED plant geometry ───
+    // Four read-only publications of values DriveCaptureSwingLeg ALREADY
+    // computes. They exist because the loss between the live capture ask and
+    // the sole that actually lands (6i: ask 0.43-0.75 m, delivered plate
+    // ankle ~0.182 m) could only be inferred from the existing columns to
+    // ~0.03-0.04 m: neither the point handed to the solver, nor the plan
+    // target in force after its clamps, nor the age the curve was evaluated
+    // at, nor the swing ankle's own world X was recorded. These are
+    // recorder-only instruments: no gain, limit, threshold, sign or target
+    // anywhere reads them back, and 0 is the "walker not running" sentinel
+    // (reset in ResetCaptureWalk), never NaN.
+    private float captureLastSwingAskX;
+    private float captureLastSwingSoleX;
+    private float captureLastSwingTrackAge;
+    private float captureLastPlanTargetX;
+    // captureSwingAskX — the X of the point this frame handed to
+    //    SolveCaptureLegIk (post reach disc, pre chord clamp), m.
+    // captureSwingSoleX — the swing ankle's MEASURED world X in that same
+    //    frame, m (CaptureAnklePoint).
+    // captureSwingTrackAge — the age the swing curve was evaluated at, s,
+    //    after the 6i airborne clock (trackAge after the Max).
+    // capturePlanTargetX — the plan target in force that frame, m, after the
+    //    reach-disc X clamp and the live-ask floor.
+    public float captureSwingAskX => captureLastSwingAskX;
+    public float captureSwingSoleX => captureLastSwingSoleX;
+    public float captureSwingTrackAge => captureLastSwingTrackAge;
+    public float capturePlanTargetX => captureLastPlanTargetX;
+
+    // ─── WALK CYCLE 6k instrumentation: THE SOLVER'S OWN ANSWER ───
+    // 6j proved the leg is where the solver told it to be (hip/knee/ankle
+    // within 1-3 deg of req*) and the ankle 0.457 m short of the point the
+    // solver was handed. That leaves two owners and the 6j columns cannot
+    // separate them: (a) the solver's own input-to-solution kinematics (its
+    // returned angles do not put the ankle at the ask), or (b) the delivered
+    // pose is built from something other than the ask (the world ask is
+    // converted into the parent's frame to make a joint command). The values
+    // below are the solver's own answer and the frame that answer is written
+    // in; 0 is the "walker not running" sentinel (reset in ResetCaptureWalk),
+    // never NaN, and nothing reads them back — recorder-only instruments.
+    private float captureLastSwingSolvedSoleX;
+    private float captureLastSwingSolvedResidualX;
+    private float captureLastSwingSolveFrameX;
+    private float captureLastSwingSolveFrameAngleDeg;
+    // captureSwingSolvedSoleX — world X of the ankle that the angles RETURNED
+    //    by SolveCaptureLegIk put the ankle at this frame (forward kinematics
+    //    of the returned thigh/knee, same two links), m. The solver's own
+    //    answer, not the measured leg: CaptureAnklePoint is the measured one.
+    // captureSwingSolvedResidualX — captureSwingAskX minus
+    //    captureSwingSolvedSoleX, m. 0 while the walker is off; ~0 means the
+    //    solver gave back exactly the point it was handed, and the gap lives
+    //    downstream of it.
+    // captureSwingSolveFrameX — world X of the hip hinge the chord was
+    //    measured from this frame, m (the origin of the solve).
+    // captureSwingSolveFrameAngleDeg — the tilt the returned WORLD thigh
+    //    angle is converted into a hip joint command against
+    //    (CapturePelvisWorldTarget, i.e. the plan's pelvis tilt, deg). The
+    //    solve itself is world-space; this is the only body frame in the
+    //    path, so it is the frame that lets the plant's -22.4 deg trunk tilt
+    //    be tested as the owner.
+    //    WALK CYCLE 6m: the value is UNCHANGED (still the plan's tilt) but
+    //    its meaning is now only a reference: the returned angles are no
+    //    longer converted against it (the command is written on the
+    //    MEASURED parent, captureSwingAppliedFrameAngleDeg). Reading the
+    //    two columns as a difference still gives the plan-vs-measured sag
+    //    that 6l measured as the 0.5015 m of the plant.
+    public float captureSwingSolvedSoleX => captureLastSwingSolvedSoleX;
+    public float captureSwingSolvedResidualX => captureLastSwingSolvedResidualX;
+    public float captureSwingSolveFrameX => captureLastSwingSolveFrameX;
+    public float captureSwingSolveFrameAngleDeg => captureLastSwingSolveFrameAngleDeg;
+
+    // ─── WALK CYCLE 6l instrumentation: THE POSE THAT WAS APPLIED ───
+    // 6k put the loss downstream of the solver: captureSwingSolvedResidualX is
+    // exactly 0.0000 on all 446 walk frames, while |solvedSole - measuredSole|
+    // is 0.2047 m mean / 0.7150 max and at the plant (t 7.140) the ask and the
+    // solver are together 0.6657 m against a measured sole of 0.2090 m. That
+    // delivery has two halves and no column separated them: (i) the PARENT
+    // FRAME - the solver's returned WORLD angles are written into a joint
+    // command against captureSwingSolveFrameAngleDeg, which is the PLAN's tilt
+    // (-3.00 deg at the plant and frozen there) while the body the hinge is on
+    // is 19-30 deg further pitched; and (ii) the CLAMP/TRACKING between the
+    // returned angles and the targets the joints are actually given
+    // (reqHipR pegged at the -65.00 floor for the whole plant).
+    // The four values below are the same two-link forward kinematics as 6k's,
+    // rebuilt on the MEASURED parent frame and on the POST-CLAMP targets this
+    // frame handed the actuators, so the 6k residual splits by subtraction:
+    //     solvedSole - appliedSole   = the clamps / tracking
+    //     appliedSole - measuredSole = the parent frame
+    // 0 is the "walker not running" sentinel (reset in ResetCaptureWalk),
+    // never NaN, and nothing in the control math reads them back: recorder-only
+    // instruments, exactly like the 6j and 6k sets.
+    private float captureLastSwingAppliedSoleX;
+    private float captureLastSwingAppliedResidualX;
+    private float captureLastSwingAppliedFrameX;
+    private float captureLastSwingAppliedFrameAngleDeg;
+    // captureSwingAppliedSoleX — world X of the ankle the pose that was
+    //    ACTUALLY DRIVEN this frame puts the ankle at: the MEASURED hip hinge,
+    //    the MEASURED parent tilt the joint command is incremented against,
+    //    and the post-clamp hip/knee targets ApplyCaptureHip / ApplyCaptureKnee
+    //    handed the PD this frame (identical link law, signs and segment
+    //    lengths as CaptureSolvedAnklePoint). A COMMANDED pose, not the
+    //    measured leg - that one is captureSwingSoleX.
+    // captureSwingAppliedResidualX — captureSwingAskX minus
+    //    captureSwingAppliedSoleX, m. 0 while the walker is off; ~0 means the
+    //    applied chain already lands on the ask and the 6k residual is the
+    //    parent frame, not the delivery.
+    // captureSwingAppliedFrameX — world X of the MEASURED hip hinge this
+    //    applied chain was built on, m, same units as captureSwingSolveFrameX.
+    //    The solve is measured from that same hinge (6k) and no command of a
+    //    frame has reached physics when either is read, so the two X columns
+    //    coincide by construction and the frame difference lives entirely in
+    //    the angle column below.
+    // captureSwingAppliedFrameAngleDeg — the MEASURED tilt of the body that
+    //    carries the hinge this frame (the hip hinge's own parent body, i.e.
+    //    the pelvis whose rotation the joint angle is incremented against),
+    //    deg, same sign convention as captureSwingSolveFrameAngleDeg: minus is
+    //    forward, so the two columns subtract directly. The measured value is
+    //    the one the joint command is really written in; the 6k column is the
+    //    value it was SOLVED in.
+    //    WALK CYCLE 6m: this is now the parent the returned hip/knee angles
+    //    are APPLIED on as well - DriveCaptureSwingLeg writes the hip command
+    //    against this same read - so the column stops being the 6l witness of
+    //    the frame defect and becomes the frame of the applied pose. The 6l
+    //    sub-face it supersedes is appliedSole - measuredSole, still the
+    //    tracking between the command and the leg.
+    public float captureSwingAppliedSoleX => captureLastSwingAppliedSoleX;
+    public float captureSwingAppliedResidualX => captureLastSwingAppliedResidualX;
+    public float captureSwingAppliedFrameX => captureLastSwingAppliedFrameX;
+    public float captureSwingAppliedFrameAngleDeg => captureLastSwingAppliedFrameAngleDeg;
+
+    // ─── WALK CYCLE 6n instrumentation: THE ASK'S OWN Y, AND THE FLEXION
+    //     DEMAND IT CARRIES ───
+    // 6m fixed the frame the ask is delivered in and left one quantity of that
+    // ask unmeasured: its HEIGHT. The flexion an ask needs is a function of the
+    // sole's height as much as its X — the solver's chord angle grows with the
+    // point's X while its knee flex (hence the thigh's angle to the chord)
+    // grows as the chord SHORTENS, i.e. as the ankle is asked HIGHER — so with
+    // only the X column published, a flexion the ask needs cannot be attributed
+    // to the X or to the Y, and an allowance must not be re-tuned against a
+    // quantity nobody measures. Published first, before any number moved. 0 is
+    // the "walker not running" sentinel (reset in ResetCaptureWalk), never NaN,
+    // and nothing in the control math reads either of these back.
+    private float captureLastSwingAskY;
+    private float captureLastSwingHipDemandDeg;
+    // captureSwingAskY — world Y of the point this frame handed to
+    //    SolveCaptureLegIk, m (up is plus): the same point captureSwingAskX is
+    //    the X of, i.e. after the reach disc, after
+    //    CaptureSwingAnkleYForChord's clearance / hip-relative bounds and after
+    //    the 6n flexion allowance. The clearance Y the ask is built against is
+    //    therefore readable as a height, not inferred from the X.
+    // captureSwingHipDemandDeg — the hip flexion the ask CARRIES in the frame
+    //    it is delivered in, deg, with no allowance applied: that frame (the
+    //    measured parent, the same read the command is written against) minus
+    //    the world thigh SolveCaptureLegIk returns for the point. More negative
+    //    = more flexion asked for. This is the PRE-BOUND demand: the 6n
+    //    allowance spends itself on the ask, so this column is what keeps a
+    //    demand the allowance refuses READABLE in the row instead of hidden by
+    //    it. 0 = walker off / the solve returned no pose, never NaN.
+    public float captureSwingAskY => captureLastSwingAskY;
+    public float captureSwingHipDemandDeg => captureLastSwingHipDemandDeg;
+
+    // ─── WALK CYCLE 6o instrumentation: THE FRAME THE PLAN TARGET IS BUILT IN ───
+    // 6j/6k/6l/6m/6n all measure one walk FRAME's quantities: 6m splits the plan
+    // frame from the measured frame inside a single tick, so the sole's delivery
+    // is closed. The step TARGET is a different thing: it is built ONCE, on the
+    // freeze, and then delivered over a whole swing while the body pitches. Every
+    // column published so far says what the target is worth NOW (capturePlanTargetX,
+    // captureSwingAskX) and what the body is doing NOW (pelvisTilt), and nothing says
+    // what frame the target was BUILT in — so the 0.5303 -> 0.7839 m jump of the
+    // target, delivered at a measured -37.6 deg, cannot be split into "the plan moved
+    // it" from "the body left the plan's frame". Published first, before any number
+    // moved (the walk lane's own law since 6j). 0 is the "walker not running"
+    // sentinel (reset in ResetCaptureWalk), never NaN, and nothing in the control
+    // math reads this column back: it is the frame the 6o bound below is derived in.
+    private float captureLastPlanFrameTiltDeg;
+    // capturePlanFrameTiltDeg — the MEASURED pelvis tilt at the freeze that built
+    //    the plan in force, deg, world frame, same convention and sign as the
+    //    recorder's pelvisTilt / captureSwingAppliedFrameAngleDeg (minus is
+    //    forward), read from the same estimator the freeze's own tilt seed reads.
+    //    Held while that plan is in force; the reader's subtraction is
+    //      pelvisTilt - capturePlanFrameTiltDeg
+    //    = how far the body has pitched since the target was built, i.e. the
+    //    frame the target was NOT planned in (negative on the row = the body went
+    //    forward of its plan). On the frames the ask is solved the walk's own plan
+    //    tilt is also published as captureSwingSolveFrameAngleDeg; this column is
+    //    the other half of that split — the frame the plan started from, not the
+    //    plan's target lean. 0 = walker off / no freeze yet, never NaN.
+    public float capturePlanFrameTiltDeg => captureLastPlanFrameTiltDeg;
+
+    // ─── WALK CYCLE 6p instrumentation: THE POSTURE ANSWER SPENT ON THE
+    //     DELIVERED COMMAND ───
+    // 6o measured the split (pelvisTilt - capturePlanFrameTiltDeg) and paid it out
+    // of the swing hip's FLEXION allowance — a charge on the stepping leg. What
+    // the delivered hip command does with the posture ITSELF was not published:
+    // the reflex is readable (captureSwingHipDemandDeg, the pre-bound demand) but
+    // the bounded restoring answer the command carries was not. Published first,
+    // before any number moved (the walk lane's own law since 6j). 0 is the
+    // "walker not running" sentinel (reset in ResetCaptureWalk), never NaN, and
+    // nothing in the control math reads this column back.
+    private float captureLastSwingPostureBiasDeg;
+    // captureSwingPostureBiasDeg — the bounded posture error the swing hip's
+    //    DELIVERED command carried this frame, deg of hip joint angle, positive =
+    //    the ask sits on the EXTENSION side of the pose the IK returned (the
+    //    direction that pitches the pelvis BACK, i.e. the answer to a forward
+    //    fold), 0 = no answer. Its bound is the walker's own loaded-hip heel band
+    //    expressed in degrees (captureStanceHipTorqueCap 45 N*m through
+    //    ActuatorMixer.HipTorqueBandDeg at hipMuscleTorque 100 / hipPGain 1.5 /
+    //    errorReferenceDegrees 10 = 3.0 deg): the same bounded posture error the
+    //    loaded hip's ask is capped by, delivered by the one joint whose reaction
+    //    the pelvis feels with no sole to roll. Held like the 6j-6o set (the last
+    //    value a delivered command carried). 0 while the walker is not running or
+    //    with no positive plan-frame drift, never NaN.
+    public float captureSwingPostureBiasDeg => captureLastSwingPostureBiasDeg;
+
+    // ─── WALK CYCLE 6q recording: WHICH PATH RAN ───
+    // 6j..6p published what the level 1 walker delivered, frame by frame. This
+    // cycle added a SECOND path (the level 2 pose library, behind -poseDrive 1,
+    // default off) that writes the same six leg joints, so a row has to say
+    // which of the two produced it or the two cannot be told apart downstream.
+    // Name, units, frame, sentinel: `captureWalkPath`, no units (a code), no
+    // frame, 0 = the level 1 path (the capture walker and every layer before it,
+    // and the sentinel reset in ResetCaptureWalk), 1 = the level 2 pose library
+    // held the joints on this row. Recorder only: no gain, limit, threshold or
+    // branch in the control math reads it, and nothing writes it but
+    // PublishWalkPath below.
+    public const int WalkPathLevel1 = 0;
+    public const int WalkPathPoseLibrary = 1;
+    private float captureLastWalkPath;
+    public float captureWalkPath => captureLastWalkPath;
+
+    // Single writer: BalanceController.FixedUpdate names the path it took on
+    // this physics step, the way it names legReqLayer. Called once per step,
+    // before the branch, so a row never carries the previous step's answer.
+    public void PublishWalkPath(bool poseLibrary)
+    {
+        captureLastWalkPath = poseLibrary ? WalkPathPoseLibrary : WalkPathLevel1;
+    }
 
     // ─── WALK-1 per-frame command tap (instrumentation only) ───
     // What the walker COMMANDED this frame, which drive method wrote it, and
@@ -768,6 +1035,38 @@ public partial class BalanceController
         captureLeftSupportKneeHeld = false;
         captureRightSupportKneeHeld = false;
         captureStanceAnchorValid = false;
+        captureAirborneAge = 0f;
+        // 6j: the delivered-geometry instruments have no value while the walker
+        // is off; 0 is the sentinel the recorder writes, never NaN.
+        captureLastSwingAskX = 0f;
+        captureLastSwingSoleX = 0f;
+        captureLastSwingTrackAge = 0f;
+        captureLastPlanTargetX = 0f;
+        // 6k: the solver's-own-answer instruments, same sentinel law: 0 while
+        // the walker is off, never NaN.
+        captureLastSwingSolvedSoleX = 0f;
+        captureLastSwingSolvedResidualX = 0f;
+        captureLastSwingSolveFrameX = 0f;
+        captureLastSwingSolveFrameAngleDeg = 0f;
+        // 6l: the applied-pose instruments, same sentinel law: 0 while the
+        // walker is off, never NaN.
+        captureLastSwingAppliedSoleX = 0f;
+        captureLastSwingAppliedResidualX = 0f;
+        captureLastSwingAppliedFrameX = 0f;
+        captureLastSwingAppliedFrameAngleDeg = 0f;
+        // 6n: the ask's own Y and the pre-bound flexion demand. Same sentinel
+        // law as the 6j/6k/6l sets above: 0 while the walker is off, never NaN.
+        captureLastSwingAskY = 0f;
+        captureLastSwingHipDemandDeg = 0f;
+        // 6o: the frame the plan in force was built in. Same sentinel law: 0
+        // while the walker is off, never NaN.
+        captureLastPlanFrameTiltDeg = 0f;
+        // 6p: the bounded posture answer the delivered swing command carried.
+        // Same sentinel law: 0 while the walker is off, never NaN.
+        captureLastSwingPostureBiasDeg = 0f;
+        // 6q: which path held the joints. 0 is the level 1 sentinel, so a
+        // reset row reads as "the old path" and never as the pose library.
+        captureLastWalkPath = WalkPathLevel1;
         ApplySwingLegFriction(0f, false, 0f);
     }
 
@@ -847,6 +1146,14 @@ public partial class BalanceController
     // not this. Waiting for estimator Heel never froze DualSupport
     // (burn_walk walkSwap 0 / swingFoot 0.955).
     private bool CaptureHeelGrounded(bool left) => captureContact.HeelPin(left);
+
+    // WALK CYCLE 6: the swing foot of the roles in force, whichever side it is.
+    // The hand-back (TapAbortTiltPast) is gated on this: a bar crossed while the
+    // swing sole is still in the air is a placement order, not a surrender.
+    private bool CaptureSwingSoleAirborne()
+    {
+        return !CaptureFootTouching(!captureGait.IsStanceLeft);
+    }
 
     private bool CaptureFootSupporting(bool left) => captureContact.Supporting(left);
 
@@ -1077,7 +1384,15 @@ public partial class BalanceController
             && stepPhaseDriver.walkRecoverAnyPose > 0.5f
             && vestibularSystem != null
             && Mathf.Abs(vestibularSystem.GetBodyTilt())
-                >= Mathf.Max(20f, getUpFallenAbsTilt))
+                >= Mathf.Max(20f, getUpFallenAbsTilt)
+            // WALK CYCLE 6: the hand-back waits for the foot. While the swing
+            // sole is still in the air this bar is a PLACEMENT order — the
+            // swing reads the same number and drives the sole onto the slab
+            // (DriveCaptureSwingLeg, landNow) — and handing the joints back
+            // over a hovering foot is what put 1401 N = 2.02 W on the one sole
+            // still on the slab at 6.00 s. Unchanged the moment the sole is
+            // down: that is the failed peel this abort was written for.
+            && !CaptureSwingSoleAirborne())
         {
             walkTap.abortCode = TapAbortTiltPast;
             ReturnCaptureWalkToStandingPlant();
@@ -1268,6 +1583,16 @@ public partial class BalanceController
             captureDirtLiftAge = -1f;
             ClearDirtFoldLatch();
         }
+        // WALK CYCLE 6i: the swing sole's own airborne clock, advanced here
+        // because this is the one place that sees every state (Swing,
+        // TouchdownBlend, RecoveryStep) with the roles already handed over by
+        // Apply. Touching again ends it: a sole on the slab has no air age.
+        if (gaitDecision.swapRoles)
+            captureAirborneAge = 0f;
+        else if (!CaptureFootTouching(!captureGait.IsStanceLeft))
+            captureAirborneAge += dt;
+        else
+            captureAirborneAge = 0f;
         // WALK-1: gait evidence, published after Apply so the swap latch is
         // this frame's. roleL/R are re-read below; these are the machine's.
         walkTap.dualSupport = captureGait.IsDualSupport ? 1 : 0;
@@ -1456,14 +1781,14 @@ public partial class BalanceController
                 {
                     captureDirtLiftAge = -1f;
                     ClearDirtFoldLatch();
-                    DriveCaptureHoldMeasuredHip(stanceIsLeft, true);
+                    DriveCaptureLoadedStanceHip(stanceIsLeft);
                     DriveCaptureHoldKnee(stanceIsLeft);
                     DriveCaptureHoldMeasuredHip(!stanceIsLeft, true);
                     DriveCaptureHoldKnee(!stanceIsLeft);
                 }
                 else
                 {
-                    DriveCaptureHoldMeasuredHip(stanceIsLeft, true);
+                    DriveCaptureLoadedStanceHip(stanceIsLeft);
                     DriveCaptureHoldKnee(stanceIsLeft);
                     DriveCaptureSwingKneeLift(!stanceIsLeft);
                 }
@@ -1531,6 +1856,54 @@ public partial class BalanceController
                     / Mathf.Max(0.01f, captureTouchdownBlendSeconds));
                 bool landingIsLeft = capturePlan.swingSide < 0;
                 bool oldStanceDown = CaptureFootTouching(!landingIsLeft);
+                // ─── WALK CYCLE 6h: an AIRBORNE landing sole keeps its ASK ───
+                // The blend is reached 25 ms after a freeze: three frames of
+                // peel scrape inside the 2×contactOffset band latch
+                // SwingLeftGround once, ContactFrames then reach
+                // touchdownFrames and DecideSwing's periodicCatch (plantMiss
+                // bypassed) enters this state while the sole is still 0.02 m
+                // off the slab. p_auto (defaults, walk start 5): third swing
+                // frozen at walk-relative +1.795, blend entered at +1.820 and
+                // held 0.445 s with the landing sole OFF the slab in 78 of 89
+                // frames (soleClearL to 0.124 m). The plant asks below are the
+                // asks of a sole already down — RestoreHip 7 / LandingKnee 10 /
+                // CopAnkle 13, then Idle 15 — so the LAST placement ask
+                // (TapOwnerSwingLeg 5 / TapOwnerSwingAnkle 12, the 6g capture
+                // point) was written at +1.815 and the sole fell back onto the
+                // peel X: the hull front stayed at x 0.4128 while comX ran
+                // 0.3335 -> 0.6015, supportMargin crossed zero at +2.020
+                // (hullMax 0.4120 vs comX 0.4121, comVelX 0.494), the walk
+                // handed back at +2.290 (TapAbortCollapsed) and the fall
+                // criterion fired at +2.385 — 0.73 m of travel lost against
+                // p_start8, whose third swing did NOT trip this (its blend
+                // entered with the landing touching 19/19) and kept the
+                // placement drive for its full 0.275 s. An airborne sole is a
+                // swing: give it the swing/placement ask, and leave the
+                // plant/CoP asks to the sole that is actually loaded. Not the
+                // landing knee blend, not a new toggle: the state test is the
+                // contact sensor's own Touching bit.
+                if (!CaptureFootTouching(landingIsLeft))
+                {
+                    if (oldStanceDown)
+                        DriveCaptureStancePlant(!landingIsLeft);
+                    else
+                    {
+                        DriveCaptureHoldMeasuredHip(!landingIsLeft, false);
+                        DriveCaptureHoldKnee(!landingIsLeft, false);
+                    }
+                    // CoP stays on the loaded plate (the old stance): the
+                    // landing is not support until it touches.
+                    if (oldStanceDown && CaptureFootLoaded(!landingIsLeft))
+                        DriveCaptureCop(!landingIsLeft, dir, com, comVelX, 1f,
+                            CaptureFootCenterX(!landingIsLeft)
+                            + captureCopLead * dir);
+                    if (capturePlan.valid && !capturePlan.recovery
+                        && capturePlan.swingSide != 0)
+                        DriveCaptureSwingLeg();
+                    else
+                        DriveCaptureSwingKneeLift(landingIsLeft);
+                    break;
+                }
                 // Old stance plant-knee while that plate still carries;
                 // both hips restore world pelvis on a two-foot landing.
                 // Landing hip used last-IK thigh, which tracks the sit
@@ -1668,8 +2041,19 @@ public partial class BalanceController
             if ((ahead - freezeComX) * dir > 0f)
                 freezeComX = ahead;
         }
+        // WALK CYCLE 6d: the plan's step time is the walker's own measured CoM
+        // speed, not the constant captureStepDuration — see
+        // CaptureStepDurationForSpeed. The tilt-seeded freezeVelX is NOT the
+        // speed to use here: that seed is the first-freeze estimator for a
+        // stacked two-pin reading (from rest the measured v is 0), and during
+        // the walk it carries the trunk's own fold, so a fold would set the
+        // step time instead of the mass (tiltVelX = -angVel*h = 1.49 m/s at the
+        // measured -100 deg/s). The live CoM speed is the quantity the step
+        // has to keep up with.
+        float planSpeedX = WalkComVelocityX;
+        if (float.IsNaN(planSpeedX)) planSpeedX = 0f;
         capturePlan = capturePlanner.Freeze(
-            CapturePlannerModel(),
+            CapturePlannerPlanModel(planSpeedX),
             new CapturePointPlanner.Body
             {
                 comX = freezeComX,
@@ -1693,6 +2077,17 @@ public partial class BalanceController
                 heldStartY = capturePlan.startY,
                 heldApex = capturePlan.apex
             });
+        // ─── WALK CYCLE 6o: the frame this plan (and its target) is built in ───
+        // Read HERE, on the freeze, so the column IS the frame the target was
+        // computed in rather than a value that happens to agree with it later.
+        // The same estimator the recorder's pelvisTilt column and the hip
+        // command's parent frame read (VestibularSystem.GetPelvisTilt), so the
+        // reader's subtraction pelvisTilt - capturePlanFrameTiltDeg is one
+        // quantity in one convention. Recorder-only: nothing reads it back; 0
+        // with no tilt source, reset in ResetCaptureWalk.
+        captureLastPlanFrameTiltDeg = vestibularSystem != null
+            ? vestibularSystem.GetPelvisTilt()
+            : 0f;
         captureGait.NotifyPlanFrozen(gluedReplan);
         // SPD has no integrator. Muscle.activation is a first-order lag at
         // muscleActivationSpeed 20: reversing a saturated stance extensor
@@ -1745,6 +2140,55 @@ public partial class BalanceController
         };
     }
 
+    // ─── WALK CYCLE 6d: the step finishes in the time the speed allows ───
+    // The periodic orbit was a CONSTANT T (captureStepDuration 0.26 s): one
+    // step time, whatever the mass is doing. But the swing's landing X is
+    // CAPTURE PLACEMENT, recomputed from live state every frame —
+    // xCom + captureComLandingScale * v / omega0 = xCom + 0.116 * v (0.37/3.2,
+    // 0.075 m at the c6c_walk 0.65 m/s) — so the point the sole is chasing runs
+    // forward with the mass while the foot is still in the air, and how far it
+    // runs in one step is v * T. At the walking 0.55 m/s that is 0.14 m, at the
+    // c6c_walk 0.73 m/s it is 0.19 m, and the air time is not the walker's to
+    // spend: the sole has to be DOWN and confirmed inside the support margin
+    // the CoM is eating at e^{omega t}. c6c_walk third swing (frozen 6.885 s):
+    // soleClearL 0.018 -> 0.161 m, fzL 0.00 N for its last 0.28 s, supportMargin
+    // 0.161 -> 0.008 m at 7.085 and -0.019 m at 7.125 s, the third plant never
+    // arrived and the run ended 7.14 s with torsoTilt -58.6 and the loaded hip
+    // (CSV request = ActuatorMixer.CapLoadedHip's clamped target, i.e. the
+    // measured joint + the 45 N*m heel band = 3.0 deg at hipMuscleTorque 100 /
+    // hipPGain 1.5 / errorRef 10) and the stance ankle both already pinned at
+    // their walls, so no torque was left to answer the fold.
+    // So do not hold T: hold the TRAVEL per step at the walking length
+    // (captureTargetSpeed * captureStepDuration = 0.143 m) and let the cadence
+    // follow the mass. The chase the foot has to finish shrinks with the speed
+    // (v * T = v_des * captureStepDuration = 0.143 m at any speed over v_des)
+    // instead of growing, the sole is down sooner after the release, and the
+    // support margin is caught by the next plant rather than by the trunk.
+    // v <= v_des returns captureStepDuration exactly, so the first freeze from
+    // rest, the launch and every slow step are unchanged to the bit.
+    private CapturePointPlanner.Model CapturePlannerPlanModel(float comVelX)
+    {
+        CapturePointPlanner.Model model = CapturePlannerModel();
+        // 6d is switchable so a walk can be measured with and without it: 0
+        // restores the constant-T orbit of every cycle before 6d, to the bit.
+        if (captureStepSpeedAdapt != 0)
+            model.stepDuration = CaptureStepDurationForSpeed(comVelX);
+        return model;
+    }
+
+    private float CaptureStepDurationForSpeed(float comVelX)
+    {
+        // The reference is the walking v_des of THIS mode, CaptureDesiredSpeed
+        // (0.55, or 0.88 under -run 1): the cadence only has to give way once
+        // the mass is travelling faster than the walk asked it to.
+        float vDes = CaptureDesiredSpeed();
+        float v = Mathf.Abs(comVelX);
+        if (vDes < 0.05f || v <= vDes)
+            return captureStepDuration;
+        return Mathf.Max(captureStepDuration * vDes / v,
+            CaptureSwingDurationFloorSeconds);
+    }
+
     // Swing leg. The curve is SwingTrajectory; this method only glues that
     // pose to the two-link IK. One solve gives the hip and the knee together,
     // so the two hinges cannot disagree about where the foot is going; the
@@ -1764,10 +2208,96 @@ public partial class BalanceController
         tapWriterKnee = TapOwnerSwingLeg;
         bool left = capturePlan.swingSide < 0;
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
-        float pelvisTilt = vestibularSystem != null ? vestibularSystem.GetPelvisTilt() : 0f;
+        // WALK CYCLE 6f: the pelvis this ask is written in is the PLAN's
+        // walking tilt (CapturePelvisWorldTarget), not the live measured one.
+        // The budget behind that change is in the comment on the ask at the
+        // end of this method.
+        float pelvisAskDeg = CapturePelvisWorldTarget();
+        // ─── WALK CYCLE 6n: ONE read of the frame the ask is delivered in,
+        //     and the flexion allowance that belongs to that frame ───
+        // 6m writes this command against the hinge's own parent body (the
+        // measured pelvis) and publishes it as captureSwingAppliedFrameAngleDeg;
+        // the ask below is built for the same body, so the frame is read here,
+        // once, at the top of the method: the 6n allowance is derived from it,
+        // the ask is bounded by that allowance BEFORE the solve, and the hip
+        // command at the end of the method is written inside the same number.
+        // Nothing between this read and the publication moves the pelvis (no
+        // command of a frame has reached physics until the tick returns), so
+        // this is the value 6l/6m published, read one page earlier.
+        float deliveredFrameDeg = hip != null && hip.connectedBody != null
+            ? Mathf.DeltaAngle(0f, hip.connectedBody.rotation)
+            : pelvisAskDeg;
+        float hipAllowanceDeg = CaptureSwingHipAllowanceDeg(hip, deliveredFrameDeg);
+        // ─── WALK CYCLE 6o: THE PITCH THE PLAN DID NOT BUILD ITS TARGET IN ───
+        // The plant is closed on the frame (6m/6n) and the walk still dies as a
+        // forward pitch: measured c6n_walk, the target the swing leg is handed
+        // jumps 0.5303 -> 0.7839 m at t 7.150 with the body already -58.2 deg,
+        // and the pelvis owns nothing that answers it. Read on the same run:
+        // in DualSupport the loaded stance hip's restore is CLIPPED to the 45 N*m
+        // heel band (reqHipR = measured + 2.6 deg, appTorqueHipR -19..-25 N*m)
+        // while the body folds -43 -> -56 deg in 0.2 s, and the trail hip is a
+        // zero-error HoldMeasured (ownerHipL 2, appTorqueHipL -3 N*m): the pitch
+        // error is either cancelled or clipped, so no delivered ask carries it.
+        // The one joint that can still be asked is the swing hip, and it is the
+        // pitch's OWN owner: its flexion reaction is what folds the pelvis
+        // forward (6f: -6.9 -> -51.5 deg in 0.25 s at the second swap). So the
+        // frame the plan target was built in — capturePlanFrameTiltDeg, the
+        // pelvis tilt at the freeze — bounds the flexion that ask may carry:
+        // the drift between that frame and the frame the target LANDS in (the
+        // measured pelvis this command is written on) is paid on the ask, the
+        // same way 6n pays its allowance: retract X, never lift Y, upstream of
+        // the solve, so solved == applied == ask still holds and the plant is
+        // not touched. The bound only ever TIGHTENS the 6n allowance (a body
+        // that pitched BACK does not earn itself extra flexion), it is capped
+        // (CaptureSwingPlanFrameBoundDeg), and the demand it refuses stays
+        // readable in captureSwingHipDemandDeg, which keeps its 6n meaning as
+        // the PRE-bound demand of the point handed to the solver.
+        float hipBoundDeg = CaptureSwingPitchBoundDeg(hipAllowanceDeg);
+        // ─── WALK CYCLE 6p: THE BOUNDED POSTURE ERROR GETS AN OWNER ───
+        // Read on the c6o_walk row at t 7.00: the split pelvisTilt -
+        // capturePlanFrameTiltDeg is still -35.89 deg while the walk sits in the
+        // post-plant DualSupport the 6.845 swap opened, and the code says what
+        // carries it there. The posture error IS measured every frame of that
+        // window — the loaded hip's restore is called from DriveCaptureStancePlant
+        // in Swing, from the blend's landing hip, and from
+        // DriveCaptureLoadedStanceHip in DualSupport — so the freeze is NOT the
+        // last time the body is read. What is missing is the DELIVERY: the ask is
+        // bounded by the walker's own heel arm (CapLoadedHip clips it to the
+        // measured joint + heelBand, ActuatorMixer 118-128: 3.0 deg = 45 N*m,
+        // which is what the 6o note measured as reqHipR = measured + 2.6), and the
+        // other loaded hip's slot in that state is a zero-error HoldMeasured
+        // (DriveCaptureHoldMeasuredHip, the trailCarries branch). So the error
+        // reaches the joints as a CAP and never as a bounded command: no
+        // delivered ask answers the pitch.
+        // The one joint whose reaction the pelvis feels with no sole to roll is
+        // the swing hip — and it is the pitch's own driver (6f: a hip flexor's
+        // reaction posteriorly tilts the pelvis, so the flexion this command
+        // already carries IS a forward pitch on it). So the same bounded drift 6o
+        // derives (CapturePlanFrameDriftDeg, one source for the charge and the
+        // answer) is spent here as a RESTORING bias on the command that joint is
+        // given: positive = the ask sits on the EXTENSION side of the pose the IK
+        // returned, the direction that pitches the pelvis back instead of folding
+        // it. Bounded by the walker's own 45 N*m band expressed in degrees
+        // (CaptureSwingPostureBiasDeg: 45 N*m at hipMuscleTorque 100 / hipPGain
+        // 1.5 / errorReferenceDegrees 10 = 3.0 deg), so ONE joint answers the
+        // pitch with the same bounded dose the loaded hip's ask is capped by. The
+        // 6o charge on the ask's X is untouched — the leg keeps its allowance and
+        // its step — and the answer costs the APPLIED sole the bias instead
+        // (published as the 6l residual; the geometry's own gain is at most
+        // l1 + l2 = 0.86 m/rad, so 3 deg cannot move it past 0.045 m, under the
+        // 0.05 m the plant's bar allows). Read once, at the top, like the 6n/6o
+        // reads: nothing between here and the command below moves the pelvis.
+        float postureBiasDeg = CaptureSwingPostureBiasDeg(left);
+        captureLastSwingPostureBiasDeg = postureBiasDeg;
 
         if (capturePlan.valid && hip != null)
         {
+            // WALK CYCLE 6b: the hinge the placement is measured from. Read
+            // once, here, because the reach disc below has to bound the plan
+            // target BEFORE the trajectory is built; nothing in this method
+            // moves the hinge before the two-link solve at the end, so the
+            // IK reads the same point it always did.
+            Vector2 hipPoint = hip.transform.TransformPoint(hip.anchor);
             // Freeze age includes the glued peel. Feeding it to X the
             // moment the probe drops is a shuffle. Periodic swing tracks
             // air time; recovery keeps freeze age so the catch X still
@@ -1789,6 +2319,21 @@ public partial class BalanceController
             bool comPastToe = (liveCom.x - capturePlan.stanceX) * dir
                               > toeArm * 0.5f;
             bool catchNow = capturePlan.recovery || heelFreedPeel || comPastToe;
+            // WALK CYCLE 6: the walker's own bar, read here as a PLACEMENT
+            // order. TapAbortTiltPast is the bar this swing crossed at
+            // 5.940 s; it fired with the sole still 0.180 m in the air, handed
+            // both legs back to the Plant (legLayer 21 -> 17) and the only
+            // loaded sole then took 1401 N = 2.02 W. A bar crossed with a foot
+            // in the air is an order to PUT THAT FOOT DOWN, not to let go:
+            // catchNow drops the arc's ease and the disc below hands the solver
+            // the slab point, so the swing lands and the roles can transfer.
+            // This and the abort read the same number, so the sole's own
+            // contact is the only thing that decides which of the two acts.
+            bool landNow = swingAir && !heelPin
+                && vestibularSystem != null
+                && Mathf.Abs(vestibularSystem.GetBodyTilt())
+                   >= Mathf.Max(20f, getUpFallenAbsTilt);
+            if (landNow) catchNow = true;
             bool leftGround = captureSwingLeftGround || swingAir || heelFreedPeel
                               || (comPastToe && CaptureFootTouching(left));
             float trackAge;
@@ -1798,13 +2343,96 @@ public partial class BalanceController
                 trackAge = captureGait.SwingAirAge;
             else
                 trackAge = 0f;
+            // ─── WALK CYCLE 6i: an AIRBORNE ask is driven on AIR time ───
+            // The ages above stop the moment the gait leaves Swing
+            // (DecideSwing owns SwingAge / SwingAirAge, and Enter clears the
+            // air pair for TouchdownBlend), so the 6h airborne-placement path
+            // was driving the curve with the age the step had 20 ms after its
+            // own freeze: the X it handed the solver was startX + 6.6 % of the
+            // step — the previous plant's X — however far the live capture ask
+            // had travelled (c6h_walk: ask 0.435 -> 0.742, sole 0.204 -> 0.220,
+            // comX 0.328 -> 0.686, trunk -44.5 deg). The clock below only
+            // exceeds those ages when the gait's have stopped; while the sole
+            // is down it is 0, and while the gait is still in Swing it is the
+            // peel-shorter of the two. One law for the placement: the sole in
+            // the air is asked for the capture point at its OWN plant, so feed
+            // the curve the time the sole has actually been off the slab.
+            trackAge = Mathf.Max(trackAge, captureAirborneAge);
             float planTargetX = capturePlan.targetX;
             // Catch the fall: if CoM already leads the frozen plant, push
             // the goal ahead of CoM (small lead). Planting on freeze-xi
             // under a pitching trunk is following the dump into Recovery.
             float catchLead = Mathf.Max(0.03f, captureCopLead);
-            if ((liveCom.x - planTargetX) * dir > 0.02f)
-                planTargetX = liveCom.x + catchLead * dir;
+            // CAPTURE PLACEMENT (this cycle). The destination is the CoM's OWN
+            // capture point, recomputed from measured state on every frame:
+            //     xLand = xCom + vCom * sqrt(h/g) * kLead,   1/omega0 = sqrt(h/g)
+            // so the step is a consequence of the mass leaving the support
+            // area, not of the frozen plan: a frozen target parks the sole
+            // where the CoM already was (auto_walk_fc1: soleClear 0.10 -> 0.05,
+            // fzL 0 N, CoM past the hull 5.56 s, fall 6.155 s). One step of a
+            // LIPM about the new sole keeps its speed when kLead = tanh(ωT/2)
+            // = 0.39 at the measured ω 3.2, T 0.26; the field's 0.37 sits just
+            // under that, and 1 (landing ON the capture point) arrests the
+            // mass at the plant and leaves the walker parked.
+            // captureComLandingScale 0 turns the path off.
+            float xLandNow = liveCom.x + catchLead * dir;
+            if (captureComLandingScale > 0f)
+            {
+                float omega = Mathf.Max(0.5f, captureLastOmega0);
+                float comVelLand = WalkComVelocityX;
+                if (float.IsNaN(comVelLand)) comVelLand = 0f;
+                // ─── WALK CYCLE 6g: the ask is the capture point AT THE PLANT ───
+                // The sole lands a whole swing AFTER the frame this is written
+                // in, and the mass travels v*(duration - trackAge) in that
+                // time, so xCom + k*v/omega alone is v*T short of where the
+                // mass will be when the sole is down. The sole then lands
+                // BEHIND the CoM however well the leg tracks the ask:
+                // c6f_walk, third swing (frozen 7.06-7.10, v 1.09-1.61,
+                // duration 0.16-0.26): asked 0.874 -> 1.267 (0.116*v), the sole
+                // arrived at 0.809 with fzL 0 N, 0.27 m behind the CoM
+                // (1.081) and 0.77 m behind the live capture point (1.583),
+                // touched 7.34 (soleClearL 0.016, fzL 338 N), 0.24 s after
+                // supportMargin crossed zero (+0.012 at 7.08, -0.009 at 7.10,
+                // -0.266 at 7.30), run over 7.38 s. The LIPM's own budget is
+                // the neutral lead about the NEW sole, so the plant, not the
+                // freeze, is what k is a fraction of: the write-in lead is
+                // v*T + k*v/omega, and only k*v/omega of it survives as the
+                // delivered step. The arrest fraction itself is untouched.
+                float swingRemain = Mathf.Max(0f, capturePlan.duration - trackAge);
+                float xLand = liveCom.x
+                              + comVelLand * swingRemain
+                              + comVelLand / omega * captureComLandingScale;
+                // 5 mm minimum forward lead: the sole is never asked for a
+                // point on or behind the mass, but this is a floor and not the
+                // old fixed 3 cm lever — the placement is the capture point.
+                float lead = Mathf.Max((xLand - liveCom.x) * dir, 0.005f);
+                xLandNow = liveCom.x + lead * dir;
+                if ((xLandNow - planTargetX) * dir > 0f) planTargetX = xLandNow;
+            }
+            else if ((liveCom.x - planTargetX) * dir > 0.02f)
+            {
+                planTargetX = xLandNow;
+            }
+            // ─── WALK CYCLE 6b, site 1 of 2: the LATCHED plan target ───
+            // The latched land point is pulled into the reach disc around the
+            // CURRENT hip BEFORE the trajectory is built, at the plan's own
+            // land height. Further down the lateral footprint span is measured
+            // from the trajectory Y (shallower than the drop the ankle finally
+            // takes) and about hipRef, which may be the FREEZE hip
+            // (capturePlan.hipLandX) sitting ahead of the live one, so a
+            // latched target could still leave |target − hip| > l1 + l2 — and
+            // then SolveCaptureLegIk clamps the chord itself and hands back the
+            // fully extended leg: auto_walk_c6, walk command 5.0 s, swing
+            // 5.175–5.935 s never landed, ikSaturated 1 on all 127 swing
+            // frames, reqKnee pinned 17.4920 (= l1 + l2 − 0.01), reqHip −65,
+            // fzL 0.00 N, captureStepCount 0, the CoM turned back at 5.575 s
+            // and the trunk reached the getUp bar (walkTapAbort 6, the swing
+            // abort at BalanceControllerCaptureWalk.cs:1088). The disc keeps
+            // the plan's landY, so the sole is still asked for the slab: only
+            // X is retracted, to the farthest land point the leg can reach.
+            float landSpan = CaptureSwingReachSpanX(hipPoint, capturePlan.landAnkleY);
+            planTargetX = Mathf.Clamp(planTargetX,
+                hipPoint.x - landSpan, hipPoint.x + landSpan);
             var pose = captureSwing.Evaluate(
                 new SwingTrajectory.Path
                 {
@@ -1824,19 +2452,28 @@ public partial class BalanceController
                 CaptureFootTouching(left));
             float x = pose.x;
             float y = pose.y;
-            Vector2 hipPoint = hip.transform.TransformPoint(hip.anchor);
             // Live reach still tracks a SLOW hip (the sole would hang).
             // Floor the span at the freeze footprint: a taut walking pose
             // sits near drop==reach, so any vault or a collapsing dump
             // zeros the live span and retracts the catch under the hip —
             // the step that should have stopped the −27° lean. The planner
             // owns the span; the trajectory does not read the hip.
+            // CAPTURE PLACEMENT (this cycle): that floor was measured with the
+            // FREEZE hip, which sits higher over the slab than the placing hip,
+            // so it licenses a lateral offset the current drop cannot pay for:
+            // the chord then exceeds the bars, SolveCaptureLegIk saturates on
+            // l1+l2−0.01 and the sole hangs centimetres above the slab instead
+            // of landing (auto_walk_fc1: ikSaturated 1 and reqKnee pinned at
+            // 17.49 — the fully extended leg — for the whole swing). On the
+            // placement path the footprint is the live one, so the sole xLandNow
+            // is a sole the leg can actually put on the slab. Old path keeps the
+            // floor.
             float liveSpan = capturePlanner.ReachSpanX(
                 hipPoint.y - y, CapturePlannerModel());
             float span = liveSpan;
             if (span < 0f)
                 span = capturePlan.reachSpan;
-            else if (capturePlan.reachSpan > 0f)
+            else if (capturePlan.reachSpan > 0f && captureComLandingScale <= 0f)
                 span = Mathf.Max(span, capturePlan.reachSpan);
             // First catch used to skip this clamp so a sagging hip could
             // not park the sole under the mass. Unclamped X plus a world
@@ -1859,9 +2496,13 @@ public partial class BalanceController
                     wantX = hipRef + span * dir;
                 if ((liveCom.x - wantX) * dir > 0.02f)
                 {
-                    float catchX = liveCom.x + catchLead * dir;
+                    // CAPTURE PLACEMENT: the goal is the capture landing point,
+                    // not a fixed 3 cm. The far reach edge is the fallback when
+                    // the capture point sits outside the footprint.
                     float maxReach = hipRef + span * dir;
-                    wantX = (catchX - hipRef) * dir <= span ? catchX : maxReach;
+                    wantX = (xLandNow - hipRef) * dir <= span
+                        ? xLandNow
+                        : maxReach;
                 }
                 x = Mathf.Lerp(x, wantX, Mathf.Max(pose.xEase, catchNow ? 1f : 0f));
             }
@@ -1869,26 +2510,235 @@ public partial class BalanceController
                      && (liveCom.x - x) * dir > 0.02f)
             {
                 // Recovery: still plant ahead of a pitching CoM when the
-                // frozen xi already sits under the mass.
+                // frozen xi already sits under the mass. CAPTURE PLACEMENT:
+                // same capture landing point as the periodic step, so one rule
+                // owns where the sole goes.
                 float hipRef = hipPoint.x;
-                float catchX = liveCom.x + catchLead * dir;
                 float maxReach = hipRef + span * dir;
-                x = (catchX - hipRef) * dir <= span ? catchX : maxReach;
+                x = (xLandNow - hipRef) * dir <= span ? xLandNow : maxReach;
             }
+            // ─── WALK CYCLE 6c: the PEEL is a LIFT, in place ───
+            // A sole that is still on the slab is peeled about its own
+            // footprint; the curve's X may travel only once the sole is
+            // AIRBORNE. c6b_walk, second swing (swap 5.79 s): the arc was
+            // already past its 0.26 s duration (SwingAge 1.0 s), so the
+            // commanded point was the LAND point on the slab, 0.85 m from
+            // the placing hip — the solver's own chord clamp (reqKneeR
+            // 17.4920 = the straight leg, reqHipR -65.00) — and the sole
+            // never left: fzR > 1 N in 199 of the 229 frames, soleClearR
+            // 0.017 m, the toe scraping forward for a full second (the
+            // pelvis folded -4.5 -> -90.0 deg, 280 deg/s in the first
+            // 0.1 s) and the run ended at 6.885 s. The FIRST step's peel
+            // (5.155 s) folded instead — reqKneeL 47.79 = a 0.786 m chord
+            // on 0.86 m bars — and its sole left the slab at 5.17 s,
+            // 0.015 s in. Same law here: while the sole is down and this
+            // swing has never been airborne, the foot's OWN X is the
+            // point — a pinned foot's measured X is a held value, not a
+            // live one — and CaptureSwingAnkleYForChord below keeps the Y
+            // at the lift floor. The leg then FOLDS (chord ~0.70-0.75 m,
+            // 55-66 deg of knee, the lift cap is 70), the ankle rises out
+            // of the contact band, SwingLeftGround latches, and the
+            // airborne curve owns the travel, the catch and the landing.
+            // The reach disc just below still bounds that point (X back,
+            // Y kept), so a peel cannot ask for a chord the bars cannot
+            // give. Recovery keeps its catch X: planting ahead of a
+            // pitching CoM is that path's whole job.
+            if (!capturePlan.recovery && !captureSwingLeftGround
+                && CaptureFootTouching(left))
+                x = CaptureAnklePoint(left).x;
             y = CaptureSwingAnkleYForChord(hipPoint, y, left);
-            if (SolveCaptureLegIk(hipPoint, new Vector2(x, y),
-                    out float thighDeg, out float kneeDeg))
+            // ─── WALK CYCLE 6: the point handed to the solver, one law ───
+            // The disc, now on the (x, y) the two-link solve is about to be
+            // asked for. Everything the placement path clamps above is a bound
+            // on X alone — the planner's footprint measured about the freeze
+            // hip, the capture landing point, the latched plan target — so the
+            // chord can still leave the bars (the trajectory's Y is the curve's,
+            // not the landY those spans were measured at) and the solver's
+            // answer to that is the fully extended leg and a hanging sole.
+            // Outside the disc the X comes back and the HEIGHT STAYS: the
+            // retracted point is a point at the landing height, i.e. on the
+            // slab, which is the one coordinate the swing sole cannot give up.
+            // A radial clamp — the nearest point of the disc — would lift the
+            // ankle by the same distance the X came back; that is the 0.180 m
+            // hover and the 0.00 N swing sole of auto_walk_c6.
+            Vector2 placement = SwingPlacementWithinReach(hipPoint, new Vector2(x, y));
+            // ─── WALK CYCLE 6n: the flexion allowance, spent on the ASK ───
+            // 6m made the delivered command and the ask one frame and left the
+            // two numbers that were picked when the command still carried the
+            // PLAN's tilt: the plant's ask reads -35.75 deg in the plan frame
+            // and needs ~70.6 deg of real flexion in the measured one, so the
+            // calibrated 65 deg allowance refuses flexion the leg would have to
+            // give for the sole to go where the walker asked. c6m_walk's plant
+            // is that refusal: reqHipL pegged 65.000 from 7.170 to the fall
+            // with the applied chain short of the ask by 0.0165 / 0.0796 /
+            // 0.2168 m on the ramp's last rows, the sole parked 0.15 m under a
+            // hip that keeps folding. hipAllowanceDeg is the same bound
+            // re-derived in the frame the ask is delivered in
+            // (CaptureSwingHipAllowanceDeg), and it is spent HERE, on the point
+            // handed to the solver, so the ask the plant receives is one the leg
+            // can deliver in that frame and the command at the end of this
+            // method is never clamped after the fact (solved == applied == ask,
+            // the 6k/6l residuals stay 0). The demand the allowance refuses
+            // stays readable: captureSwingHipDemandDeg is the PRE-bound value.
+            captureLastSwingHipDemandDeg =
+                CaptureSwingHipDemandDeg(hipPoint, placement, deliveredFrameDeg);
+            // 6o: the bound spent here is the 6n allowance TIGHTENED by the
+            // plan-frame drift (hipBoundDeg), not the allowance alone. Same law
+            // as 6n — retract X at the same Y, before the solve — and the
+            // PRE-bound demand above is what keeps a fold this bound refuses
+            // readable in the row.
+            if (captureLastSwingHipDemandDeg < hipBoundDeg)
+                placement = SwingPlacementWithinFlexion(hipPoint, placement,
+                    deliveredFrameDeg, hipBoundDeg);
+            x = placement.x;
+            y = placement.y;
+            // ─── WALK CYCLE 6j: publish what this frame HANDS the solver ───
+            // The four values that make the delivered plant geometry
+            // measurable instead of inferred: the plan target in force after
+            // every clamp above, the age the curve was actually evaluated at
+            // (post-6i Max), the X this frame asks the solver for, and the
+            // swing ankle's OWN measured world X in the same frame - no
+            // command of this frame has reached physics yet, so that is the
+            // sole position the ask is built against. Nothing reads them
+            // back: recorder-only instruments.
+            captureLastPlanTargetX = planTargetX;
+            captureLastSwingTrackAge = trackAge;
+            captureLastSwingAskX = placement.x;
+            captureLastSwingAskY = placement.y;
+            captureLastSwingSoleX = CaptureAnklePoint(left).x;
+            // ─── WALK CYCLE 6k: publish the SOLVER'S OWN ANSWER ───
+            // 6j ended at the point the solver was HANDED. These add the point
+            // the solver's own returned angles put the ankle at, the gap
+            // between the two, and the frame the answer is written in, so the
+            // 0.457 m at the plant is split into (a) the solver's own
+            // input-to-solution kinematics and (b) whatever the drive makes of
+            // it. The FK below reproduces the handed point by construction
+            // unless the chord clamp or a singular pair fired, so a ~0 residual
+            // reads as "not the solver" and a ~0.46 m residual reads as "the
+            // solver did it, and the frame values are what it did it with".
+            // Recorder-only: nothing reads these back.
+            bool solved = SolveCaptureLegIk(hipPoint, new Vector2(x, y),
+                    out float thighDeg, out float kneeDeg);
+            if (solved)
             {
                 captureLastIkThighDeg = thighDeg;
                 captureLastIkKneeDeg = kneeDeg;
             }
+            captureLastSwingSolveFrameX = hipPoint.x;
+            captureLastSwingSolveFrameAngleDeg = pelvisAskDeg;
+            if (solved)
+            {
+                captureLastSwingSolvedSoleX =
+                    CaptureSolvedAnklePoint(hipPoint, thighDeg, kneeDeg).x;
+                captureLastSwingSolvedResidualX =
+                    captureLastSwingAskX - captureLastSwingSolvedSoleX;
+            }
+            else
+            {
+                // No pose to publish (singular or zero-length links): the same
+                // 0 sentinel the off-walker case uses, never NaN.
+                captureLastSwingSolvedSoleX = 0f;
+                captureLastSwingSolvedResidualX = 0f;
+            }
         }
 
+        // ─── WALK CYCLE 6f: WHO PITCHES THE TRUNK - the FEED, not the ask ───
+        // The algebra is right: jointAngle = pelvis - thighWorld is what puts
+        // the sole where the IK asked. The defect was the FEED. Handed the
+        // live measured pelvis, the ask is a function of the fold itself: it
+        // follows the sag down at the fold's own rate, reaches the clamp while
+        // the measured joint lags it, and the PD then holds a FULL-SCALE
+        // FLEXION for as long as the fold lasts. A hip flexor's reaction
+        // posteriorly tilts the pelvis, so that flexion is a forward pitch on
+        // the pelvis the swing leg hangs from - the loop that took the pelvis
+        // -6.9 -> -51.5 deg in 0.25 s at the second swap.
+        //
+        // c6e_walk, 6.415-6.570 s (200 Hz, the 29 frames with the swing hip in
+        // ownerHipR 5):
+        //   pelvisTilt  -11.07 -> -34.44      hipR (measured) -5.65 -> -49.82
+        //   reqHipR     -14.37 -> -65.00 (the CaptureClampSwingHipDeg floor;
+        //               pegged for all 50 frames of 6.900-7.145 to the fall)
+        //   demandHipR  ramps -0.16 -> -1.20 (|demand| > 1 = "more torque than
+        //               the muscle can deliver"), mean |demand| 0.51 over the
+        //               29 frames, appTorqueHipR to 97.2 N*m of the 100 ceiling
+        //   forward-pitch impulse on the pelvis +6.92 N*m*s (flexion positive)
+        //   = -99 deg/s of pelvis-unit fold rate at I = 4 kg*m^2, against a
+        //   measured |pelvVel| of 152.9 deg/s in 6.45-6.70 and an external
+        //   m*g*(comX - xCopMeas) of only +32.3 N*m in that same window. The
+        //   swing-hip reaction, not the ground, is what the fold's onset is
+        //   made of; the ground then owns it (+48 -> +176 N*m from 6.70,
+        //   dcm 0.39 -> 0.83, fzL 0 N from 6.94, dcm/supportMargin past the
+        //   hull at 7.105, fall 7.145).
+        //
+        // The counterfactual, from this same recording: with the plan's tilt
+        // (CapturePelvisWorldTarget, late-Swing -10..-3) the ask is less
+        // flexed by exactly the sag (plan - measured = +9.5 deg at 6.445,
+        // +31.4 at 6.545), so the same demand moves by hipPGain/errorRef*that
+        // = 0.15/deg: the -1.20 flexion reads as an EXTENSION demand and
+        // saturates at +1.00 from 6.46 on. First order the forward impulse
+        // +6.92 N*m*s becomes a restoring +10.1..+14.5 N*m*s - the -99 deg/s
+        // fold turns into a braking push of +144..+208 deg/s at the same
+        // inertia. The unloaded swing leg becomes the strut that holds the
+        // pelvis up over the stance foot: the law the file header has named
+        // since the first pass ("hip joint = walking pelvis lean - IK thigh").
+        // The measured tilt is what capwalk3 (+137 deg, CoM 39 cm behind the
+        // feet) was measured with.
+        //
+        // Untouched on purpose: the IK point, the reach disc, the in-place
+        // peel, the CaptureClampSwingHipDeg floor, every cap and gain. The
+        // peel's own lift ask (DriveCaptureSwingKneeLift) still reads the
+        // live pelvis; it opened the fold alone with a 35 ms -1.349..-0.288
+        // ramp at 6.385-6.415 (~3.2 N*m*s of the same forward pitch) and is
+        // out of this cycle's scope.
         // jointAngle = parent - child, so the hip angle that puts the thigh
-        // at a world tilt is pelvisTilt - thighWorld. Cap before the
+        // at a world tilt is parent - thighWorld. Cap before the
         // hinge stop: SPD to −90 / 110° is the first-transfer chair.
-        ApplyCaptureHip(left,
-            CaptureClampSwingHipDeg(pelvisTilt - captureLastIkThighDeg));
+        // ─── WALK CYCLE 6m: the apply frame is the MEASURED parent ───
+        // 6l measured the plant: the ask the solver was handed and the
+        // world thigh it returned are one frame (solvedSole - appliedSole
+        // 0.5015 m), and the command was written against the PLAN's tilt
+        // (pelvisAskDeg, -3.01 at the plant and frozen there) while the
+        // body the hinge hangs from was measured -37.82. jointAngle =
+        // parent - child is incremented against the JOINT'S OWN parent
+        // body, so the parent here is the hinge's connectedBody rotation:
+        // the same value 6l publishes as captureSwingAppliedFrameAngleDeg,
+        // and the same conversion the in-place lift has always used
+        // (DriveCaptureSwingKneeLift: GetPelvisTilt() - thighDeg). The ask
+        // itself was never in the plan frame - it is built from the
+        // measured hinge, the measured sole and the live CoM - so nothing
+        // is re-projected: the command is written in the frame the body is
+        // actually in, and the returned world thigh survives to the sole.
+        // ─── WALK CYCLE 6n: the frame read is the method's own, one page up,
+        // and the floor is that frame's flexion allowance ───
+        // The parent is the same read the 6n allowance was derived from and the
+        // ask was bounded by (deliveredFrameDeg, top of this method), so the
+        // command below cannot be written in a frame other than the one the ask
+        // was made deliverable in. The floor is CaptureSwingHipAllowanceDeg's
+        // number — TIGHTENED by the 6o plan-frame bound (hipBoundDeg, top of
+        // this method), which is the same number the ask above was bounded by,
+        // so the command and the ask still carry one bound and not two — NOT the
+        // plan-frame CaptureClampSwingHipDeg floor: the ask is
+        // now inside the allowance before the solve, so this is the net that
+        // catches a solve the ask bound could not see (a singular pair, a chord
+        // clamp), and with the ask inside it the applied pose lands on the ask
+        // instead of being silently 0.2168 m short of it. The other two callers
+        // of CaptureClampSwingHipDeg (the in-place peel and the lift hold) keep
+        // that plan-frame floor unchanged: they are not this cycle's subject.
+        // ─── WALK CYCLE 6p: the answer is spent on the COMMAND, downstream of the
+        //     6n/6o bound, and on the same two numbers ───
+        // The 6n/6o bound floors a FLEXION ask (retract X, never lift Y). The 6p
+        // bias is not a flexion ask — it is the joint that takes the posture off
+        // the pelvis — so it is spent here, downstream of that floor, instead of
+        // being absorbed by it, and the result is re-clamped to the same floor and
+        // the same +15 hold ceiling the command already had. Nothing above this
+        // line changes: the ask, the reach disc, the in-place peel, the solve and
+        // the pre-bound demand column are the 6n/6o ones (postureBiasDeg 0 gives
+        // the 6n/6o command back to the digit).
+        float hipCommandDeg = CaptureSwingHipClampDeg(hipBoundDeg,
+            deliveredFrameDeg - captureLastIkThighDeg);
+        hipCommandDeg = Mathf.Clamp(hipCommandDeg + postureBiasDeg,
+            hipBoundDeg, CaptureSwingHipHoldMaxDeg);
+        ApplyCaptureHip(left, hipCommandDeg);
         // Swing knee is never a loaded support, even if the toe still
         // touches. The 1 BW ceiling on a still-down swing is the weld
         // that kept both soles in the closed loop.
@@ -1896,6 +2746,65 @@ public partial class BalanceController
             Mathf.Clamp(captureLastIkKneeDeg, 0f, CaptureSwingKneeCapDeg()),
             false);
         DriveCaptureSwingAnkle(left);
+        // ─── WALK CYCLE 6l: publish the pose that was APPLIED, not the ask ───
+        // 6k closed the solver: its own returned angles, run forward, land on
+        // the ask to the digit on every frame, so the 0.457 m at the plant is
+        // made downstream of it. Downstream has two halves and the 6j/6k
+        // columns cannot tell them apart - the FRAME the returned WORLD angles
+        // are written into a joint command against (the plan's pelvis tilt at
+        // the plant: -3.00 deg, frozen, on a body measured 22-35 deg down) and
+        // the CLAMPS/TRACKING between those angles and the targets the joints
+        // are actually given. This block rebuilds 6k's own two-link forward
+        // kinematics on:
+        //   * the MEASURED parent - the hip hinge's parent body rotation, the
+        //     frame jointAngle = parent - child is really incremented in, so
+        //     the thigh world the driven hip command produces is parent - hip;
+        //   * the POST-CLAMP targets ApplyCaptureHip / ApplyCaptureKnee just
+        //     handed the PD - the tap holds exactly those (after the hip bound
+        //     and the knee support bound), not the solver's raw ask.
+        // With them published, the CSV splits the 6k delivery by subtraction:
+        //     solvedSole - appliedSole   = the clamps / tracking
+        //     appliedSole - measuredSole = the parent frame
+        // The hinge point is re-read here rather than carried out of the branch
+        // above: nothing in this method moves the hinge between that read and
+        // this one (no command of this frame has reached physics yet), so it is
+        // the same point 6k published as captureSwingSolveFrameX and the two
+        // frames subtract directly. Read-only: no gain, limit, threshold, sign
+        // or target in this file reads any of these fields back.
+        if (capturePlan.valid && hip != null && hip.connectedBody != null)
+        {
+            Vector2 appliedHinge = hip.transform.TransformPoint(hip.anchor);
+            // 6m: the same frame the hip command above was written against, so
+            // the published frame IS the frame the applied pose was built in.
+            // 6n: that read is now the method's own single read
+            // (deliveredFrameDeg, taken before the ask was built and bounded),
+            // so the published frame and the frame the 6n allowance and the ask
+            // bound used are one variable and not two reads that happen to
+            // agree. Nothing between the read and this line moves the pelvis
+            // (no command of this frame has reached physics yet), so the value
+            // is the one 6l published.
+            captureLastSwingAppliedFrameX = appliedHinge.x;
+            captureLastSwingAppliedFrameAngleDeg = deliveredFrameDeg;
+            // The tap is NaN on a joint no drive method wrote this frame (it is
+            // cleared at the top of every walk tick), so a NaN here is the same
+            // "no applied pose" case 6k answers with its 0 sentinel.
+            float hipAppliedDeg = left ? walkTap.reqHipL : walkTap.reqHipR;
+            float kneeAppliedDeg = left ? walkTap.reqKneeL : walkTap.reqKneeR;
+            if (!float.IsNaN(hipAppliedDeg) && !float.IsNaN(kneeAppliedDeg))
+            {
+                float thighAppliedDeg = deliveredFrameDeg - hipAppliedDeg;
+                captureLastSwingAppliedSoleX =
+                    CaptureSolvedAnklePoint(appliedHinge, thighAppliedDeg,
+                        kneeAppliedDeg).x;
+                captureLastSwingAppliedResidualX =
+                    captureLastSwingAskX - captureLastSwingAppliedSoleX;
+            }
+            else
+            {
+                captureLastSwingAppliedSoleX = 0f;
+                captureLastSwingAppliedResidualX = 0f;
+            }
+        }
     }
 
     // Swing ankle owns foot orientation only. jointAngle = shin - foot, so
@@ -2132,6 +3041,13 @@ public partial class BalanceController
     // re-tested 12° on that lean and killed geo-lift.
     private const float CaptureDirtOnsetPlantHoldU = 0.15f;
     private const float CaptureDirtOnsetFoldSeconds = 0.18f;
+    // WALK CYCLE 6d — shortest air time a step may be given. The peel/fold
+    // clock is 0.20 s, c6c_walk's first swing (peel + plant) took 0.24 s and
+    // the emergency step is captureRecoveryDuration 0.22 s, so 0.16 s is under
+    // anything this body has ever put on the slab: the floor is a backstop for
+    // a runaway speed, not a working number (the c6c_walk peak 0.73 m/s asks
+    // for 0.196 s, and 0.16 s is reached only past 0.89 m/s).
+    private const float CaptureSwingDurationFloorSeconds = 0.16f;
     // First-step stance strut. Both knees to 120 was plant-IK on a
     // dropping hip. Onset may flex only the swing; this cap is the
     // 15° / 3 cm pelvis budget (quiet ~6° plus a few degrees of sag).
@@ -2471,6 +3387,55 @@ public partial class BalanceController
         ApplyCaptureHip(left, hip.jointAngle, loadedCap);
     }
 
+    // ─── WALK CYCLE 6e: the LOADED lead hip is a support, not a hold ───
+    // Measured on c6d_walk (walk command 5.005 s, fall 7.285 s): in EVERY
+    // DualSupport frame the walker handed the hip whose own foot carries the
+    // body to DriveCaptureHoldMeasuredHip — a zero-error SPD on the angle the
+    // hip is already sagging to — so the loaded lead asked for 0 N*m in
+    // exactly the window where the pelvis folded -6.9 -> -67.8 deg and the
+    // trunk -2.8 -> -47.7 deg. The CSV is unambiguous: ownerHipL 2 with
+    // reqHipL -10.932 at 6.400 (hipL -10.932), reqHipL -55.063 at 6.700
+    // (hipL -55.063), reqHipL -65.181 at 6.800 (hipL -65.181) — the request
+    // IS the measured angle, so the walker asked nothing while the load was
+    // 532-1215 N.
+    //
+    // The same hip gets the pelvis restore one state later (Swing / Recovery,
+    // owner 7), and the loaded-hip cap clips that ask to the measured + 3.0
+    // deg = 45 N*m (heelNm 45 / hipMuscleTorque 100 / hipPGain 1.5 /
+    // errorReferenceDegrees 10), i.e. 6.500 reqHipL -26.028 against a measured
+    // -26.998. So the ask on a loaded hip is ALREADY the walker's ceiling
+    // whenever the restore owns it; the handover — 0 N*m or the ceiling — is
+    // the only lever the stance-hip chain has, and this is the frame it owns.
+    //
+    // The guard is not optional. The walk's lean phase is still asking for a
+    // forward pelvis (CapturePelvisWorldTarget -10 at 6.400 against a measured
+    // -6.93), and that ask, converted to a joint angle, is a 3.07 deg FLEXION:
+    // handing it to a loaded hip would be a ~46 N*m push INTO the fold. A
+    // loaded hip is asked for the posture it stands in that keeps the trunk
+    // over the foot, never for a flexion past the angle it is in.
+    //
+    // The trail keeps its own call untouched: the two-strut fight is a plant
+    // problem (capwalk14: pelvis +8 -> +21 deg in 0.1 s with the trail asleep),
+    // not a lead problem, and the trail's latched chord is what stops the
+    // rear's length-servo from peeling.
+    private void DriveCaptureLoadedStanceHip(bool left)
+    {
+        HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
+        if (hip == null || hip.attachedRigidbody == null)
+        {
+            DriveCaptureHoldMeasuredHip(left, true);
+            return;
+        }
+        float ask = CaptureBalance.HipHoldTarget(CapturePelvisWorldTarget(),
+            hip.attachedRigidbody.rotation);
+        if (ask <= hip.jointAngle)
+        {
+            DriveCaptureHoldMeasuredHip(left, true);
+            return;
+        }
+        DriveCaptureRestoreHip(left, true);
+    }
+
     // First DualSupport trail hip: SPD to the quiet joint latched on
     // the first walking frame. Zero muscles let the thigh sag; live
     // HoldMeasuredHip follows that sag; RestoreHip is a second column.
@@ -2630,6 +3595,27 @@ public partial class BalanceController
         return n > 0 ? sum / n : kneeBaseAngle;
     }
 
+    // The captureLaunchAnkleCap ceiling is a LAUNCH term, not a walk term: it
+    // may only hold the stance ankle down while the launch ramp itself is
+    // still ramping. CaptureOnsetLeanU() is that clock (0.12 s of onset lean);
+    // from the moment it reaches 1 the same branch already commands the full
+    // ceiling (cap = Lerp(launchCap, 1, max(u, onsetLeanU))), so the gate adds
+    // no new number and removes no launch behaviour.
+    //
+    // Before this gate the periodic step used captureLaunchAnkleCap as its own
+    // ceiling on every frame of Swing / RecoveryStep / TouchdownBlend
+    // (`cap = launchCap` in DriveCaptureCop). walk_place1 (build f9d594f0) is
+    // that bug: the CoP loop's raw demand ran 3.4 -> 21.5 while copCmdR sat at
+    // exactly 0.2800 and appTorqueAnkleR at 18.2 N*m = 0.28 * 65 for the whole
+    // step, i.e. the one actuator that can hold a CoP used 28 % of its
+    // authority while the trunk pitched -5 -> -45 deg at 60-70 deg/s.
+    private bool CaptureLaunchAnkleCapActive()
+    {
+        return captureStepCount == 0
+               && captureState == CaptureWalkState.DoubleSupport
+               && CaptureOnsetLeanU() < 1f;
+    }
+
     // Stance ankle owns the CoP. Existing ankleComP / ankleComD loop.
     // Weight is the load share. copTargetX, when given, is the CoM setpoint
     // (lead sole in dual support); omitted, it is this foot's centre.
@@ -2681,14 +3667,23 @@ public partial class BalanceController
         {
             // Single support / blend: do not fully brake. Match a share
             // of current forward speed so D is quiet on a captured step.
-            // Cap stays at the launch ceiling; plus past the toe is still
+            // Ceiling is the launch cap ONLY inside the launch itself; a
+            // loaded stance ankle on the periodic step keeps the full
+            // authority the quiet-stance CoP loop has (see
+            // CaptureLaunchAnkleCapActive). Plus past the toe is still
             // clipped below. P still pulls toward the setpoint.
             float vFwd = comVelX * dir;
             float vCap = Mathf.Max(0.05f, CaptureDesiredSpeed());
             float fade = Mathf.Clamp01(captureCopTravelBias)
                          * Mathf.Clamp01(Mathf.Max(0f, vFwd) / vCap);
             copVDes = fade * comVelX;
-            cap = launchCap;
+            // Was `cap = launchCap` on every frame of this branch: Swing,
+            // RecoveryStep and TouchdownBlend then ran the loaded stance
+            // ankle at 0.28 x 65 = 18.2 N*m against a raw demand of 3.4-21.5
+            // (walk_place1). The gate is false here by construction — the
+            // first DualSupport is owned by launchDs above — so this is the
+            // full ceiling, and it keeps the rule in one visible place.
+            cap = CaptureLaunchAnkleCapActive() ? launchCap : 1f;
         }
         float velN = (comVelX - copVDes) / Mathf.Max(0.05f, comVelocityReference);
         float raw = ankleComP * errN + ankleComD * velN;
@@ -3040,11 +4035,17 @@ public partial class BalanceController
         float l2 = legShinLength;
         if (l1 < 0.0001f || l2 < 0.0001f) return false;
         Vector2 r = targetAnkle - hipPoint;
-        float d = r.magnitude;
+        float dRaw = r.magnitude;
+        float d = dRaw;
         if (d < 0.0001f) return false;
         // Never ask for a locked knee or a folded singularity: both are
         // hinge stops, and a stop is not a controllable pose.
         d = Mathf.Clamp(d, Mathf.Abs(l1 - l2) + 0.02f, l1 + l2 - 0.01f);
+        // C1 witness (recorder only): the request was outside what the two links
+        // can reach, so the pose the caller asked for is not the pose the leg
+        // takes. Nothing in this file reads it.
+        CaptureIkSaturated = Mathf.Abs(d - dRaw) > 1e-4f;
+        CaptureIkSolveTick = Time.frameCount;
         float chordDeg = Mathf.Atan2(r.x, -r.y) * Mathf.Rad2Deg;
         float cosKnee = (l1 * l1 + l2 * l2 - d * d) / (2f * l1 * l2);
         kneeFlexDeg = 180f - Mathf.Acos(Mathf.Clamp(cosKnee, -1f, 1f)) * Mathf.Rad2Deg;
@@ -3052,6 +4053,25 @@ public partial class BalanceController
         float alphaDeg = Mathf.Acos(Mathf.Clamp(cosAlpha, -1f, 1f)) * Mathf.Rad2Deg;
         thighWorldDeg = chordDeg + alphaDeg;
         return true;
+    }
+
+    // ─── WALK CYCLE 6k: forward kinematics of the solver's OWN answer ───
+    // Same two links and the same segment law as SolveCaptureLegIk: a segment
+    // at world rotation r runs from its top joint to its bottom one along
+    // (sin r, -cos r), and jointAngle = parent - child puts the shin one
+    // kneeFlex behind the thigh. The returned thighWorldDeg is already world,
+    // so this is the ankle the solver BELIEVES it commanded - not the
+    // measured leg (CaptureAnklePoint). Recorder-only.
+    private Vector2 CaptureSolvedAnklePoint(Vector2 hipPoint, float thighWorldDeg,
+                                            float kneeFlexDeg)
+    {
+        float thigh = thighWorldDeg * Mathf.Deg2Rad;
+        float shin = (thighWorldDeg - kneeFlexDeg) * Mathf.Deg2Rad;
+        return new Vector2(
+            hipPoint.x + legThighLength * Mathf.Sin(thigh)
+                       + legShinLength * Mathf.Sin(shin),
+            hipPoint.y - legThighLength * Mathf.Cos(thigh)
+                       - legShinLength * Mathf.Cos(shin));
     }
 
     // Unloaded swing hip. Quiet hold is near 0; walk flex is minus
@@ -3077,6 +4097,236 @@ public partial class BalanceController
         if (targetDeg < lo) return lo;
         if (targetDeg > CaptureSwingHipHoldMaxDeg) return CaptureSwingHipHoldMaxDeg;
         return targetDeg;
+    }
+
+    // ─── WALK CYCLE 6n: the flexion allowance in the DELIVERED frame ───
+    // The number CaptureClampSwingHipDeg above returns is calibrated in the
+    // PLAN's frame, and it was picked when the delivered command still carried
+    // that frame: written against CapturePelvisWorldTarget (late-Swing −10..−3
+    // deg) a hip command IS the thigh's world tilt, so "−40 (or −65 on a long
+    // catch) of flexion" named a world pose. Since 6m the same command is
+    // written against the MEASURED parent, and the same sole then needs the
+    // plan-frame number PLUS the sag between the two frames: c6m_walk's plant
+    // puts the ask at −35.75 deg in the plan frame and ~70.6 deg of real
+    // flexion in the measured one, which the 65 deg floor refuses (reqHipL
+    // pegged 65.000 to the fall). This is the same bound re-derived in the
+    // frame the ask is delivered in:
+    //     worldThighBound = planTilt − planFrameFloor   (the pose the number
+    //                                                    named, world space)
+    //     floor           = frameDeg − worldThighBound  (that same pose, in the
+    //                                                    delivered frame)
+    // and never below the joint's OWN stop less one margin. That last term is
+    // the only part of the allowance a frame convention cannot move: the hinge
+    // limit is read from the hinge itself (Human.hipLimitMin into
+    // joint.limits.min, −90), the mixer re-clamps every target to it
+    // (ActuatorMixer line 85), and "SPD to −90 / 110° is the first-transfer
+    // chair" — so the allowance stops one margin short of the stop instead of
+    // asking for it. The caller spends this number on the ASK, before the
+    // solve (see SwingPlacementWithinFlexion), and writes no hip command below
+    // it, so an ask inside the allowance is a command no clamp can shorten.
+    private const float CaptureSwingHipStopMarginDeg = 5f;
+
+    private float CaptureSwingHipAllowanceDeg(HingeJoint2D hip, float frameDeg)
+    {
+        float flex = Mathf.Max(20f, swingHipFlex);
+        bool longCatch = capturePlan.valid
+            && (capturePlan.recovery
+                || (capturePlan.reachSpan > 0.01f
+                    && (capturePlan.targetX - capturePlan.stanceX)
+                       * capturePlan.dir
+                       > capturePlan.reachSpan + 0.01f));
+        float planFloor = (captureStepCount == 0 && !longCatch)
+            ? -flex
+            : -(flex + 25f);
+        float planTilt = CapturePelvisWorldTarget();
+        float floor = frameDeg - (planTilt - planFloor);
+        // A joint with no limits enabled has no stop to read (Unity leaves
+        // limits.min at 0 there), so the floor stays a pure frame conversion
+        // instead of being turned into a positive number by a limit that is
+        // not in force. HumanSegment.ConnectTo assigns useLimits = true with
+        // hipLimitMin for every hip, so on this rig the stop always binds.
+        if (hip != null && hip.useLimits)
+        {
+            float stopFloor = hip.limits.min + CaptureSwingHipStopMarginDeg;
+            if (floor < stopFloor) floor = stopFloor;
+        }
+        return floor;
+    }
+
+    // ─── WALK CYCLE 6o: the plan-frame drift as a bound on the delivered ask ───
+    // The 6n allowance above says how much flexion this LEG can deliver in the
+    // frame the ask is handed over in. It says nothing about how much flexion the
+    // BODY can afford: the swing hip's flexion is a forward pitch on the pelvis
+    // the leg hangs from (6f), and the walk is measured dying of exactly that —
+    // c6n_walk, the target frozen at 7.120 asks for a 0.62 m step (−85 deg of
+    // flexion, the allowance floor, appTorqueHipL +90.7 N*m) with the body
+    // already −57 deg and the pelvis nowhere to put the reaction. So the frame
+    // the plan target was BUILT in is spent here: the drift between that frame
+    // (capturePlanFrameTiltDeg, the pelvis tilt on the freeze) and the frame the
+    // target LANDS in (the measured pelvis the command is written on) is removed
+    // from the flexion the ask may carry. One degree of drift buys one degree less
+    // fold — the frame difference is paid in the ask's X, which is the only
+    // coordinate the swing sole can give up (6n's law: retract X, never lift Y).
+    //
+    // Bounded three ways, and it never loosens: a body that pitched BACKWARD does
+    // not earn itself extra flexion (drift <= 0 returns the 6n allowance
+    // untouched), the drift paid is capped at CaptureSwingPlanFrameBoundDeg, and
+    // the result may not ask the hip for extension past its own hold ceiling
+    // (CaptureSwingHipHoldMaxDeg). The demand this bound refuses is NOT hidden:
+    // captureSwingHipDemandDeg stays the PRE-bound demand of the point handed to
+    // the solve, and the ask stays inside the bound before the solve, so
+    // solved == applied == ask (the 6l/6m/6n criterion) is untouched.
+    //
+    // 25 deg is 0.4 of the c6n_walk measured drift at the fall (−58.2 deg body
+    // against a plan frozen near −18) and is the walker's own bound, not a
+    // physical one: past it the bound stops tightening so a deeply pitched body
+    // still gets a fold to plant the sole with instead of the plan's full reach.
+    private const float CaptureSwingPlanFrameBoundDeg = 25f;
+
+    // ─── WALK CYCLE 6p: ONE source for the bounded plan-frame drift ───
+    // The 6o charge on the leg's flexion and the 6p answer on the delivered
+    // command are the same quantity — the drift between the frame the plan in
+    // force was built in and the frame the body is measured in now — so it is
+    // read here once, in one place, and both spend it. 0 with no tilt source, no
+    // freeze yet (the 0 sentinel of capturePlanFrameTiltDeg), a body at or behind
+    // its plan frame (a body that pitched BACK earns no answer and no charge), and
+    // never more than CaptureSwingPlanFrameBoundDeg. CaptureSwingPitchBoundDeg's
+    // own output is unchanged to the bit by this extraction: allowance + 0 is the
+    // allowance, and the ceiling below is applied exactly where it was.
+    private float CapturePlanFrameDriftDeg()
+    {
+        if (vestibularSystem == null) return 0f;
+        // 0 is the "no plan frame published yet" sentinel (ResetCaptureWalk),
+        // so a walk tick that has never frozen a plan is not bounded by a
+        // frame it never had.
+        if (captureLastPlanFrameTiltDeg == 0f) return 0f;
+        // DeltaAngle(from, to) = to - from, so this is the FREEZE tilt minus the
+        // tilt now: positive when the body has moved forward of the frame its
+        // target was built in (forward is minus on every tilt in this rig).
+        float driftDeg = Mathf.DeltaAngle(vestibularSystem.GetPelvisTilt(),
+            captureLastPlanFrameTiltDeg);
+        if (driftDeg <= 0f) return 0f;
+        if (driftDeg > CaptureSwingPlanFrameBoundDeg)
+            driftDeg = CaptureSwingPlanFrameBoundDeg;
+        return driftDeg;
+    }
+
+    private float CaptureSwingPitchBoundDeg(float allowanceDeg)
+    {
+        float bound = allowanceDeg + CapturePlanFrameDriftDeg();
+        if (bound > CaptureSwingHipHoldMaxDeg) bound = CaptureSwingHipHoldMaxDeg;
+        return bound;
+    }
+
+    // ─── WALK CYCLE 6p: the bounded posture error, spent as an ANSWER on the
+    //     delivered command ───
+    // Same drift as the 6o charge above, bounded here by what the walker may ask
+    // a joint to answer the posture WITH: its own loaded-hip heel band in degrees
+    // (ActuatorMixer.HipTorqueBandDeg, the conversion CapLoadedHip itself uses:
+    // captureStanceHipTorqueCap 45 N*m at hipMuscleTorque 100 / hipPGain 1.5 /
+    // errorReferenceDegrees 10 = 3.0 deg). That is the one part of the posture
+    // error the walker's own numbers already license on a hip; 6p spends it on
+    // the hip whose reaction the pelvis feels with no sole to roll (the swing
+    // leg, 6f), instead of only using it to retract the step. A cap of 0 ("no
+    // cap") leaves the drift itself as the bound, which is the same convention
+    // CapLoadedHip has. 0 = no source, no freeze, no positive drift, or muscles
+    // that carry no torque to convert.
+    private float CaptureSwingPostureBiasDeg(bool left)
+    {
+        float biasDeg = CapturePlanFrameDriftDeg();
+        if (biasDeg <= 0f) return 0f;
+        Muscle flexor = left ? leftHipFlexor : rightHipFlexor;
+        Muscle extensor = left ? leftHipExtensor : rightHipExtensor;
+        float maxTorque = Mathf.Max(flexor != null ? flexor.maxTorque : 0f,
+                                    extensor != null ? extensor.maxTorque : 0f);
+        if (maxTorque <= 0.001f) return 0f;
+        float bandDeg = ActuatorMixer.HipTorqueBandDeg(captureStanceHipTorqueCap,
+            maxTorque, hipPGain, errorReferenceDegrees);
+        if (biasDeg > bandDeg) biasDeg = bandDeg;
+        return biasDeg;
+    }
+
+    // The same bound, spent on a command instead of on an ask. Only the floor
+    // differs from CaptureClampSwingHipDeg: the walk swing path passes 6n's
+    // delivered-frame allowance, whose upper bound (CaptureSwingHipHoldMaxDeg,
+    // the +15 hold) is the plan-frame law the other callers keep.
+    private float CaptureSwingHipClampDeg(float floorDeg, float targetDeg)
+    {
+        if (targetDeg < floorDeg) return floorDeg;
+        if (targetDeg > CaptureSwingHipHoldMaxDeg) return CaptureSwingHipHoldMaxDeg;
+        return targetDeg;
+    }
+
+    // The hip flexion the point about to be handed to the solver CARRIES in the
+    // frame it is delivered in, deg: that frame minus the world thigh
+    // SolveCaptureLegIk returns for the point (more negative = more flexion).
+    // This is the PRE-BOUND demand — published next to the bounded ask, so a
+    // demand the allowance refuses stays readable in the row instead of being
+    // hidden by the bound. Same two links and the same solve as the delivery
+    // itself; the C1 witnesses that solve writes are re-written by the caller's
+    // own solve of the final point in the same frame, so nothing is left stale.
+    // 0 = no pose (singular pair / zero-length links), the sentinel 6k uses.
+    private float CaptureSwingHipDemandDeg(Vector2 hipPoint, Vector2 target,
+                                           float frameDeg)
+    {
+        float kneeDeg;
+        if (!SolveCaptureLegIk(hipPoint, target, out float thighDeg, out kneeDeg))
+            return 0f;
+        return frameDeg - thighDeg;
+    }
+
+    // ─── WALK CYCLE 6n: the ask, bounded by the allowance, BEFORE the plant ───
+    // The allowance has to answer the ask the walker now delivers, and the ask
+    // is what the sole is measured against, so it is bounded here — upstream of
+    // the solve and the plant — instead of the joint command being clamped
+    // downstream of them, where the deficit is silent (6l: 0.5015 m of applied
+    // pose lost under a pegged command; 6m: 0.2168 m on the ramp's last rows).
+    // The law is the reach disc's own: RETRACT X, NEVER LIFT Y. The handed point
+    // keeps the height the walker asked for (the slab under a landing sole, the
+    // clearance floor above a peeling one) and comes back toward the hip until
+    // the IK's flexion fits the allowance, so the command written from it needs
+    // no post-solve shortening and the planted sole is the sole that was asked
+    // for. The disc's rear edge is always inside the allowance (there the thigh
+    // points BACK, i.e. extension, so the demand is at its most positive), so a
+    // bracket exists by construction; the search bisects it and keeps the
+    // fitting side as its invariant, which is what makes it safe even where the
+    // demand is not monotone in X (near the front edge the chord angle grows
+    // with X while the knee straightens, so the demand peaks just inside it).
+    // Cost: 10 pure two-link solves per walk frame, bounded.
+    private Vector2 SwingPlacementWithinFlexion(Vector2 hipPoint, Vector2 target,
+                                                float frameDeg, float allowanceDeg)
+    {
+        float reach = CaptureSwingReachRadius();
+        float dy = target.y - hipPoint.y;
+        if (reach <= 0f || Mathf.Abs(dy) >= reach) return target;
+        float span = Mathf.Sqrt(reach * reach - dy * dy);
+        float lo = hipPoint.x - span;
+        float hi = target.x;
+        if (hi > hipPoint.x + span) hi = hipPoint.x + span;
+        // The ask itself is the bracket's high end and it does NOT fit (the
+        // caller only calls this when its demand is outside the allowance), so
+        // an ask already at the rear disc edge has nowhere to come back to.
+        if (hi <= lo) return target;
+        // The bracket's low end must actually fit; the rear edge is extension
+        // (its demand is the most positive at this height), so this can only
+        // fail when the FRAME itself already sits below the allowance — the
+        // pelvis folded past the joint's stop margin. Then no point at this
+        // height fits, the ask is left exactly as the plan asked it and the
+        // post-solve clamp is the net again (the pre-6n behaviour, with the
+        // demand column showing why).
+        if (CaptureSwingHipDemandDeg(hipPoint, new Vector2(lo, target.y), frameDeg)
+            < allowanceDeg)
+            return target;
+        for (int i = 0; i < 10; i++)
+        {
+            float mid = 0.5f * (lo + hi);
+            if (CaptureSwingHipDemandDeg(hipPoint, new Vector2(mid, target.y),
+                    frameDeg) >= allowanceDeg)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        return new Vector2(lo, target.y);
     }
 
     // Unloaded swing knee. 110° is a squat chord (~0.50 m on 0.86 m
@@ -3155,6 +4405,69 @@ public partial class BalanceController
         if (y > airMax)
             y = airMax;
         return y;
+    }
+
+    // ─── WALK CYCLE 6: the swing reach disc, one rule for the placement ───
+    //
+    // A swing land point is a point only if the leg can put a sole on it:
+    // |target − hip| <= bars − reserve, the disc about the CURRENT hip.
+    // The reserve is the KNEE's authority, not the solver's edge. SolveCaptureLegIk
+    // clamps its chord at bars − 0.01 = 0.85 m, which on these two 0.43 m bars
+    // is a knee of 17.49 deg — the singular pose the solver itself refuses to
+    // enter, and a leg at that angle cannot press a sole onto the slab: it can
+    // only hang. auto_walk_c6 is that pose, held for the whole swing: reqHipL
+    // pinned −65.00 in 125 frames, reqKneeL pinned 17.4920 in 127, soleClearL
+    // 0.180 m, fzL 0.00 N, no swap. bars − 0.02 = 0.84 m is 24.8 deg of knee
+    // at the far edge — still an ordinary near-straight landing leg, and the
+    // point the solver's own clamp then never has to touch, so its saturation
+    // witness (CaptureIkSaturated) stays 0 on the walk path.
+    private const float CaptureSwingReachReserveM = 0.02f;
+
+    private float CaptureSwingReachRadius()
+    {
+        float bars = legThighLength + legShinLength;
+        return bars > 0.0001f ? bars - CaptureSwingReachReserveM : 0f;
+    }
+
+    // Edge of that disc at a given target height: the farthest a land point
+    // may sit from hipPoint.x while the sole is still asked for `targetY`.
+    // The trajectory takes X and the plan's own landY, so this is the disc
+    // edge a latched plan target is pulled back to — the landing depth is
+    // preserved, which is what lets the sole reach the slab.
+    private float CaptureSwingReachSpanX(Vector2 hipPoint, float targetY)
+    {
+        float reach = CaptureSwingReachRadius();
+        float dy = hipPoint.y - targetY;
+        float rest = reach * reach - dy * dy;
+        return rest > 0f ? Mathf.Sqrt(rest) : 0f;
+    }
+
+    // The point handed to the solver: the requested X, kept when the leg can
+    // reach it at the requested height, and otherwise retracted to the edge of
+    // the disc AT THAT SAME HEIGHT. Retract X, never lift Y — the landing
+    // height is the slab, and it is the only coordinate the swing sole cannot
+    // give up. A radial clamp (the nearest point of the disc) answers an
+    // over-reach by pulling the point toward the hip, which raises the ankle by
+    // the same distance the X came back: auto_walk_c6 swung 0.94 s with the
+    // sole 0.180 m over the slab, fzL 0.00 N and no swap, while the IK saturated
+    // every frame on reqKnee 17.4920.
+    //
+    // Y itself moves only when the requested height is outside the disc — a hip
+    // that has sagged, or lifted, so far that no X can pay for the drop. The
+    // ankle is then asked for the lowest (or highest) point of the disc, i.e.
+    // straight under the hip, so the sole still comes down instead of the solve
+    // saturating. Same law for the periodic step and for Recovery.
+    private Vector2 SwingPlacementWithinReach(Vector2 hipPoint, Vector2 target)
+    {
+        float reach = CaptureSwingReachRadius();
+        if (reach <= 0f) return target;
+        float dy = target.y - hipPoint.y;
+        if (Mathf.Abs(dy) >= reach)
+            return new Vector2(hipPoint.x, hipPoint.y + Mathf.Sign(dy) * reach);
+        float span = Mathf.Sqrt(reach * reach - dy * dy);
+        return new Vector2(
+            Mathf.Clamp(target.x, hipPoint.x - span, hipPoint.x + span),
+            target.y);
     }
 
     // Knee flexion whose two bars span distance d between hip and ankle.

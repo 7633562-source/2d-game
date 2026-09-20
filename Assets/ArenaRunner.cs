@@ -97,6 +97,8 @@ public class ArenaRunner : MonoBehaviour
     private float lastWallSampleTime;
     private Camera arenaCamera;
     private GameObject groundHost;
+    private float[] pendingEliteCopyGenome;
+    private int pendingEliteCopyParentId = -1;
 
     public bool Done => begun && simTime >= durationSeconds;
     public bool Begun => begun;
@@ -199,7 +201,12 @@ public class ArenaRunner : MonoBehaviour
     {
         if (!begun) return;
         simTime = time;
-        float delta = Time.fixedDeltaTime;
+
+        // Cull BEFORE spawning: the cap (60) and the 30 s life exactly meet at
+        // 0.5 s intervals, so spawning first made every spawn from t=30 s on sit one
+        // body over the cap and force-cull the oldest, which is the same body the
+        // 30 s rule removes a frame later. Order is the whole fix.
+        CullDue(time);
 
         while (time + 1e-4f >= nextSpawnTime)
         {
@@ -211,7 +218,6 @@ public class ArenaRunner : MonoBehaviour
             alive[i].Step(time);
 
         MeasureDue(time);
-        CullDue(time);
         SampleCurves(time);
     }
 
@@ -232,7 +238,20 @@ public class ArenaRunner : MonoBehaviour
             && spawnIndex % EliteEverySpawns == 0
             && measured.Count > 0;
 
-        if (eliteTurn)
+        if (pendingEliteCopyGenome != null)
+        {
+            // The second half of the elite pair: the identical genome, the identical
+            // spawn point, a different age. Two copies are spawned back to back so the
+            // collision proof always has a pair, even when the best genome moves on.
+            genome = ArenaGenome.Copy(pendingEliteCopyGenome);
+            parentId = pendingEliteCopyParentId;
+            childKind = 2;
+            mutationSeed = -1;
+            parentRank = 0;
+            parentBest = true;
+            pendingEliteCopyGenome = null;
+        }
+        else if (eliteTurn)
         {
             ArenaHumanAgent best = BestMeasured();
             genome = ArenaGenome.Copy(best.genome);
@@ -242,6 +261,8 @@ public class ArenaRunner : MonoBehaviour
             parentRank = 0;
             parentFitness = best.Fitness;
             parentBest = true;
+            pendingEliteCopyGenome = ArenaGenome.Copy(genome);
+            pendingEliteCopyParentId = best.id;
         }
         else if (poolSize > 0 && rng.Next01() < ChildShare)
         {
@@ -437,8 +458,12 @@ public class ArenaRunner : MonoBehaviour
         agent.MarkCulled(time, agent.UprightNow());
         culledCount++;
         alive.Remove(agent);
+        // DestroyImmediate, not Destroy: a deferred Destroy lands at the end of whatever
+        // rendered frame happens to be current, so the number of bodies in the physics
+        // world then depends on the frame rate and two runs of one seed can drift apart.
+        // Removing the body inside the fixed step keeps the world identical for both runs.
         if (agent.gameObject != null)
-            Destroy(agent.gameObject);
+            DestroyImmediate(agent.gameObject);
     }
 
     private void SampleCurves(float time)
@@ -616,7 +641,11 @@ public class ArenaRunner : MonoBehaviour
                 if (!lines[i].StartsWith(prefix, System.StringComparison.Ordinal)) continue;
                 string[] fields = lines[i].Split(',');
                 if (fields.Length < 10) return;
-                fields[9] = agent.destroyedTime.ToString("0.###", CultureInfo.InvariantCulture);
+                // -1 means "never destroyed inside this run": the contract column is
+                // left empty rather than filled with a number that did not happen.
+                fields[9] = agent.destroyedTime >= 0f
+                    ? agent.destroyedTime.ToString("0.###", CultureInfo.InvariantCulture)
+                    : "";
                 lines[i] = string.Join(",", fields);
                 File.WriteAllLines(path, lines);
                 return;
@@ -724,6 +753,23 @@ public class ArenaRunner : MonoBehaviour
             json.Append(",\"intervalAssert\":\"").Append(
                 Mathf.Abs(mean - spawnInterval) <= 0.001f ? "OK" : "DRIFT").Append('"');
         }
+        if (measuredCount > 0)
+        {
+            // The card wants the sample exactly 15 s after the spawn, with the one
+            // frame tolerance stated: report what the loop actually achieved.
+            float minAge = float.MaxValue, maxAge = 0f, sumAge = 0f;
+            for (int i = 0; i < measured.Count; i++)
+            {
+                float age = measured[i].measuredTime - measured[i].spawnTime;
+                minAge = Mathf.Min(minAge, age);
+                maxAge = Mathf.Max(maxAge, age);
+                sumAge += age;
+            }
+            json.Append(",\"measureAgeMeanSeconds\":").Append(Num(sumAge / measured.Count));
+            json.Append(",\"measureAgeMinSeconds\":").Append(Num(minAge));
+            json.Append(",\"measureAgeMaxSeconds\":").Append(Num(maxAge));
+        }
+        json.Append(",\"measureToleranceSeconds\":").Append(Num(Time.fixedDeltaTime));
         json.Append(",\"aliveCurve\":[").Append(string.Join(",", aliveCurve)).Append(']');
         json.Append(",\"wallPerSimCurve\":[").Append(string.Join(",", wallCurve)).Append(']');
         json.Append(",\"maxRigidbodies\":").Append(maxRigidbodies.ToString(CultureInfo.InvariantCulture));
@@ -763,7 +809,10 @@ public class ArenaRunner : MonoBehaviour
 
         json.Append(",\"best\":");
         ArenaHumanAgent best = BestMeasured();
-        if (best == null)
+        // ReferenceEquals, not ==: a best human that has already been culled is a
+        // destroyed Unity object, and `== null` would be true for it. Its data is
+        // plain fields and is still the best genome of the run.
+        if (ReferenceEquals(best, null))
         {
             json.Append("null");
         }
@@ -802,7 +851,7 @@ public class ArenaRunner : MonoBehaviour
         for (int i = 0; i < eliteCopies.Count - 1; i++)
         {
             ArenaHumanAgent reference = eliteCopies[i];
-            for (int j = 1; j < eliteCopies.Count; j++)
+            for (int j = i + 1; j < eliteCopies.Count; j++)
             {
                 ArenaHumanAgent other = eliteCopies[j];
                 if (!SameGenome(reference.genome, other.genome)) continue;
@@ -870,6 +919,7 @@ public class ArenaRunner : MonoBehaviour
             sb.Append(",\"poolSize\":").Append(a.poolSize.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"parentBestQuartile\":").Append(a.parentInBestQuartile ? "true" : "false");
             sb.Append(",\"measuredT\":").Append(Num(a.measuredTime));
+            sb.Append(",\"ageAtMeasure\":").Append(Num(a.measuredTime - a.spawnTime));
             sb.Append(",\"distance15\":").Append(Jnum(a.distanceAt15));
             sb.Append(",\"upright15\":").Append(a.uprightAt15 ? "true" : "false");
             sb.Append(",\"fallen\":").Append(a.fallen ? "true" : "false");

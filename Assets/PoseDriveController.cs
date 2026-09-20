@@ -11,15 +11,28 @@ using UnityEngine;
 // untouched. BalanceController keeps the whole old path and runs it whenever
 // the switch is off, so rollback is one command-line argument.
 //
-// The balance layer is two loops and no gates:
-//   1. pelvis height above the stand frame -> the stance knee extends to keep it,
-//   2. the capture point -> where the swing foot lands, and when the legs swap.
+// WALK CYCLE 6q: the balance layer is reduced to TWO metre-valued requests and
+// to nothing else -
+//   1. WHERE the next foot lands (the capture point plus the margin, clamped to
+//      the step band), and
+//   2. HOW HIGH the hip is held (the stand frame) -
+// and the POSE LIBRARY (the class at the foot of this file) turns those two
+// requests, the step clock and the pelvis state into EVERY joint angle on both
+// legs. The library is the single writer of the six leg joints; it writes angles
+// through ActuatorMixer and never a torque of its own. THE HANDOVER is written
+// at the call marked `WALK CYCLE 6q HANDOVER` in TickWalk: everything above that
+// line is metres, everything below it is the library's degrees.
 //
-// Poses: standing (quiet, walk key released) and a four key walk cycle
-// (contact, mid stance, push off, swing) keyed to a step clock. The swing leg
-// folds under the body instead of trailing: the ankle target passes under the
-// pelvis at the knee fold angle, so clearance and the fold come from the same
-// geometry the drawing asks for.
+// Poses are DATA, in degrees, inside the joint limits of Human.cs: stance (the
+// pose the walk leaves the ground from), launch (the first push), swing fold
+// (the leg folded under the body, the knee in the drawing's 60..80 deg band),
+// foot place (the knee back under 20 deg before the plant, the foot carried to
+// the placement), plant / load (the foot down and taking the weight). Five
+// poses, blended over the step clock by PoseLibrary.Sample.
+//
+// The path is chosen once per physics step by BalanceController.FixedUpdate and
+// published as `captureWalkPath` (0 = the level 1 path, the capture walker;
+// 1 = this pose library holds the joints), so a row says which path ran.
 public class PoseDriveController : MonoBehaviour
 {
     // ─── switches ──────────────────────────────────────────────────────────
@@ -30,6 +43,10 @@ public class PoseDriveController : MonoBehaviour
     private float swingDuration = 0.35f;
     private float stanceDuration = 0.45f;
     private float swingLiftMeters = 0.22f;
+    // ─── C1 instrumentation (recorder only; the control math never reads it) ───
+    // Set on every SolveLegIk with whether the solve had to clamp, and when.
+    public bool IkSaturated;
+    public int IkSolveTick = -1;
     private float swingLandShare = 0.8f;
     private float heightGainDegPerMeter = 400f;
     // 25 is the value the 40 s stand was verified on (p_ds 09:44, 15 mm drop).
@@ -101,6 +118,16 @@ public class PoseDriveController : MonoBehaviour
     // ─── recorder-facing counters ──────────────────────────────────────────
     public int poseStepCount;
     public float poseHeightError;
+
+    // The torso (lumbar) world tilt target the pose in force owns: written by
+    // TickStand / TickWalk on every physics step, read by the trunk driver. The
+    // walk writes the pose library's own torso target; the stand writes the
+    // verified lumbarTargetTilt, i.e. the stand path is unchanged.
+    private float torsoTargetDeg;
+    // Human.cs writes the ankle's hinge limits as literals at the heel's
+    // ConnectTo call (Human.cs:555) and names no field for them; the pose
+    // library clamps every ankle target to this symmetric pair.
+    private const float AnkleLimitDeg = 45f;
 
     public void Initialize(Human owner, BalanceController controller)
     {
@@ -254,7 +281,7 @@ public class PoseDriveController : MonoBehaviour
             TickStand(tilt, pelvisTilt, pelvisAngVel, pelvisY, pelvisVelY,
                 comX, comVelX, leftDown, rightDown, leftFootY, rightFootY);
         }
-        DriveTrunk(pelvisTilt, pelvisAngVel, tilt, walkKey && walkEnabled);
+        DriveTrunk(pelvisTilt, pelvisAngVel, tilt, walkKey && walkEnabled, torsoTargetDeg);
     }
 
     // ─── stand frame ───────────────────────────────────────────────────────
@@ -294,10 +321,16 @@ public class PoseDriveController : MonoBehaviour
                            bool leftDown, bool rightDown, float leftFootY, float rightFootY)
     {
         float knee = KneeForHeight(pelvisY, pelvisVelY);
+        // The stand path is the law the 40 s stand was verified on and stays as
+        // it is: the pelvis-upright law owns both hips, the CoM loop owns the
+        // ankles (a torque, not an angle), the trunk target is the controller's
+        // own. The pose library drives the WALK; its Stance pose is the pose the
+        // walk leaves the ground from, not a second stand controller.
+        torsoTargetDeg = balance.lumbarTargetTilt;
         // The stand hip carries no angle target: the pelvis upright law below
         // owns both hips, and on planted legs that is also the hip pose.
-        DriveOneLeg(true, float.NaN, knee, false, 0f, 0f, 0f);
-        DriveOneLeg(false, float.NaN, knee, false, 0f, 0f, 0f);
+        DriveOneLeg(true, float.NaN, knee, false, 0f);
+        DriveOneLeg(false, float.NaN, knee, false, 0f);
         DriveHips(pelvisTilt, pelvisAngVel, 0f, true, true, 0f, false);
         DriveAnkleBalance(comX, comVelX, leftDown, rightDown);
         DriveToes(0f, 0f);
@@ -361,49 +394,71 @@ public class PoseDriveController : MonoBehaviour
         float s = Mathf.Clamp01(stepClock / Mathf.Max(0.05f, swingDuration));
         phaseForLog = s;
 
-        // Capture point: where the CoM will be in one pendulum time constant.
-        // That is where the next stance foot belongs; the margin ahead of it is
-        // the stability reserve the plan asks for.
+        // ═══ THE BALANCE LAYER, REDUCED TO TWO METRE-VALUED REQUESTS ═══
+        // 1. WHERE the next foot lands: the capture point (where the CoM will be
+        //    in one pendulum time constant) plus the stability margin the plan
+        //    asks for, clamped to the step band. Metres.
         float pendulum = Mathf.Sqrt(Mathf.Max(0.05f, (pelvisY - groundY) / 9.81f));
         float captureX = comX + comVelX * pendulum;
         float placeX = Mathf.Clamp(captureX + placementMarginMeters,
             stanceFootX + stepMinMeters, stanceFootX + stepMaxMeters);
+        // 2. HOW HIGH the hip is held: the stand frame's own height. Metres.
+        float hipHeightTargetM = standPelvisY - groundY;
+        float hipHeightLiveM = pelvisY - groundY;
 
-        float standAnkle = standAnkleY;
-        // Swing leg: ankle travels from where it left the ground, through the
-        // pass under the pelvis, to the placement. The lift at mid swing is
-        // what makes the knee fold - a high tucked foot is a folded knee. The
-        // foot is down at sLand of the swing and holds the ground after that,
-        // so the support is handed over instead of a flight phase.
-        float air = Mathf.Clamp01(s / swingLandShare);
-        float eased = air * air * (3f - 2f * air);
-        float ankleX = Mathf.Lerp(swingFootX0, placeX, eased);
-        float ankleY = standAnkle + swingLiftMeters * Mathf.Sin(Mathf.PI * air);
-        float swingKnee;
-        float swingHip;
-        SolveLegIk(ankleX, ankleY, pelvisY, pelvisTilt, out swingHip, out swingKnee);
+        // ═══════════════════ WALK CYCLE 6q HANDOVER ═══════════════════════
+        // Above this line: metres, and the two requests are the balance layer's
+        // own decisions. Below it: degrees, and every one of them is the pose
+        // library's. The library is the single writer of the six leg joints on
+        // this step - nothing after this call writes a raw joint angle, and the
+        // pelvis-upright law (DriveHips) is NOT called on the walk: the trunk is
+        // held by the pose's own pelvis target plus the library's bounded hip
+        // correction on the stance leg.
+        PoseLibrary.Inputs poseIn = new PoseLibrary.Inputs();
+        poseIn.swingPhase = s;
+        poseIn.landingShare = swingLandShare;
+        poseIn.footPlaceX = placeX;
+        poseIn.hipHeightM = hipHeightLiveM;
+        poseIn.hipHeightTargetM = hipHeightTargetM;
+        poseIn.pelvisX = pelvisBody != null ? pelvisBody.position.x : 0f;
+        poseIn.pelvisTiltDeg = pelvisTilt;
+        poseIn.pelvisAngVelDeg = pelvisAngVel;
+        poseIn.pelvisVelY = pelvisVelY;
+        poseIn.thighM = human.thighSize.y;
+        poseIn.shinM = human.shinSize.y;
+        // The ankle sits at the centre of the heel plate, so the sole hangs half
+        // a foot below the hinge (Human.cs CreateLeg / pelvisCenterToSole above).
+        poseIn.soleBelowAnkleM = human.footSize.y * 0.5f;
+        poseIn.swingLiftM = swingLiftMeters;
+        poseIn.heightGainDegPerM = heightGainDegPerMeter;
+        poseIn.heightDampDegPerMps = heightDampDegPerMeterPerSecond;
+        poseIn.hipMin = human.hipLimitMin;
+        poseIn.hipMax = human.hipLimitMax;
+        poseIn.kneeMin = human.kneeLimitMin;
+        poseIn.kneeMax = human.kneeLimitMax;
+        poseIn.ankleLimit = AnkleLimitDeg;
+        poseIn.toeMin = human.toeLimitMin;
+        poseIn.toeMax = human.toeLimitMax;
+        PoseLibrary.Targets pose = PoseLibrary.Sample(poseIn);
 
-        float stanceKnee = KneeForHeight(pelvisY, pelvisVelY);
-        float stanceHip = float.NaN;   // the pelvis upright law owns the stance hip
+        // The trunk target this step's pose owns (DriveTrunk reads it).
+        torsoTargetDeg = pose.torsoTiltTargetDeg;
+        // The pose path solves no inverse kinematics - the library holds angles
+        // - so the walker's own IK-saturation witness is false by construction
+        // here; PoseLibrary.ClampLeg bounds every angle to the rig's limits
+        // instead, which is the analogue of the same event.
+        IkSaturated = false;
+        IkSolveTick = Time.frameCount;
 
-        if (swingSign > 0)
-        {
-            DriveOneLeg(true, swingHip, swingKnee, true, ankleX, ankleY, pelvisY);
-            DriveOneLeg(false, stanceHip, stanceKnee, false, 0f, 0f, 0f);
-        }
-        else
-        {
-            DriveOneLeg(false, swingHip, swingKnee, true, ankleX, ankleY, pelvisY);
-            DriveOneLeg(true, stanceHip, stanceKnee, false, 0f, 0f, 0f);
-        }
-
-        // Stance hip stays on the pelvis upright law: the planted thigh follows
-        // the body passing over it, which is what carries the weight forward.
-        // No hip pose hold here: a step IS hip travel past the band.
-        DriveHips(pelvisTilt, pelvisAngVel, 0f, swingSign < 0, swingSign > 0,
-            0f, false);
-        DriveAnkleBalance(comX, comVelX, leftDown, rightDown);
-        DriveToes(swingSign > 0 ? -10f : 0f, swingSign > 0 ? 0f : -10f);
+        // One writer per joint. The library's pair is the SWING leg (the leg in
+        // the air at this phase) and the STANCE leg (the one carrying the
+        // weight); which side that is on the rig is the step clock's business.
+        bool leftIsSwing = swingSign > 0;
+        PoseLibrary.LegPose leftLeg = leftIsSwing ? pose.swingLeg : pose.stanceLeg;
+        PoseLibrary.LegPose rightLeg = leftIsSwing ? pose.stanceLeg : pose.swingLeg;
+        DriveOneLeg(true, leftLeg.hip, leftLeg.knee, true, leftLeg.ankle);
+        DriveOneLeg(false, rightLeg.hip, rightLeg.knee, true, rightLeg.ankle);
+        DriveToes(leftLeg.toe, rightLeg.toe);
 
         // Arms counter the opposite leg: the left arm swings with the right
         // leg, so the shoulder correlation with the same side leg stays below
@@ -419,6 +474,11 @@ public class PoseDriveController : MonoBehaviour
     // Planar two link IK for the swing leg. a = thigh, b = shin, both from the
     // segment sizes, so the anatomy is not hardcoded here. The knee is the
     // vertex and it points forward: theta = phi + alpha, knee flexion = 2*alpha.
+    //
+    // WALK CYCLE 6q: NOT called any more - the pose library holds the joint
+    // angles and solves the placement as an angle offset from a drawn pose, so
+    // the walk no longer runs an inverse kinematics. Kept as the reference the
+    // pose path's angles can be read against (and the rollback's own solver).
     private void SolveLegIk(float ankleX, float ankleY, float pelvisY, float pelvisTilt,
                             out float hipDeg, out float kneeDeg)
     {
@@ -433,6 +493,13 @@ public class PoseDriveController : MonoBehaviour
         float reach = Mathf.Sqrt(dx * dx + dy * dy);
         float maxReach = (a + b) * 0.995f;
         float length = Mathf.Clamp(reach, (a + b) * 0.45f, maxReach);
+        // C1 witness (recorder only, read by nothing in this file): the solve had
+        // to clamp. `dy` clamped means the ankle target sat above the hip's
+        // 0.12 m floor - once the pelvis sinks, that is the frozen near-127 deg
+        // knee target and the degenerating hip angle the walk report measured.
+        // `length` clamped means the target was out of reach altogether.
+        IkSaturated = ((ankleY - hipY) > -0.12f) || Mathf.Abs(length - reach) > 1e-4f;
+        IkSolveTick = Time.frameCount;
         float alpha = Mathf.Acos(Mathf.Clamp(length / (a + b), 0f, 1f));
         float phi = Mathf.Atan2(dx, Mathf.Max(0.01f, -dy));
         float thighWorld = phi + alpha;
@@ -442,8 +509,12 @@ public class PoseDriveController : MonoBehaviour
         hipDeg = pelvisTilt - thighWorld * Mathf.Rad2Deg;
     }
 
-    private void DriveOneLeg(bool left, float hipDeg, float kneeDeg, bool swing,
-                             float ankleX, float ankleY, float pelvisY)
+    // One leg, one writer. hipDeg NaN means "no hip angle target" (the quiet
+    // stand: the pelvis-upright law owns the hip there). driveAnkle false means
+    // the ankle is driven as a torque by the balance loop instead of being held
+    // at an angle.
+    private void DriveOneLeg(bool left, float hipDeg, float kneeDeg,
+                             bool driveAnkle, float ankleDeg)
     {
         HingeJoint2D hip = left ? leftHipJoint : rightHipJoint;
         Muscle hipFlexor = left ? balance.leftHipFlexor : balance.rightHipFlexor;
@@ -460,21 +531,20 @@ public class PoseDriveController : MonoBehaviour
         DriveJoint(knee, kneeDeg, balance.kneePGain, balance.kneeDGain,
             balance.errorReferenceDegrees, kneeFlexor, kneeExtensor, ref kneeInertia);
 
-        // Airborne ankle keeps a flat foot: the fold, not the ankle, is what
-        // lifts the sole. A swing ankle driven to zero would point the toe down
-        // on the fold and scrape the ground at lift off.
-        if (swing)
+        // The ankle is a pose joint on the walk: the library's own number (plus
+        // = toe down / heel rise, minus = toe up for clearance). The PD is the
+        // same pair the airborne swing ankle was always held with, so no gain is
+        // retuned and none is added. On the stand the ankle stays a torque loop
+        // and this branch is not entered.
+        if (driveAnkle)
         {
             HingeJoint2D ankle = left ? leftAnkleJoint : rightAnkleJoint;
             Muscle ankleFlexor = left ? balance.leftAnkleFlexor : balance.rightAnkleFlexor;
             Muscle ankleExtensor = left ? balance.leftAnkleExtensor : balance.rightAnkleExtensor;
             ref float ankleInertia = ref (left ? ref leftAnkleInertia : ref rightAnkleInertia);
-            DriveJoint(ankle, 0f, balance.kneePGain, balance.kneeDGain,
+            DriveJoint(ankle, ankleDeg, balance.kneePGain, balance.kneeDGain,
                 balance.errorReferenceDegrees, ankleFlexor, ankleExtensor, ref ankleInertia);
         }
-        // ankleX / ankleY / pelvisY stay in the signature: the swing placement
-        // is solved in TickWalk, and a later cycle needs them for the heel
-        // strike angle. They are intentionally unused here.
     }
 
     // ─── shared joint drives ───────────────────────────────────────────────
@@ -588,13 +658,16 @@ public class PoseDriveController : MonoBehaviour
 
     // Chest, neck and head to world vertical. Same law as the old path: the
     // joint sits on the segment, so plus P and D enter as minus P and minus D.
-    private void DriveTrunk(float pelvisTilt, float pelvisAngVel, float tilt, bool walking)
+    // torsoTargetDeg is the world tilt target the pose in force owns (the walk:
+    // the pose library's own; the stand: lumbarTargetTilt, as before).
+    private void DriveTrunk(float pelvisTilt, float pelvisAngVel, float tilt,
+                            bool walking, float torsoTargetDeg)
     {
         if (vestibular == null) return;
         bool posture = walking || balance.standLegLevel < 0.5f;
         if (posture)
         {
-            float lumbarError = Mathf.DeltaAngle(tilt, balance.lumbarTargetTilt)
+            float lumbarError = Mathf.DeltaAngle(tilt, torsoTargetDeg)
                 / Mathf.Max(1f, balance.lumbarErrorReferenceDegrees);
             float lumbarSpeed = vestibular.GetBodyAngularVelocity()
                 / Mathf.Max(1f, balance.speedReferenceDegPerSec);
@@ -675,5 +748,400 @@ public class PoseDriveController : MonoBehaviour
         if (index < 0 || index + 1 >= args.Length) return fallback;
         return float.TryParse(args[index + 1], NumberStyles.Float,
             CultureInfo.InvariantCulture, out float value) ? value : fallback;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEVEL 2 POSE LIBRARY (walk cycle 6q) — the walk's shapes as DATA, in degrees.
+//
+// Conventions are the rig's own (Assets/Human.cs, CreateLeg):
+//   hip    minus = flexion, the thigh forward                 limits -90 .. +45
+//   knee   0 = straight, plus = flexion                        limits   0 .. +120
+//   ankle  jointAngle = heel - toe: plus = toe down / heel rise
+//          (plantarflexion), minus = toe up (dorsiflexion)          -45 .. +45
+//   toe    MTP: minus = toe up (swing clearance), plus = toe down     -35 .. +50
+//   trunk  pelvisTiltDeg / torsoTiltDeg = world tilt targets, minus = forward
+//          (the recorder's pelvisTilt sign, VestibularSystem.GetPelvisTilt)
+// The ankle pair is the literal pair of the heel.ConnectTo call (Human.cs:555);
+// Human.cs names no field for it, so the limit travels in Inputs.ankleLimit.
+//
+// Every number in the table is inside those limits - the widest is the swing
+// fold's hip -30 against the -90 stop - and ActuatorMixer.JointStable clamps
+// every target to the LIVE joint limits a second time, so a mistyped pose can
+// never drive a joint onto a stop. ClampLeg below re-clamps in the library for
+// the same reason.
+//
+// A POSE owns both legs' hip / knee / ankle / toe in degrees, the pelvis tilt
+// target and the torso (lumbar) tilt target. The step clock picks the pose pair
+// and blends between the keys (Blend):
+//   stance      0.00  the pose the walk leaves the ground from (hipBaseAngle /
+//                     kneeBaseAngle: the pose the verified quiet stand holds)
+//   launch      0.12  the first push: the stance leg extends and rolls onto the
+//                     toe, the swing knee starts to fold
+//   swing fold  0.35  the leg folded under the body (Yury 18.09 "Swing leg must
+//                     fold": knee 60..80 deg, the foot passes under the pelvis)
+//   foot place  the swing's landing share (0.80): the knee back under 20 deg
+//                     before the plant, the foot carried to the placement
+//   plant/load  1.00  the foot is down and takes the load, the rear leg pushes
+//
+// THE LAW (Sample): the balance layer hands over two requests it owns, both in
+// METRES - where the foot lands and how high the hip is held - plus the pelvis
+// state. This class returns every joint angle, with three terms on top of the
+// drawn pose:
+//   1. the clearance request (-poseLift, m, measured at the SOLE) may only RAISE
+//      the drawn fold, and the drawing's 60..80 deg band caps the knee it may
+//      ask for;
+//   2. the placement: the error between where the drawn pose would put the foot
+//      and where the balance layer says it belongs becomes a swing HIP angle -
+//      1 deg of hip moves the ankle by the pose's own hip-to-ankle drop, so the
+//      gain is a property of the pose, not a tuned number;
+//   3. the hip height: the same loop the quiet stand is verified on (gain, damp
+//      and the pelvis vertical rate - the constants come from the controller and
+//      are NOT retuned here), trimmed onto the knee and bounded to
+//      HeightTrimBandDeg, so the request can never rewrite the pose;
+//   4. the trunk hold: the pelvis tilt error and rate against the pose's own
+//      pelvis target become a HIP ANGLE on the stance leg - the leg that can
+//      move the trunk - with the signs of the verified pelvis law (a positive
+//      hip angle is extensor work, the correction for a back-tipped pelvis),
+//      bounded to TrunkBandDeg.
+// Nothing here reads a torque, a gain or an actuator: it is a function from
+// metres and degrees to degrees.
+public static class PoseLibrary
+{
+    // One leg's pose. All four in degrees, joint conventions above.
+    public struct LegPose
+    {
+        public float hip;
+        public float knee;
+        public float ankle;
+        public float toe;
+    }
+
+    // One named pose: the leg in the air, the leg carrying the weight, and the
+    // trunk targets the same pose owns.
+    public struct Pose
+    {
+        public string name;
+        public LegPose swing;
+        public LegPose stance;
+        public float pelvisTiltDeg;
+        public float torsoTiltDeg;
+    }
+
+    // Everything the library is given. The two metre-valued entries are the
+    // balance layer's own decisions; everything else is a measurement or a rig
+    // constant, and nothing here is a gain the library tunes.
+    public struct Inputs
+    {
+        public float swingPhase;         // 0..1 of the swing: stepClock/swingDuration
+        public float landingShare;       // the swing share at which the foot is down
+        public float footPlaceX;         // BALANCE LAYER: where the next foot lands, m
+        public float hipHeightM;         // live pelvis height above the ground, m
+        public float hipHeightTargetM;   // BALANCE LAYER: the height it holds, m
+        public float pelvisX;            // pelvis X (the pose is hip-relative), m
+        public float pelvisTiltDeg;      // measured pelvis world tilt, minus = forward
+        public float pelvisAngVelDeg;    // pelvis rate, same sign as the tilt, deg/s
+        public float pelvisVelY;         // pelvis vertical rate, plus = rising, m/s
+        public float thighM;             // segment lengths, m
+        public float shinM;
+        public float soleBelowAnkleM;    // ankle hinge height above the sole, m
+                                         //   (Human.cs: the ankle sits at the
+                                         //   centre of the heel plate, so the
+                                         //   sole is half a foot below it)
+        public float swingLiftM;         // the SOLE clearance the swing foot is
+                                         //   asked for, m (-poseLift)
+        public float heightGainDegPerM;  // the stand's verified height pair, as it is
+        public float heightDampDegPerMps;
+        public float hipMin, hipMax;     // Human.cs limits (pose clamp + the table's
+        public float kneeMin, kneeMax;   // own audit), degrees
+        public float ankleLimit;         // symmetric ankle pair, Human.cs:555
+        public float toeMin, toeMax;
+    }
+
+    // Every joint angle of the step, plus the trunk targets the same pose owns.
+    // The witnesses (poseIndex .. trunkCorrDeg) are recorded, never read back.
+    public struct Targets
+    {
+        public LegPose swingLeg;
+        public LegPose stanceLeg;
+        public float pelvisTiltTargetDeg;
+        public float torsoTiltTargetDeg;
+        public int poseIndex;
+        public string poseName;
+        public float nominalAnkleXM;
+        public float clearanceM;
+        public float placementErrorM;
+        public float placementDeg;
+        public float heightTrimDeg;
+        public float trunkCorrDeg;
+    }
+
+    // ─── step-clock keys (landing key = Inputs.landingShare) ───────────────
+    public const float LaunchKey = 0.12f;
+    public const float FoldKey = 0.35f;
+
+    // ─── the law's own constants ───────────────────────────────────────────
+    // The swing fold's band, from the drawing (Yury 18.09, "Swing leg must
+    // fold": the knee bends 60 to 80 deg while the foot is off the ground).
+    public const float FoldKneeMinDeg = 60f;
+    public const float FoldKneeMaxDeg = 80f;
+    // The trunk hold: how much hip angle answers one degree of pelvis tilt
+    // error, and how much answers one deg/s of pelvis rate. First-pass numbers
+    // of the pose path (this cycle measures the off state only); they are the
+    // angle form of pelvisPGain 2.0 / pelvisDGain 0.3, bounded to TrunkBandDeg
+    // so a tipped body cannot rewrite the pose.
+    public const float TrunkGainDegPerDeg = 0.6f;
+    public const float TrunkDampDegPerDegPerSec = 0.02f;
+    public const float TrunkBandDeg = 12f;
+    // The hip-height request's own bound (the height pair itself - gain, damp -
+    // is the controller's verified stand pair and is passed in, not retuned).
+    public const float HeightTrimBandDeg = 12f;
+
+    // ─── the five poses ────────────────────────────────────────────────────
+    // stance: the quiet stand pose the walk starts from - hipBaseAngle -3 /
+    //   kneeBaseAngle 6 of BalanceController, i.e. the pose the verified quiet
+    //   stance holds, both legs equal.
+    public static readonly Pose Stance = Make("stance",
+        Leg(-3f, 6f, 0f, 0f), Leg(-3f, 6f, 0f, 0f), 0f, 0f);
+
+    // launch (the first push): the stance leg extends (-3 -> +6 hip) and rolls
+    //   onto the toe (+14 ankle, +10 toe), the swing knee folds from 6 to 28 as
+    //   the foot leaves, the toe lifts for clearance (toe -12).
+    public static readonly Pose Launch = Make("launch",
+        Leg(-16f, 28f, -6f, -12f), Leg(6f, 8f, 14f, 10f), -2f, -1f);
+
+    // swing fold: the leg folded under the body - the drawing's band, knee 68
+    //   (60..80), the thigh 30 deg forward of the pelvis, the toe up. The stance
+    //   leg is nearly straight (knee 10) with the body passing over it.
+    public static readonly Pose SwingFold = Make("swingfold",
+        Leg(-30f, 68f, -10f, -14f), Leg(-6f, 10f, 4f, 2f), 0f, 0f);
+
+    // foot place: the knee is back under 20 deg before the plant and the thigh
+    //   carries the leg forward to the placement; the stance leg has begun to
+    //   roll onto the toe for the push that follows.
+    public static readonly Pose FootPlace = Make("footplace",
+        Leg(-22f, 20f, -8f, -6f), Leg(2f, 12f, 8f, 6f), 0f, 0f);
+
+    // plant / load: the just-landed leg takes the weight - the knee softens to
+    //   24 (the load is absorbed, then the leg stands him up) - and the rear
+    //   leg is at its push-off pose. The `swing` leg is the FRONT leg here: it
+    //   landed at the previous key and the roles swap at the next step clock.
+    public static readonly Pose PlantLoad = Make("plantload",
+        Leg(-16f, 24f, -2f, 0f), Leg(10f, 10f, 16f, 12f), -1f, 0f);
+
+    // Keyed in clock order: Stance 0.00, Launch 0.12, SwingFold 0.35, FootPlace
+    // at the landing share, PlantLoad 1.00.
+    public static readonly Pose[] WalkCycle = { Stance, Launch, SwingFold, FootPlace, PlantLoad };
+    public static int PoseCount { get { return WalkCycle.Length; } }
+    public static string PoseName(int index)
+    {
+        return index >= 0 && index < WalkCycle.Length ? WalkCycle[index].name : "";
+    }
+
+    private static LegPose Leg(float hip, float knee, float ankle, float toe)
+    {
+        LegPose l;
+        l.hip = hip;
+        l.knee = knee;
+        l.ankle = ankle;
+        l.toe = toe;
+        return l;
+    }
+
+    private static Pose Make(string name, LegPose swing, LegPose stance,
+                             float pelvisDeg, float torsoDeg)
+    {
+        Pose p;
+        p.name = name;
+        p.swing = swing;
+        p.stance = stance;
+        p.pelvisTiltDeg = pelvisDeg;
+        p.torsoTiltDeg = torsoDeg;
+        return p;
+    }
+
+    // ─── the clock: which pose, and how much of it ─────────────────────────
+    public static Pose Blend(float phase, float landingShare)
+    {
+        float land = Mathf.Clamp(landingShare, FoldKey + 0.05f, 0.98f);
+        if (phase <= LaunchKey)
+            return Mix(Stance, Launch, phase / LaunchKey);
+        if (phase <= FoldKey)
+            return Mix(Launch, SwingFold, (phase - LaunchKey) / (FoldKey - LaunchKey));
+        if (phase <= land)
+            return Mix(SwingFold, FootPlace, (phase - FoldKey) / (land - FoldKey));
+        return Mix(FootPlace, PlantLoad, Mathf.Clamp01((phase - land) / (1f - land)));
+    }
+
+    private static Pose Mix(Pose a, Pose b, float t)
+    {
+        t = Mathf.Clamp01(t);
+        t = t * t * (3f - 2f * t);           // smoothstep: no step change at a key
+        Pose p;
+        p.name = t < 0.5f ? a.name : b.name;
+        p.swing = MixLeg(a.swing, b.swing, t);
+        p.stance = MixLeg(a.stance, b.stance, t);
+        p.pelvisTiltDeg = Mathf.Lerp(a.pelvisTiltDeg, b.pelvisTiltDeg, t);
+        p.torsoTiltDeg = Mathf.Lerp(a.torsoTiltDeg, b.torsoTiltDeg, t);
+        return p;
+    }
+
+    private static LegPose MixLeg(LegPose a, LegPose b, float t)
+    {
+        LegPose l;
+        l.hip = Mathf.Lerp(a.hip, b.hip, t);
+        l.knee = Mathf.Lerp(a.knee, b.knee, t);
+        l.ankle = Mathf.Lerp(a.ankle, b.ankle, t);
+        l.toe = Mathf.Lerp(a.toe, b.toe, t);
+        return l;
+    }
+
+    private static int NearestKey(float phase, float land)
+    {
+        // No array and no allocation: this runs once per physics step of a pose
+        // walk, and the project's perf rule is no per-step garbage.
+        int best = 0;
+        float bestGap = Mathf.Abs(phase);
+        float gap = Mathf.Abs(phase - LaunchKey);
+        if (gap < bestGap) { bestGap = gap; best = 1; }
+        gap = Mathf.Abs(phase - FoldKey);
+        if (gap < bestGap) { bestGap = gap; best = 2; }
+        gap = Mathf.Abs(phase - land);
+        if (gap < bestGap) { bestGap = gap; best = 3; }
+        gap = Mathf.Abs(phase - 1f);
+        if (gap < bestGap) { best = 4; }
+        return best;
+    }
+
+    // ─── the law ───────────────────────────────────────────────────────────
+    public static Targets Sample(Inputs x)
+    {
+        Targets t = new Targets();
+        Pose p = Blend(x.swingPhase, x.landingShare);
+        float thigh = Mathf.Max(0.05f, x.thighM);
+        float shin = Mathf.Max(0.05f, x.shinM);
+        float land = Mathf.Clamp(x.landingShare, FoldKey + 0.05f, 0.98f);
+
+        // The drawn pose, hip-relative. thighWorld / shinWorld are world angles
+        // from vertical with forward plus; the hip's own joint angle is minus
+        // flexion and the knee folds the shin back off the thigh, so
+        // shinWorld = thighWorld - knee.
+        float thighWorld = -p.swing.hip;
+        float shinWorld = thighWorld - p.swing.knee;
+        float thighRad = thighWorld * Mathf.Deg2Rad;
+        float shinRad = shinWorld * Mathf.Deg2Rad;
+        t.nominalAnkleXM = thigh * Mathf.Sin(thighRad) + shin * Mathf.Sin(shinRad);
+        float drop = thigh * Mathf.Cos(thighRad) + shin * Mathf.Cos(shinRad);
+        // The clearance the drawn swing pose gives: the SOLE's height above the
+        // ground while the hip is held at the height the balance layer asks for
+        // (the ankle hinge sits `soleBelowAnkleM` above the sole).
+        t.clearanceM = x.hipHeightM - drop - x.soleBelowAnkleM;
+
+        // 1. the clearance request (-poseLift, m, the SOLE's clearance). It may
+        //    only RAISE the drawn fold, and the drawing's band caps the knee it
+        //    may ask for.
+        float swingKnee = p.swing.knee;
+        if (x.swingLiftM > 0.001f)
+        {
+            float asked = KneeForDrop(
+                x.hipHeightM - x.soleBelowAnkleM - x.swingLiftM, thighWorld,
+                thigh, shin, p.swing.knee);
+            asked = Mathf.Clamp(asked, FoldKneeMinDeg, FoldKneeMaxDeg);
+            float weight = FoldWeight(x.swingPhase, land);
+            if (asked > swingKnee)
+                swingKnee += (asked - swingKnee) * weight;
+        }
+
+        // 2. the placement: the balance layer's foot position against the pose's
+        //    own. 1 deg of hip moves the ankle by the pose's hip-to-ankle drop,
+        //    so the gain is the pose's own geometry.
+        t.placementErrorM = x.footPlaceX - (x.pelvisX + t.nominalAnkleXM);
+        float placeWeight = SmoothWindow(x.swingPhase, FoldKey, land);
+        float placeGain = Mathf.Rad2Deg / Mathf.Max(0.05f, drop);
+        t.placementDeg = -placeGain * t.placementErrorM * placeWeight;
+
+        // 3. the hip height the balance layer holds: the verified stand loop's
+        //    own pair, trimmed onto the knee and bounded. The stance leg holds
+        //    the height outright; the swing leg is trimmed by the same request as
+        //    it comes down, so the foot meets the ground instead of hanging.
+        float heightErrorM = x.hipHeightTargetM - x.hipHeightM;   // plus = the hip is low
+        float trim = -(x.heightGainDegPerM * heightErrorM
+                       + x.heightDampDegPerMps * x.pelvisVelY);
+        t.heightTrimDeg = Mathf.Clamp(trim, -HeightTrimBandDeg, HeightTrimBandDeg);
+        float swingHeightWeight = SmoothWindow(x.swingPhase, FoldKey, land);
+
+        // 4. the trunk hold against the pose's own pelvis target. Same signs as
+        //    the verified pelvis law: a positive hip angle is extensor work, and
+        //    a pelvis that has gone forward of its target (error positive) is
+        //    answered by extension.
+        float pelvisErrorDeg = Mathf.DeltaAngle(x.pelvisTiltDeg, p.pelvisTiltDeg);
+        t.trunkCorrDeg = Mathf.Clamp(
+            TrunkGainDegPerDeg * pelvisErrorDeg
+            - TrunkDampDegPerDegPerSec * x.pelvisAngVelDeg,
+            -TrunkBandDeg, TrunkBandDeg);
+
+        // The six joints. One owner: the library.
+        t.swingLeg = p.swing;
+        t.swingLeg.hip += t.placementDeg;
+        t.swingLeg.knee = swingKnee + t.heightTrimDeg * swingHeightWeight;
+        t.stanceLeg = p.stance;
+        t.stanceLeg.hip += t.trunkCorrDeg;
+        t.stanceLeg.knee += t.heightTrimDeg;
+        t.pelvisTiltTargetDeg = p.pelvisTiltDeg;
+        t.torsoTiltTargetDeg = p.torsoTiltDeg;
+        t.poseIndex = NearestKey(x.swingPhase, land);
+        t.poseName = PoseName(t.poseIndex);
+        t.swingLeg = ClampLeg(t.swingLeg, x);
+        t.stanceLeg = ClampLeg(t.stanceLeg, x);
+        return t;
+    }
+
+    // The knee flexion at which the hip-to-ankle drop is `dropM` with the thigh
+    // held at `thighWorldDeg` - the chain's own law
+    //   drop = thigh*cos(tw) + shin*cos(tw - knee)
+    // inverted. Cosine is even, so a drop has two knees: a nearly straight leg
+    // and a folded one. `branchKneeDeg` (the drawn pose's own knee) picks the
+    // branch, so a fold stays a fold and an extended leg stays extended.
+    private static float KneeForDrop(float dropM, float thighWorldDeg, float thigh,
+                                     float shin, float branchKneeDeg)
+    {
+        float tw = thighWorldDeg * Mathf.Deg2Rad;
+        float c = Mathf.Clamp((dropM - thigh * Mathf.Cos(tw)) / Mathf.Max(0.01f, shin),
+            -1f, 1f);
+        float shinWorld = Mathf.Acos(c) * Mathf.Rad2Deg;
+        float folded = thighWorldDeg + shinWorld;
+        float straight = thighWorldDeg - shinWorld;
+        return branchKneeDeg > (folded + straight) * 0.5f ? folded : straight;
+    }
+
+    // How much of the fold the clock is at: 0 at the launch key, 1 at the fold
+    // key, back to 0 at the landing.
+    private static float FoldWeight(float phase, float land)
+    {
+        if (phase <= FoldKey)
+        {
+            float u = Mathf.Clamp01((phase - LaunchKey) / (FoldKey - LaunchKey));
+            return u * u * (3f - 2f * u);
+        }
+        float v = Mathf.Clamp01((phase - FoldKey) / Mathf.Max(0.05f, land - FoldKey));
+        return 1f - v * v * (3f - 2f * v);
+    }
+
+    private static float SmoothWindow(float phase, float from, float to)
+    {
+        float u = Mathf.Clamp01((phase - from) / Mathf.Max(0.05f, to - from));
+        return u * u * (3f - 2f * u);
+    }
+
+    // The library's own last word on a pose: every angle inside the rig's own
+    // limits, so a pose is reachable by construction even before
+    // ActuatorMixer.JointStable clamps the target to the live joint limits.
+    private static LegPose ClampLeg(LegPose l, Inputs x)
+    {
+        l.hip = Mathf.Clamp(l.hip, x.hipMin, x.hipMax);
+        l.knee = Mathf.Clamp(l.knee, x.kneeMin, x.kneeMax);
+        l.ankle = Mathf.Clamp(l.ankle, -x.ankleLimit, x.ankleLimit);
+        l.toe = Mathf.Clamp(l.toe, x.toeMin, x.toeMax);
+        return l;
     }
 }

@@ -46,9 +46,20 @@ saturation) is a SEPARATE experiment, not this search.
 - Alive cap: about 60 (30 s / 0.5 s). At 30 s the oldest is destroyed and its body count
   released. The alive count must oscillate, never grow.
 
-## Number on the head
-Digits above the head, unique per human, readable at 1x in a frame, no collider, no
-rigidbody, no effect on physics. Verify by looking at a frame, not by code reading.
+## Number INSIDE the head (Yury's second correction, 18.09)
+
+The label is drawn INSIDE the head sprite, centred on the head segment - not floating above it.
+- Position: centred on the head segment centre; the old `numberHeightMeters = 0.34` above-the-head
+  offset is removed.
+- Size: digit height <= 60% of the head's visible height so the glyphs fit inside the outline.
+- Contrast: readable against the head's own fill in a 1080p frame - opposite luminance, plus a thin
+  outline/halo if the fill varies.
+- No collider, no rigidbody, no physics influence, and scale-independent: digits must be the same
+  size on every human regardless of segment scale.
+- Must stay readable at 1x when humans overlap in a pile; if the digits become unreadable in a pile,
+  say so instead of claiming readability.
+- Acceptance: a 1080p frame from the run where the heads of at least three different humans are
+  readable with their own numbers, attached to the report.
 
 ## Measurement (15 s)
 - Distance = current x minus that human's own spawn x, in metres, sampled exactly 15 s
@@ -125,3 +136,70 @@ Yury: "the mutations must run all the time; that is the criterion of evolution".
   spawned with a deliberately identical genome so the no-human-collision layer can be proven
   (same genome, same spawn point, different age => same distance and early trajectory). This
   is a calibration pair, not the breeding scheme.
+
+
+## WIDE genome - Yury's requirement 18.09: "almost every parameter that can influence walking"
+
+The first build sampled 13 continuum parameters; the wide set below lists 155 that exist in the human stack.
+Verified spread of that first build (run arena1e_sweep_s31): 149 distinct genomes out of
+181 humans, every parameter spanning its full declared range - so VALUES are varied, but the
+SCOPE was narrow. Widen it to the groups below.
+
+### C - control layer (continuum, sampled every spawn)
+- C1 pose drive (PoseDriveController): the 13 already sampled + standCaptureSeconds, standTiltLimitDeg
+- C2 capture walk (BalanceControllerCaptureWalk): capture* continuum only, NOT the *First flags:
+  captureStepDuration, captureSwingXShare, captureTargetSpeed, captureRunSpeedScale, captureSpeedGain,
+  captureLookahead, captureStepMin, captureStepMax, captureSwingApex, captureReachMargin, captureStepBackMax,
+  captureFootLandLift, captureFootPress, captureFootPitchDeg, captureDoubleSupportMin, captureDoubleSupportMax,
+  captureDoubleSupportShare, captureTouchdownBlendSeconds, captureDoubleSupportHoldSeconds, captureLandKneeFlex,
+  captureStanceLegLength, captureLandLegLength, captureEntryRampSeconds, captureLegPushCap,
+  captureSupportKneeExtendRate, captureStanceHipTorqueCap, captureStanceHipTorqueCapForward,
+  captureTrunkLeanDeg, capturePelvisLeanDeg, captureCopLead, captureCopScale, captureCopTravelBias,
+  captureLaunchSeconds, captureLaunchAnkleCap, captureLaunchSpeed, captureLaunchLead, captureCatchPast,
+  captureRecoveryMargin
+- C3 walk lift (BalanceControllerWalkLift): walkLiftKneeFlex, walkLiftClearHeight, walkLiftStepLength,
+  walkLiftStepMax, walkLiftAdvanceSeconds, walkLiftHipRateDeg, walkLiftCoupleHipShare, walkLiftCoupleAnkleShare,
+  walkLiftCoupleHipMax, walkLiftReactionCap, walkLiftArmGain, walkLiftClearance, walkLiftStancePdScale,
+  walkLiftUnloadSeconds, walkLiftClearSeconds, walkLiftRestoreSeconds, walkLiftLoadRatio, walkLiftIdleSeconds,
+  walkLiftAbortDrop, walkLiftAbortTilt
+- C4 step phase / gating (StepPhaseDriver): stanceComTrigger, stanceComMinAge, stanceComTriggerPerSpeed,
+  stanceHeelStrikeMinAge, stanceHeelAirMin, walkCadenceStanceGain, walkCadenceMinStance, walkTiltAbortDeg,
+  walkTiltRecoverDeg, fallComLeadTrigger, fallPelvisLean, fallForwardLeanScale, reachKneeFlex, reachKneeLandDeg,
+  reachExtendStart, catchKneeFlex, catchMinDuration, catchMaxDuration, catchFootLead, catchFootLeadMin,
+  catchLeadCaptureMargin, catchComLead, fallKneeRampSeconds
+- C5 arm drive (ArmDrive): walkShoulderSwing, walkElbowMid, walkElbowAmp, walkRampSeconds, walkHipSpeedDegPerSec,
+  walkPGainScale, walkDriveSlewPerSecond, walkHoldSeconds, crossWeight, ipsWeight, hipStatsTau, minHipVarianceDeg2
+- C6 balance loop (BalanceController): comProportionalGain, comDerivativeGain, maxBalanceSignal, hipBalanceGain,
+  hipBaseAngle, kneeBaseAngle, kneeRecoveryFlex, comOffsetReference, comVelocityReference, tiltSpeedReference,
+  swingHipFlex, swingKneeFlex, swingKneeGroundedFraction, swingHipUnloadBias, forwardSwingHipUnloadScale,
+  forwardSwingKneeGroundScale, backSwingHipUnloadScale, backSwingKneeGroundScale
+
+### B - body layer (also sampled, logged as group B so we can tell strength from control)
+- B1 muscle ceilings (Human): hipMuscleTorque, kneeMuscleTorque, ankleExtensorTorque, ankleFlexorTorque,
+  toeMuscleTorque, lumbarMuscleTorque, shoulderMuscleTorque, elbowMuscleTorque
+- B2 actuator (ActuatorMixer): activationSpeed, speedReference
+- B3 contact (Human): footFriction, handFriction, hipFriction, kneeFriction, ankleFriction, toeFriction
+- B4 geometry/mass (Human): totalMass, muscleMultiplier, frictionMultiplier, footHeelShare, ankleHeelOffset,
+  hipHalfSpacing, shoulderHalfSpacing, hipLimitMin, hipLimitMax, kneeLimitMin, kneeLimitMax, toeLimitMin, toeLimitMax
+
+### Ranges and rules
+- Gains and ceilings: 0.25x to 4x the shipped default, clamped to physically sane values (torque > 0).
+- Timings and durations: 0.5x to 2x default. Lengths/margins: 0.5x to 2x default, never negative.
+- Frictions: 0.25x to 4x default. Masses/multipliers: 0.7x to 1.4x default (no super-heavy bodies).
+- Limits: keep ordered (min < max) and inside the shipped hardware limits; enforce by construction.
+- HARD invariants: stepMaxMeters >= stepMinMeters, hipLimitMin < hipLimitMax, every torque > 0,
+  every duration > 0. Violations are repaired at sample time, and the repair is logged.
+- Bounds must be handled by REFLECTION, not clamping: in the 13-parameter build 26.5% of
+  heightDampDegPerMeterPerSecond and 23.8% of ankleBalanceD sat exactly on a bound, which wastes samples.
+- Every sampled parameter is written as its own column in arena-param-log.csv (same schema, wide header),
+  plus a group tag so the influence analysis can aggregate per layer.
+
+### Excluded on purpose (do not randomise)
+- The hundreds of 0/1 `*First` toggles in BalanceController.cs from earlier patch work: randomising
+  toggles is noise, not search. They must be inventoried and de-duplicated separately (tech-debt task).
+- Ground/gravity and the fixed timestep: changing them changes the world, not the walker.
+
+### Budget
+A ~155-dimension space needs more samples than 151 per 75 s: run the sweep 5-10 minutes
+(600-1200 humans), first phase pure random (fresh 100%) to map the space, then evolution.
+Report max alive, wall per sim second, and distinct-genome count so thin sampling is visible.

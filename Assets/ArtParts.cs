@@ -6,10 +6,13 @@ using UnityEngine;
 // is never taken from localScale (project rule), and nothing here touches a
 // Rigidbody2D, a collider, a joint or a mass: it is a SpriteRenderer redraw.
 //
-// A part thinner than one tile keeps Sliced draw mode, i.e. the tile is shown
-// cropped to that part's box. That is the rectangle-equals-collider contract,
-// not a missing texture: a missing texture is ArtLibrary.Albedo(key) == null and
-// must be drawn as a labelled ArtMissing tile by the caller.
+// A MATERIAL (bark, leaf) is a repeated surface: it keeps its authored world
+// period and is always drawn Tiled, so a part smaller than one tile shows a
+// CROP of the canvas at the canvas' own scale (ART-0 22nd pass). A PAINTED part
+// (one canvas per bone) is drawn Sliced onto its box. That is the
+// rectangle-equals-collider contract, not a missing texture: a missing texture
+// is ArtLibrary.Albedo(key) == null and must be drawn as a labelled ArtMissing
+// tile by the caller.
 public static class ArtParts
 {
     public const float BarkTileMeters = 0.5f;
@@ -349,7 +352,19 @@ public static class ArtParts
         // size there) makes that factor exactly 1: nothing about the part moves, and
         // `sprite` / `size` / `color` are the only things the dress writes.
         // Evidence: Art1Check.ScaleAudit sequence B, gate assertion on every log.
-        if (box.x > tile + 0.0001f || box.y > tile + 0.0001f)
+        // ART-0 22nd pass: the draw mode follows the ROLE, not only the size.
+        // A MATERIAL (tileMeters > 0) is a repeated surface and keeps its authored world
+        // period, so it is Tiled even when the part is SMALLER than one tile: Tiled crops
+        // the canvas at the canvas' own scale, while Sliced stretches the whole canvas onto
+        // the rect. Chosen by size alone (the 21st pass' branch), a part smaller than the
+        // period took a whole 0.50 m bark/leaf sample squeezed into its own box - the grain
+        // at 1/5 of its authored scale on a 0.10 x 0.30 m limb, and on the leaf tile the
+        // LEAVES themselves at 1/4, so one tree carried two bark scales and its small pads
+        // carried miniature foliage.
+        // A PAINTED part (tileMeters == 0: Human/head, Flower/petal, Campfire/log_a) has
+        // one canvas drawn in its own box's aspect, so Sliced maps it onto the box exactly.
+        bool material = tileMeters > 0.01f;
+        if (material || box.x > tile + 0.0001f || box.y > tile + 0.0001f)
         {
             sr.drawMode = SpriteDrawMode.Tiled;
             sr.tileMode = SpriteTileMode.Continuous;

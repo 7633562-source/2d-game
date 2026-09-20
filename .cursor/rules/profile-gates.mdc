@@ -1,0 +1,36 @@
+---
+description: Which agent profile may run, and the approval gate for the expensive one.
+alwaysApply: true
+---
+
+# Profile gates (set by Yury, 18.09.2026)
+
+## h_2dgame_opus - EXPENSIVE, starts only on Yury's explicit approval
+
+- No cron job, stream, lane or script may launch `h_2dgame_opus`. It is not wired into
+  `ds-cycle.sh`, any `deepseek-*-cycle.sh`, the autopilot or the supervisor.
+- It may be started ONLY after Yury approves the specific task in chat. Approval for one
+  task is not approval for the next one.
+- Intended use: hard problems that Flash has failed twice, and help for the physics work
+  (human gait, dog, plant skeleton) - analysis, design and review, not routine edits.
+- When it is used, the task must come with: the question, the evidence, the acceptance
+  test, and a hard stop (max turns / max wall clock). Report cost-driving session facts
+  (model id, turns, duration), never keys.
+- Do not switch any existing profile to a more expensive model as a workaround. Flash
+  stays the primary executor.
+
+## Vegetation is ONE owner
+
+`h_2dgame_plant` owns every plant: tree, apple and any new species. The separate
+`h_2dgame_apple` profile is retired (moved to profiles/.deleted/). Stream `apple` and
+stream `tree` both route to `h_2dgame_plant`.
+
+## Unity workers
+
+`h_2dgame_unity` is the Unity game executor (renamed from `programmer`). All game
+streams fall back to it. Revit work stays with `h_rev_*` and is never mixed with the game.
+
+## Expensive lanes: opus AND kimi (Yury 18.09)
+The gate above applies to BOTH `h_2dgame_opus` and `h_2dgame_kimi`: no cron, no ds-cycle stream,
+no script may start them. They run only after Yury approves a specific task, and approval for one
+task never carries to the next. Purpose: hard tasks, and help for the physics lanes.

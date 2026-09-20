@@ -47,9 +47,24 @@ code=$?
 
 if grep -q "TRIAL_BUILD_OK" "$LOG" 2>/dev/null; then
   echo "TRIAL_BUILD_OK"
+  # A build from this script used to leave build-status.txt behind: it writes
+  # build-info.json only, so after the 10-minute gate was paused the status file
+  # still said "OK at 16:38" at 17:50 while every source under Assets had moved on
+  # - the stale-OK trap the gate's own comment names. A successful build proves the
+  # player carries every source, so say so here, with the newest source it carries.
+  # sort on %T@ (epoch), not on the printed clock: "23:57" of a PREVIOUS day sorts
+  # above today's 17:33 in a string sort, so the line reported a source the build
+  # never saw. The date goes into the line with the clock.
+  newest_src=$(find "$PROJ/Assets" -type f -name '*.cs' -printf '%T@ %TY-%Tm-%Td %TH:%TM\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+  printf 'Build status: OK at %s. No build action needed (impact-build %s built the player with every source present, newest %s).\n' \
+    "$(date +%H:%M)" "$TAG" "${newest_src:-unknown}" > "$TMP/build-status.txt"
+  exit 0
 else
   echo "TRIAL_BUILD_FAILED exit=$code"
   grep -m5 "error CS\|TRIAL_BUILD_FAILED\|Exception" "$LOG" 2>/dev/null
+  # Deliberately NO BROKEN write: a build can also fail on a file lock or the
+  # licence service while the tree is fine (the 18.09 09:39 false alarm blocked
+  # every slot). BROKEN stays the gate's verdict, taken from a clean rebuild.
   exit 1
 fi
 exit 0

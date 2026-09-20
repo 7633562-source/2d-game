@@ -13,6 +13,11 @@ using UnityEngine.Rendering;
 //   -activationSpeed 10 — muscle force rise speed
 //   -pushImpulse 20 -pushTime 5 — torso push (N·s, + forward) at second 5
 //   -crouch 1 -crouchTime 5 -crouchHold 10 — crouch target via MotionIntent
+//   -squatRise 1 -squatRiseTime 5 -squatRiseHold 1 — A4 scripted
+//     squat-and-rise: one crouch-and-extend cycle while standing through the
+//     same MotionIntent.crouch channel as -crouch. The rise is the controller's
+//     own crouchReleaseRatePerSecond ramp (~1.1 s for a full 1 -> 0), and the
+//     output channel is fzTotal + pelvisVelY/pelvisAccY in the trial CSV.
 //   -lean 1|-1 -leanTime 5 -leanHold 10 — trunk lean (+ forward, − back)
 //   -standLeg left|right|0 -standLegTime 5 -standLegHold 10 — one-leg stance
 //   -march 1 -marchTime 5 -marchDuration 24 -marchHold 2.5 -marchPlant 1.5
@@ -123,6 +128,11 @@ public class HeadlessTrial : MonoBehaviour
     private float crouchTarget;
     private float crouchTime;
     private float crouchHold;
+    // A4: scripted squat-and-rise - the same intent.crouch channel, scheduled as
+    // one down-and-up cycle while the body stands (see UpdateCrouchIntent).
+    private float squatRise;
+    private float squatRiseTime;
+    private float squatRiseHold;
     private float leanTarget;
     private float leanTime;
     private float leanHold;
@@ -342,6 +352,27 @@ public class HeadlessTrial : MonoBehaviour
     private float arenaPhotoOffsetX = 1.2f;
     private float arenaPhotoTime = 12f;
     private float arenaGroundMeters = 200f;
+    // BALANCE-ARENA-1: the impact harness (ImpactThrower.cs / ImpactRecorder.cs).
+    // Off unless -impact 1. The world is the normal stand: ground + ONE human; the
+    // only addition is the thrower, which spawns real Rigidbody2D bodies at him.
+    private bool spawnImpact;
+    private ImpactThrower impactThrower;
+    private ImpactRecorder impactRecorder;
+    private float impactMass = 4f;
+    private string impactShape = "circle";
+    private float impactSize = 0.25f;
+    private float impactRectAspect = 2f;
+    private float impactSpeed = 8f;
+    private string impactAim = "torso";
+    private string impactSide = "seed";
+    private float impactAt = 8f;
+    private int impactCount = 3;
+    private float impactSpacing = 6f;
+    private int impactSeed = 1;
+    private float impactShotInterval = 0.2f;
+    private float impactWindow = 4.5f;
+    private float impactCameraSize = 2.4f;
+    private float impactCameraY = -1.0f;
     private bool spawnBird;
     private bool spawnTree;
     private bool spawnFlower;
@@ -363,6 +394,20 @@ public class HeadlessTrial : MonoBehaviour
     private float dogPreyX = 1.4f;
     private bool dogWalk;
     private float dogWalkTime = 1f;
+    // DOG STEP CLOCK (harness only, 19.09): the dog trial is driven by EXECUTED
+    // physics steps, not by coroutine iterations. A coroutine resumed on
+    // `FixedStep` (WaitForFixedUpdate) runs once per FRAME, while Unity executes a
+    // variable number of FixedUpdate calls per frame: measured 5002..5007 executed
+    // steps against 5001 nominal samples on ONE build, which is exactly why the
+    // "bit-identical" dog_art1 triple was not reproducible
+    // (Trials/Runs/dog-art1-bisect-report.md). ImpactArena.FixedUpdate already
+    // counts its own steps; the dog trial now does the same, so a run IS its step
+    // count: duration / fixedDeltaTime steps, samples == executedSteps.
+    private bool dogStepping;
+    private int dogSteps;
+    private bool dogPushed;
+    private bool dogLeaped;
+    private bool dogWalked;
     private Bird bird;
     private Bird[] trialBirds;
     private BirdFlockDrive trialFlockDrive;
@@ -458,6 +503,37 @@ public class HeadlessTrial : MonoBehaviour
         arenaPhotoOffsetX = GetFloatArg("-arenaPhotoX", arenaPhotoOffsetX);
         arenaPhotoTime = GetFloatArg("-arenaPhotoTime", arenaPhotoTime);
         arenaGroundMeters = GetFloatArg("-arenaGroundMeters", arenaGroundMeters);
+        spawnImpact = GetFloatArg("-impact", 0f) > 0.5f;
+        impactMass = GetFloatArg("-impactMass", impactMass);
+        impactSpeed = GetFloatArg("-impactSpeed", impactSpeed);
+        impactAt = GetFloatArg("-impactAt", impactAt);
+        impactCount = Mathf.RoundToInt(GetFloatArg("-impactCount", impactCount));
+        impactSpacing = GetFloatArg("-impactSpacing", impactSpacing);
+        impactSeed = Mathf.RoundToInt(GetFloatArg("-impactSeed", impactSeed));
+        impactShotInterval = GetFloatArg("-shotInterval", impactShotInterval);
+        impactWindow = GetFloatArg("-impactWindow", impactWindow);
+        impactCameraSize = GetFloatArg("-impactCamera", impactCameraSize);
+        impactCameraY = GetFloatArg("-impactCameraY", impactCameraY);
+        // -impactShape circle|square|rect [size_m]: the card writes the size as the
+        // shape's own argument, so a numeric token right after the shape is read as
+        // the size, and -impactSize keeps working on its own.
+        string[] impactArgv = Environment.GetCommandLineArgs();
+        for (int impactArgIndex = 0; impactArgIndex < impactArgv.Length - 1; impactArgIndex++)
+        {
+            if (!string.Equals(impactArgv[impactArgIndex], "-impactShape",
+                StringComparison.OrdinalIgnoreCase)) continue;
+            impactShape = impactArgv[impactArgIndex + 1];
+            if (impactArgIndex + 2 < impactArgv.Length)
+            {
+                float trailing;
+                if (float.TryParse(impactArgv[impactArgIndex + 2], NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out trailing) && trailing > 0f)
+                    impactSize = trailing;
+            }
+        }
+        impactSize = GetFloatArg("-impactSize", impactSize);
+        impactAim = GetStringArg("-impactAim", impactAim).Trim().ToLowerInvariant();
+        impactSide = GetStringArg("-impactSide", impactSide).Trim().ToLowerInvariant();
         spawnBird = GetFloatArg("-bird", 0f) > 0.5f;
         spawnTree = GetFloatArg("-tree", 0f) > 0.5f;
         spawnFlower = GetFloatArg("-flower", 0f) > 0.5f;
@@ -495,6 +571,15 @@ public class HeadlessTrial : MonoBehaviour
         crouchTarget = Mathf.Clamp01(GetFloatArg("-crouch", 0f));
         crouchTime = GetFloatArg("-crouchTime", 5f);
         crouchHold = GetFloatArg("-crouchHold", 10f);
+        // A4 scripted squat-and-rise: one crouch-and-extend cycle while standing,
+        // no walk and no new controller - it drives the same MotionIntent.crouch
+        // target the -crouch switch drives, so the squat pose (hips + knees) and
+        // its rates stay the ones the controller already owns. The extension is
+        // the controller's own crouchReleaseRatePerSecond ramp (0.9/s = 1.11 s
+        // for a full 1 -> 0), which is why -squatRiseHold 1 gives ~1 s of rise.
+        squatRise = Mathf.Clamp01(GetFloatArg("-squatRise", 0f));
+        squatRiseTime = GetFloatArg("-squatRiseTime", 5f);
+        squatRiseHold = GetFloatArg("-squatRiseHold", 1f);
         leanTarget = Mathf.Clamp(GetFloatArg("-lean", 0f), -1f, 1f);
         leanTime = GetFloatArg("-leanTime", 5f);
         leanHold = GetFloatArg("-leanHold", 10f);
@@ -870,6 +955,9 @@ public class HeadlessTrial : MonoBehaviour
 
         Transform torso = human.transform.Find("Torso");
         torsoBody = torso != null ? torso.GetComponent<Rigidbody2D>() : null;
+
+        if (spawnImpact)
+            BuildImpactScene();
     }
 
     // ARENA-1: the arena lives on its own host. The ground is already built by
@@ -3099,6 +3187,9 @@ public class HeadlessTrial : MonoBehaviour
         balance.useCaptureWalker = Mathf.RoundToInt(
             GetFloatArg("-captureWalk", balance.useCaptureWalker));
         balance.captureStepDuration = GetFloatArg("-captureStepT", balance.captureStepDuration);
+        balance.captureStepSpeedAdapt = Mathf.RoundToInt(
+            GetFloatArg("-captureStepAdapt", balance.captureStepSpeedAdapt));
+        balance.captureComLandingScale = GetFloatArg("-captureComLanding", balance.captureComLandingScale);
         balance.captureSwingXShare = GetFloatArg("-captureSwingX", balance.captureSwingXShare);
         balance.captureTargetSpeed = GetFloatArg("-captureSpeed", balance.captureTargetSpeed);
         balance.captureRunSpeedScale = GetFloatArg("-captureRunScale", balance.captureRunSpeedScale);
@@ -3214,7 +3305,17 @@ public class HeadlessTrial : MonoBehaviour
         CameraFollow follow = cam.GetComponent<CameraFollow>();
         if (follow == null)
             follow = cam.gameObject.AddComponent<CameraFollow>();
-        if (appleTree != null)
+        if (spawnImpact)
+        {
+            // Impact trial: a STATIC wide lens. The man, the whole flight path and the
+            // fall all stay inside one frame, so the video can be judged uncut. The
+            // follow component is left on the camera but disabled.
+            follow.frameFullBody = false;
+            follow.enabled = false;
+            cam.orthographicSize = impactCameraSize;
+            cam.transform.position = new Vector3(0f, impactCameraY, -10f);
+        }
+        else if (appleTree != null)
         {
             // Apple trial: fixed lens on the tree. Zoomed tighter than the
             // Play `Tree` scene so the crown fills the 1080p frame.
@@ -3272,6 +3373,12 @@ public class HeadlessTrial : MonoBehaviour
     {
         // Skip the first step: the body is still settling in the joints.
         yield return FixedStep;
+
+        if (spawnImpact)
+        {
+            yield return RunImpactTrial();
+            yield break;
+        }
 
         if (spawnArena)
         {
@@ -3430,54 +3537,93 @@ public class HeadlessTrial : MonoBehaviour
         Finish(simulated, Time.realtimeSinceStartup - wallStart);
     }
 
-    private IEnumerator RunDogTrial()
+    // BALANCE-ARENA-1: the thrower beside the stand. The human is built by the stand
+    // path above - same rig defaults, same components, no override - and this only
+    // adds the launcher. A run with -impactCount 0 therefore still measures the quiet
+    // stand, and the numbers must reproduce burn_stance.json.
+    private void BuildImpactScene()
     {
-        dogRecorder = new DogTrialRecorder(dog, runInfo);
+        GameObject host = new GameObject("ImpactThrower");
+        impactThrower = host.AddComponent<ImpactThrower>();
+        impactThrower.massKg = impactMass;
+        impactThrower.shapeText = impactShape;
+        impactThrower.sizeMeters = impactSize;
+        impactThrower.rectAspect = impactRectAspect;
+        impactThrower.speedMps = impactSpeed;
+        impactThrower.aimPart = impactAim;
+        impactThrower.sideText = impactSide;
+        impactThrower.firstThrowAt = impactAt;
+        impactThrower.throwCount = impactCount;
+        impactThrower.spacingSeconds = impactSpacing;
+        impactThrower.seed = impactSeed;
+        impactThrower.Configure(human);
+
+        impactRecorder = new ImpactRecorder(human, impactThrower, label, outputFolder,
+            runInfo != null ? runInfo.SourceFingerprint : string.Empty,
+            runInfo != null ? runInfo.ManifestBuildGuid : string.Empty,
+            startY, MeasuredGroundTopY(), impactWindow);
+
+        Debug.Log("IMPACT_SCENE throws=" + impactCount.ToString(CultureInfo.InvariantCulture)
+            + " shape=" + impactShape
+            + " size=" + impactSize.ToString("0.###", CultureInfo.InvariantCulture)
+            + " mass=" + impactMass.ToString("0.###", CultureInfo.InvariantCulture)
+            + " speed=" + impactSpeed.ToString("0.###", CultureInfo.InvariantCulture)
+            + " aim=" + impactAim + " side=" + impactSide
+            + " at=" + impactAt.ToString("0.###", CultureInfo.InvariantCulture)
+            + " seed=" + impactSeed.ToString(CultureInfo.InvariantCulture)
+            + " groundTopY=" + MeasuredGroundTopY().ToString("0.####", CultureInfo.InvariantCulture));
+    }
+
+    // The stance line, measured from the built body's own feet: the sole collider the
+    // body was posed onto. Never assumed - a spawn override moves it.
+    private float MeasuredGroundTopY()
+    {
+        if (human == null) return startY - 1.18f;
+        float top = float.MaxValue;
+        Transform leftFoot = human.transform.Find("LeftLegFoot");
+        Transform rightFoot = human.transform.Find("RightLegFoot");
+        Collider2D leftCollider = leftFoot != null ? leftFoot.GetComponent<Collider2D>() : null;
+        Collider2D rightCollider = rightFoot != null ? rightFoot.GetComponent<Collider2D>() : null;
+        if (leftCollider != null) top = Mathf.Min(top, leftCollider.bounds.min.y);
+        if (rightCollider != null) top = Mathf.Min(top, rightCollider.bounds.min.y);
+        return top == float.MaxValue ? startY - 1.18f : top;
+    }
+
+    // BALANCE-ARENA-1: the quiet stand's own loop, plus a thrower. Same FixedStep,
+    // same recorder.Sample, no crouch / lean / walk / stand-leg intent of any kind:
+    // the only force that reaches the body is the solver's collision with a real
+    // thrown Rigidbody2D. Nothing is scripted onto the human.
+    private IEnumerator RunImpactTrial()
+    {
+        recorder = new TrialRecorder(human, runInfo);
+        recorder.BindWalkDriver(stepDriver);
 
         float trialWallStart = Time.realtimeSinceStartup;
         float simulated = 0f;
         float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
-        bool pushed = false;
-        bool leaped = false;
-        bool walked = false;
         int lastShot = -1;
 
         while (simulated < duration)
         {
             yield return FixedStep;
+
             simulated += Time.fixedDeltaTime;
 
-            if (!pushed && pushImpulse != 0f && simulated >= pushTime)
-            {
-                ApplyPush(simulated);
-                pushed = true;
-            }
+            if (impactThrower != null)
+                impactThrower.Advance(simulated);
+            if (impactRecorder != null)
+                impactRecorder.Sample(simulated);
 
-            if (!leaped && dogLeap && simulated >= dogLeapTime)
-            {
-                if (dog != null && dog.stance != null)
-                    dog.stance.LeapAttack(dog.stance.leapTarget);
-                leaped = true;
-            }
+            recorder.Sample(simulated);
 
-            if (!walked && dogWalk && simulated >= dogWalkTime)
-            {
-                if (dog != null && dog.stance != null)
-                    dog.stance.Walk();
-                walked = true;
-            }
-
-            dogRecorder.Sample(simulated);
-
-            // Same frame capture as the human and bird trials: the dog had none, so
-            // there were no dog videos to look at. Yury asked for dog video reports.
             if (visual)
             {
-                int shotIdx = (int)(simulated / 0.2f);
+                int shotIdx = (int)(simulated / impactShotInterval);
                 if (shotIdx != lastShot)
                 {
                     lastShot = shotIdx;
-                    string shotPath = Path.Combine(outputFolder, "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
+                    string shotPath = Path.Combine(outputFolder,
+                        "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
                     yield return CaptureVisualFrame(shotPath);
                 }
             }
@@ -3489,6 +3635,93 @@ public class HeadlessTrial : MonoBehaviour
             }
         }
 
+        Finish(simulated, Time.realtimeSinceStartup - trialWallStart);
+    }
+
+    // One executed physics step of the dog trial. The clock, the scheduled intents
+    // and the recorder sample all live here: `dogSteps` is incremented by the
+    // engine's own FixedUpdate, so the trace is step-aligned and the run's length
+    // is the step budget instead of whatever cadence the frame loop happened to
+    // deliver (that cadence is what made `dog_art1` irreproducible).
+    private void FixedUpdate()
+    {
+        if (!dogStepping) return;
+
+        dogSteps++;
+        float simulated = dogSteps * Time.fixedDeltaTime;
+
+        if (!dogPushed && pushImpulse != 0f && simulated >= pushTime)
+        {
+            ApplyPush(simulated);
+            dogPushed = true;
+        }
+
+        if (!dogLeaped && dogLeap && simulated >= dogLeapTime)
+        {
+            if (dog != null && dog.stance != null)
+                dog.stance.LeapAttack(dog.stance.leapTarget);
+            dogLeaped = true;
+        }
+
+        if (!dogWalked && dogWalk && simulated >= dogWalkTime)
+        {
+            if (dog != null && dog.stance != null)
+                dog.stance.Walk();
+            dogWalked = true;
+        }
+
+        dogRecorder.Sample(simulated);
+
+        if (simulated >= duration)
+            dogStepping = false;
+    }
+
+    private IEnumerator RunDogTrial()
+    {
+        dogRecorder = new DogTrialRecorder(dog, runInfo);
+
+        float trialWallStart = Time.realtimeSinceStartup;
+        float realDeadline = Time.realtimeSinceStartup + REAL_TIME_LIMIT_SECONDS;
+        int lastShot = -1;
+
+        // Step-driven trial: FixedUpdate owns the clock, the scheduled intents and
+        // the sampling; this coroutine only waits for the step budget, captures
+        // frames and writes the result. The budget is exact - duration /
+        // fixedDeltaTime steps - so a run can no longer end 5 ms late here and
+        // 35 ms late there, which is the difference that broke the detector.
+        dogSteps = 0;
+        dogPushed = false;
+        dogLeaped = false;
+        dogWalked = false;
+        dogStepping = true;
+
+        while (dogStepping)
+        {
+            yield return FixedStep;
+
+            // Same frame capture as the human and bird trials: the dog had none, so
+            // there were no dog videos to look at. Yury asked for dog video reports.
+            if (visual)
+            {
+                int shotIdx = (int)(dogSteps * Time.fixedDeltaTime / 0.2f);
+                if (shotIdx != lastShot)
+                {
+                    lastShot = shotIdx;
+                    string shotPath = Path.Combine(outputFolder, "shot_" + label + "_" + shotIdx.ToString("00") + ".png");
+                    yield return CaptureVisualFrame(shotPath);
+                }
+            }
+
+            if (Time.realtimeSinceStartup > realDeadline)
+            {
+                Debug.LogWarning("HeadlessTrial: real-time limit exceeded, run aborted.");
+                dogStepping = false;
+                break;
+            }
+        }
+
+        float simulated = dogSteps * Time.fixedDeltaTime;
+        dogRecorder.MarkExecutedSteps(dogSteps);
         Finish(simulated, Time.realtimeSinceStartup - trialWallStart);
     }
 
@@ -3568,16 +3801,32 @@ public class HeadlessTrial : MonoBehaviour
 
     // Rewrite each hold window every step: if PlayerInputSource
     // suddenly wakes, it cannot erase the script in one frame.
+    //
+    // A4 scripted squat-and-rise rides the same channel: -squatRise 1 schedules
+    // intent.crouch = 1 for the window [squatRiseTime, squatRiseTime +
+    // squatRiseHold) and 0 outside it. The crouch pose itself (hips via the
+    // crouch pelvis tilt term, knees via crouchKneeFlex) and both rates are the
+    // controller's own - this input writes a TARGET and nothing else. The
+    // extension is therefore the existing release ramp: crouchLevel falls at
+    // crouchReleaseRatePerSecond (0.9/s), so a full 1 -> 0 takes ~1.1 s.
     private void UpdateCrouchIntent(float time, ref bool marked, ref bool released)
     {
         if (intent == null) return;
 
         bool holding = crouchTarget > 0f && time >= crouchTime && time < crouchTime + crouchHold;
-        intent.crouch = holding ? crouchTarget : 0f;
+        float level = holding ? crouchTarget : 0f;
+        bool squatting = squatRise > 0f
+            && time >= squatRiseTime && time < squatRiseTime + squatRiseHold;
+        if (squatting) level = squatRise;
+        intent.crouch = level;
+        holding = holding || squatting;
 
         if (holding && !marked)
         {
-            recorder.MarkCrouch(time, crouchTarget);
+            // level, not crouchTarget: on the -squatRise schedule the target is
+            // 1 and crouchTarget is 0, and the JSON's requestedCrouch must name
+            // the level that was actually asked for.
+            recorder.MarkCrouch(time, level);
             marked = true;
         }
         else if (marked && !released && !holding)
@@ -3965,6 +4214,9 @@ public class HeadlessTrial : MonoBehaviour
                 summary = recorder.BuildSummaryJson(simulated, wallSeconds);
             }
             File.WriteAllText(Path.Combine(outputFolder, label + ".json"), summary);
+
+            if (impactRecorder != null)
+                impactRecorder.WriteFiles(simulated, wallSeconds);
 
             // Marker in stdout so the result can be read straight from the run log.
             Debug.Log("TRIAL_SUMMARY " + summary);

@@ -133,6 +133,37 @@ public partial class BalanceController : MonoBehaviour
     public float crouchTorsoLean = 24f;
     // Level the pose actually uses. For the stand and Inspector.
     public float crouchLevel;
+    // ─── C1 VERTICAL FORCE CHANNEL ───
+    // crouchLevel above is the POSE the driver asks for; crouchLoadLevel below
+    // is what the LEGS are given, and it only moves while the soles carry the
+    // body. squat_rise1 (build 7b6b5053, row 1015 = 5.080 s): the pose drive
+    // folded the legs at ~145 deg/s of knee and the soles fell to 358 N of a
+    // 687 N body weight (pelvisAccY -5.2 m/s^2, 67 of 103 descent frames under
+    // 0.90 W) while the pelvis had sunk 9 mm - the fold ran on the clock, not
+    // on the load, and the run bottomed out at 2057 N (2.99 W). Both band ends
+    // below are fractions of the rig's OWN weight (sum of the segment masses x
+    // g), so the bar is body weight, not a controller number. Arms / hand
+    // support and everything else still read crouchLevel: this is the leg's
+    // vertical channel only.
+    [Tooltip("Fold deeper only while the soles carry at least this fraction of body weight (0.90 = the acceptance band floor).")]
+    public float crouchLoadFoldFloor = 0.90f;
+    [Tooltip("Rise / push only while the ground reaction stays at or below this fraction of body weight (1.15 = the acceptance band ceiling).")]
+    public float crouchLoadPushCeiling = 1.15f;
+    [Tooltip("EMA time constant of the measured vertical load, s. The two soles rock the load between them at ~12 Hz; the sum is what this channel reads.")]
+    public float crouchLoadFilterTau = 0.02f;
+    // What the legs are given. Public for the Inspector/MCP, exactly like
+    // crouchLevel. Exactly 0 on every path that never crouches.
+    public float crouchLoadLevel;
+    // Measured vertical ground reaction of both soles, N, EMA-filtered.
+    // Negative = no sample yet (sentinel, so no extra flag rides along).
+    private float crouchLoadFilteredN = -1f;
+    // Sum of the masses the physics carries, x g. 0 = not resolved yet.
+    private float rigWeightN;
+    // Own read buffer and filter: TrialRecorder and BodyStateEstimator each
+    // keep theirs, and no controller has ever read this quantity.
+    private ContactPoint2D[] crouchLoadContacts;
+    private ContactFilter2D crouchLoadFilter;
+    private bool crouchLoadFilterReady;
     // Arms forward-down: a hand on the ground widens support (BodyState/CoM).
     [Tooltip("Shoulder forward-down in crouch, deg (minus on both arms).")]
     public float crouchArmShoulder = 18f;
@@ -4094,6 +4125,56 @@ public partial class BalanceController : MonoBehaviour
                 leftKneeJoint.anchor, leftAnkleJoint.connectedAnchor);
     }
 
+    // ─── A2: the controller's OWN geometric fall state (19.09.2026) ───
+    //
+    // The BalanceState automaton never reached Falling in any measured run
+    // (state stayed 0/1 while the shared FallCriterion put the fall at 5.865 s
+    // on walk1_load4), so the rig never knew it was falling. This is that state,
+    // derived from GEOMETRY ONLY - the CoM against the estimator's support
+    // polygon, and the capture point against the same polygon. No timer, no
+    // latch, no hysteresis: it is recomputed from scratch on every read, so it
+    // cannot park in a stale value the way the automaton did.
+    //
+    // Codes are BodySupportGeometry: 0 supported, 1 critical (xi outside -
+    // no ankle strategy exists), 2 fallen (the CoM itself is outside),
+    // 3 no support (no foot carries the body).
+    //
+    // INSTRUMENTATION: nothing in this file reads it. TrialRecorder publishes
+    // it to the CSV as ctrlFallState, beside hullFallState, which is the same
+    // ladder computed by the recorder against its own measured loaded-plate
+    // hull.
+    //
+    // Height note: h is the CoM height above the two ANKLE joints. That is the
+    // lowest point this class already resolves without reaching into the
+    // estimator's ground probe, and the ankle hinges sit ~0.065 m above the
+    // soles, so omega is ~4 % off the sole-referenced value the recorder uses
+    // for its own dcm column (sqrt(9.81/0.83) = 3.44 vs sqrt(9.81/0.90) =
+    // 3.30 rad/s). Both are published; the next cycle must say which it reads.
+    public int GeometricFallState
+    {
+        get
+        {
+            if (bodyState == null) return BodySupportGeometry.NoSupport;
+            float footSum = 0f;
+            int footCount = 0;
+            if (leftAnkleJoint != null)
+            {
+                footSum += leftAnkleJoint.transform.TransformPoint(leftAnkleJoint.anchor).y;
+                footCount++;
+            }
+            if (rightAnkleJoint != null)
+            {
+                footSum += rightAnkleJoint.transform.TransformPoint(rightAnkleJoint.anchor).y;
+                footCount++;
+            }
+            float h = footCount > 0 ? bodyState.comPosition.y - footSum / footCount : 0f;
+            bool hasSupport = bodyState.leftFootGrounded || bodyState.rightFootGrounded;
+            return BodySupportGeometry.Level(hasSupport,
+                bodyState.comPosition.x, bodyState.comVelocity.x, h,
+                bodyState.supportMinX, bodyState.supportMaxX);
+        }
+    }
+
     // Knee flexion (deg) at which the hip→ankle strut is exactly long enough
     // to set this sole on the ground from where it hangs right now
     // (walkSwingLandKneeGeometry above). The forward offset is whatever the
@@ -4415,6 +4496,14 @@ public partial class BalanceController : MonoBehaviour
         // BEFORE anything may return early. Whatever no layer writes is sealed
         // by TrialRecorder (measured angle + a named owner) - never NaN.
         BeginLegRequestRecord();
+        // WALK CYCLE 6q: name the path that writes the leg joints on THIS step
+        // (0 = the level 1 walker, 1 = the level 2 pose library), so one recorder
+        // column can tell the two apart. Recorder only - the value is written by
+        // PublishWalkPath and read by TrialRecorder, and no gain, limit,
+        // threshold or branch below depends on it. -poseDrive defaults to 0, so
+        // this reads 0 on the level 1 path the c6p record was measured on; the
+        // pose branch further down is not touched by this line.
+        PublishWalkPath(PoseDriveActive());
         // Before anything may return early (startup hold, Falling): a filter
         // that skips steps is a filter with an unknown time constant.
         UpdateWalkComVelocityFilter();
@@ -6093,7 +6182,7 @@ public partial class BalanceController : MonoBehaviour
         // / pf23b / pb23b all dumped backward at 2.05 s (pelvis +86°) without it.
         float pelvisTarget = Mathf.Clamp(
             hipBaseAngle - hipBalanceGain * balanceSignal * fc.hipBalanceScale
-                - crouchLevel * crouchPelvisTilt - leanLevel * leanPelvisTilt - walkAutoLean - walkBasePelvisLean
+                - crouchLoadLevel * crouchPelvisTilt - leanLevel * leanPelvisTilt - walkAutoLean - walkBasePelvisLean
                 - fc.pelvisLean,
             -60f, 60f);
         // March in place: pelvis stays world vertical. Do not chase CoM
@@ -6105,7 +6194,7 @@ public partial class BalanceController : MonoBehaviour
             marchPelvisBias = Mathf.MoveTowards(
                 marchPelvisBias, 0f, Mathf.Max(0f, marchTiltRate) * Time.fixedDeltaTime);
             pelvisTarget = Mathf.Clamp(
-                -crouchLevel * crouchPelvisTilt - leanLevel * leanPelvisTilt,
+                -crouchLoadLevel * crouchPelvisTilt - leanLevel * leanPelvisTilt,
                 -60f, 60f);
         }
         else
@@ -6116,7 +6205,7 @@ public partial class BalanceController : MonoBehaviour
         // Vault: pelvis toward vertical at weightBlend (before unload/scissor/push).
         if (!fallCatchWalk && walkSoft && walkStanceExtend > 0.001f && weightBlend > 0.001f)
             pelvisTarget = Mathf.Lerp(pelvisTarget, 0f, Mathf.Clamp01(walkStanceExtend * weightBlend));
-        float kneeTarget = kneeBaseAngle + crouchLevel * crouchKneeFlex;
+        float kneeTarget = kneeBaseAngle + crouchLoadLevel * crouchKneeFlex;
         // The same target without the Recovery term (walkStanceKneeRecoveryFlex
         // above). Clamped the same way, so a crouch that already sits on the
         // 115° stop reads the stop on both, and the two collapse to one number
@@ -9800,7 +9889,7 @@ public partial class BalanceController : MonoBehaviour
 
         ControlLumbarToWorldUpright(
             WalkLiftLumbarTarget(
-                lumbarTargetTilt - crouchLevel * crouchTorsoLean - leanLevel * leanTorsoAngle - walkAutoTorsoLean - walkBaseTorsoLean
+                lumbarTargetTilt - crouchLoadLevel * crouchTorsoLean - leanLevel * leanTorsoAngle - walkAutoTorsoLean - walkBaseTorsoLean
                 - fc.torsoLean));
 
         ControlNeckAndHeadToWorldUpright();
@@ -9894,6 +9983,136 @@ public partial class BalanceController : MonoBehaviour
         float rate = desired < crouchLevel ? crouchReleaseRatePerSecond : crouchRatePerSecond;
         crouchLevel = Mathf.MoveTowards(
             crouchLevel, desired, Mathf.Max(0f, rate) * Time.fixedDeltaTime);
+        // C1 VERTICAL FORCE CHANNEL. Two levels, one of them measured:
+        //   crouchLevel      — the pose the driver asked for (arms, hand
+        //                      support and everything else keep reading this);
+        //   crouchLoadLevel  — the same pose throttled by the vertical load
+        //                      the soles actually carry, and the only one the
+        //                      leg/trunk targets below read.
+        // On every path that never crouches intent.crouch is 0, so both levels
+        // are exactly 0f and the targets that read the second one are
+        // bit-for-bit the former ones (quiet stand, the walk, one-leg, get-up).
+        UpdateCrouchLoadMeter();
+        crouchLoadLevel = CrouchLoadShapedLevel(crouchLevel);
+    }
+
+    // C1: one measured step of vertical load, then the shaped level.
+    // Read-only: no counter, no gate, no joint command is touched here, and
+    // the whole meter is skipped on any frame the crouch channel is asleep.
+    private void UpdateCrouchLoadMeter()
+    {
+        bool awake = crouchLevel > 0.001f || crouchLoadLevel > 0.001f;
+        if (!awake)
+        {
+            // No sample: the sentinel, so a later crouch starts from its own
+            // first reading instead of a stale one from the last one.
+            crouchLoadFilteredN = -1f;
+            return;
+        }
+        if (!crouchLoadFilterReady)
+        {
+            crouchLoadFilter = new ContactFilter2D();
+            crouchLoadFilter.SetLayerMask(GroundLayers.Mask);
+            crouchLoadFilter.useTriggers = false;
+            crouchLoadFilterReady = true;
+        }
+        if (crouchLoadContacts == null)
+            crouchLoadContacts = new ContactPoint2D[12];
+
+        float dt = Time.fixedDeltaTime;
+        if (dt <= 0f) dt = 0.005f;
+        // The same quantity TrialRecorder publishes as fzL/fzR: the solver's
+        // own contact impulse along the contact normal, upward part only, /dt.
+        float raw = SoleLoadN(leftHeelBox, dt) + SoleLoadN(leftToeBox, dt)
+            + SoleLoadN(rightHeelBox, dt) + SoleLoadN(rightToeBox, dt);
+        if (crouchLoadFilteredN < 0f)
+            crouchLoadFilteredN = raw;
+        else
+        {
+            float tau = Mathf.Max(0f, crouchLoadFilterTau);
+            float alpha = dt / (tau + dt);
+            crouchLoadFilteredN += (raw - crouchLoadFilteredN) * alpha;
+        }
+    }
+
+    private float SoleLoadN(Collider2D col, float dt)
+    {
+        if (col == null) return 0f;
+        int n = col.GetContacts(crouchLoadFilter, crouchLoadContacts);
+        int used = Mathf.Min(n, crouchLoadContacts.Length);
+        float acc = 0f;
+        for (int i = 0; i < used; i++)
+        {
+            float vertical = crouchLoadContacts[i].normalImpulse
+                * crouchLoadContacts[i].normal.y;
+            if (vertical > 0f) acc += vertical / dt;
+        }
+        return acc;
+    }
+
+    // C1: the load the soles are under, as a fraction of the rig's own weight.
+    // Negative means "not available" (no sample yet, or no weight resolved);
+    // the caller then leaves the pose on its clock, exactly as before.
+    private float CrouchLoadRatio()
+    {
+        float weight = RigWeightN();
+        if (weight <= 0.01f || crouchLoadFilteredN < 0f) return -1f;
+        return crouchLoadFilteredN / weight;
+    }
+
+    // Sum of the masses the physics carries, x g. Resolved once, and only ever
+    // read by this channel, so no path that never crouches sees it.
+    private float RigWeightN()
+    {
+        if (rigWeightN > 0.01f) return rigWeightN;
+        Rigidbody2D[] bodies = GetComponentsInChildren<Rigidbody2D>();
+        float mass = 0f;
+        for (int i = 0; i < bodies.Length; i++)
+            if (bodies[i] != null) mass += bodies[i].mass;
+        rigWeightN = mass * Physics2D.gravity.magnitude;
+        return rigWeightN;
+    }
+
+    // C1: the one change. The leg folds only while the soles carry the body,
+    // and unfolds (rise / push-off) only while the reaction stays inside the
+    // band. Both rates fall to 0 at their own band edge, so the pose drive is
+    // throttled by the load instead of running on its own clock: the deeper
+    // the fold, the shorter the leg and the larger the knee moment arm, so the
+    // load is exactly the signal that says how much fold the leg can still
+    // hold. At the band edge the reference stops and the position servo's own
+    // resistance brakes the descent; when the load comes back the fold
+    // resumes. The rise is the mirror image: it stops before the reaction can
+    // turn into a bang.
+    private float CrouchLoadShapedLevel(float target)
+    {
+        float level = crouchLoadLevel;
+        float ratio = CrouchLoadRatio();
+        if (ratio < 0f)
+        {
+            // Meter not available: the pose clock, exactly as before this cycle.
+            float plainRate = target < level
+                ? crouchReleaseRatePerSecond
+                : crouchRatePerSecond;
+            return Mathf.MoveTowards(
+                level, target, Mathf.Max(0f, plainRate) * Time.fixedDeltaTime);
+        }
+        if (target > level)
+        {
+            float gate = Mathf.Clamp01(
+                (ratio - crouchLoadFoldFloor)
+                / Mathf.Max(0.01f, 1f - crouchLoadFoldFloor));
+            level = Mathf.MoveTowards(level, target,
+                Mathf.Max(0f, crouchRatePerSecond) * gate * Time.fixedDeltaTime);
+        }
+        else if (target < level)
+        {
+            float gate = Mathf.Clamp01(
+                (crouchLoadPushCeiling - ratio)
+                / Mathf.Max(0.01f, crouchLoadPushCeiling - 1f));
+            level = Mathf.MoveTowards(level, target,
+                Mathf.Max(0f, crouchReleaseRatePerSecond) * gate * Time.fixedDeltaTime);
+        }
+        return level;
     }
 
     // Lean is a −1/0/+1 step from the keyboard; the regulator sets the slew.

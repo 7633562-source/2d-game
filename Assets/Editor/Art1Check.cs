@@ -44,6 +44,7 @@ public static class Art1Check
         CheckFlameCore();
         CheckFireLogs();
         CheckFlowerParts();
+        CheckMaterialPeriod();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
         CheckSlabStretch(6f);
@@ -541,6 +542,154 @@ public static class Art1Check
         for (int i = 0; i < srs.Length; i++)
             ArtParts.Forget(srs[i]);
         Object.DestroyImmediate(go);
+    }
+
+    // ART-0 22nd pass: a MATERIAL keeps its authored world period, so a part smaller than
+    // one tile shows a CROP of the canvas at the canvas' own scale instead of the whole
+    // canvas squeezed into the part. Measured on the shipped canvases: which draw mode the
+    // dress chose, and how many source pixels of the canvas one part width shows (the
+    // canvas' own density = no stretch; the whole 512 = Sliced's stretch).
+    private static void CheckMaterialPeriod()
+    {
+        // The rig is built here, in the editor, so arm real art: the same switch the
+        // gallery flips.
+        ArtLibrary.RealArtEnabled = true;
+
+        // A material part smaller than one tile (the tree lane's limb, a small leaf pad)
+        // and a painted part of the same size (a flower petal): the first must be Tiled,
+        // the second must stay Sliced, because its single canvas IS its picture.
+        MaterialCase(ArtLibrary.Bark, new Vector2(0.10f, 0.30f), ArtParts.BarkTileMeters, true);
+        MaterialCase(ArtLibrary.Leaf, new Vector2(0.12f, 0.08f), ArtParts.LeafTileMeters, true);
+        MaterialCase(ArtParts.FlowerPetalKey, new Vector2(0.029f, 0.036f), 0f, false);
+
+        // The real rig, built the way GalleryScene.BuildTreeRow builds its oak (Static rig,
+        // the same dress call: wood bark, leaf leaf, no fruit).
+        GameObject go = new GameObject("Art1CheckOak");
+        PlantTree tree = go.AddComponent<PlantTree>();
+        tree.kind = TreeKind.Oak;
+        tree.seed = 11;
+        tree.rig = TreeRig.Static;
+        tree.BuildTree();
+
+        SpriteRenderer[] srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+        int bodiesBefore = BodyCount(srs);
+        Vector3 rootScale = go.transform.localScale;
+        Vector3[] partScale = new Vector3[srs.Length];
+        for (int i = 0; i < srs.Length; i++)
+            partScale[i] = srs[i].transform.localScale;
+
+        int dressed = ArtParts.DressAll(go.transform, true, ArtLibrary.Bark, ArtLibrary.Leaf, "");
+
+        int barkParts = 0, leafParts = 0, notTiled = 0, movedScale = 0, empty = 0;
+        float smallestBox = float.MaxValue, smallestCropPx = float.MaxValue;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null || sr.sprite == null || sr.sprite.texture == null)
+                continue;
+            string tex = sr.sprite.texture.name;
+            bool isBark = tex == ArtLibrary.Bark;
+            if (!isBark && tex != ArtLibrary.Leaf)
+                continue;
+
+            Vector2 box = ArtParts.WorldBoxOf(sr);
+            if (box.x <= 0.0001f || box.y <= 0.0001f)
+            {
+                empty++;
+                continue;
+            }
+            if (isBark)
+                barkParts++;
+            else
+                leafParts++;
+            if (sr.drawMode != SpriteDrawMode.Tiled)
+                notTiled++;
+            if (sr.transform.localScale != partScale[i])
+                movedScale++;
+            float minSide = Mathf.Min(box.x, box.y);
+            if (minSide < smallestBox)
+                smallestBox = minSide;
+            float period = isBark ? ArtParts.BarkTileMeters : ArtParts.LeafTileMeters;
+            float cropPx = minSide * (sr.sprite.texture.width / period);
+            if (cropPx < smallestCropPx)
+                smallestCropPx = cropPx;
+        }
+
+        Debug.Log("ART-1A-CHECK INFO oak dressed=" + dressed + " barkParts=" + barkParts
+            + " leafParts=" + leafParts + " notTiled=" + notTiled + " empty=" + empty
+            + " smallestBox=" + smallestBox.ToString("0.000") + "m"
+            + " itsCrop=" + smallestCropPx.ToString("0.#") + "px of the 512 canvas"
+            + " (a squeezed one would show all 512)");
+
+        Report("oak every bark/leaf part is Tiled (" + (barkParts + leafParts)
+            + " parts, 0 in Sliced)", barkParts + leafParts > 0 && notTiled == 0);
+        Report("oak dressing moves no localScale", go.transform.localScale == rootScale
+            && movedScale == 0);
+        Report("oak dressing adds no body (rule zero)",
+            BodyCount(go.GetComponentsInChildren<SpriteRenderer>(true)) == bodiesBefore);
+
+        for (int i = 0; i < srs.Length; i++)
+            ArtParts.Forget(srs[i]);
+        Object.DestroyImmediate(go);
+    }
+
+    // One part, dressed with the real rule. Prints the two numbers the picture depends on:
+    // the draw mode, and the share of the canvas the part shows (natural scale vs stretch).
+    private static void MaterialCase(string key, Vector2 box, float tileMeters, bool expectTiled)
+    {
+        Texture2D tex = ArtLibrary.Albedo(key);
+        Report("material period " + key + " canvas resolves (Albedo)", tex != null);
+        if (tex == null)
+            return;
+
+        GameObject go = new GameObject("MaterialCase_" + key.Replace("/", "_"));
+        SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+        HumanSegment.ApplyPicture(sr, box, HumanVisualShape.Box, null, Color.white, 0);
+        Vector3 before = sr.transform.localScale;
+        ArtParts.Dress(sr, key, tileMeters, true);
+
+        Vector2 world = ArtParts.WorldBoxOf(sr);
+        float period = tileMeters > 0.01f ? tileMeters : Mathf.Max(box.x, box.y);
+        float canvasMeters = sr.sprite != null ? sr.sprite.bounds.size.x : 0f;
+        float naturalPxPerM = tex.width / period;
+        float shownPx = world.x > 0.0001f ? world.x * naturalPxPerM : 0f;
+        float slicedPxPerM = world.x > 0.0001f ? tex.width / world.x : 0f;
+
+        Debug.Log("ART-1A-CHECK INFO " + key + " box=" + box.x.ToString("0.000") + "x"
+            + box.y.ToString("0.000") + "m period=" + tileMeters.ToString("0.00") + "m mode="
+            + sr.drawMode + " canvas=" + canvasMeters.ToString("0.000") + "m drawn="
+            + world.x.ToString("0.000") + "x" + world.y.ToString("0.000") + "m shows="
+            + shownPx.ToString("0") + "/" + tex.width + "px at " + naturalPxPerM.ToString("0")
+            + " px/m (Sliced would show " + tex.width + "px at " + slicedPxPerM.ToString("0")
+            + " px/m, " + (slicedPxPerM / naturalPxPerM).ToString("0.0") + "x the canvas' scale)");
+
+        Report(key + " " + box.x.ToString("0.000") + "x" + box.y.ToString("0.000") + "m period "
+            + tileMeters.ToString("0.00") + "m is drawn " + (expectTiled ? "Tiled" : "Sliced"),
+            expectTiled ? sr.drawMode == SpriteDrawMode.Tiled : sr.drawMode == SpriteDrawMode.Sliced);
+        Report(key + " dressing writes the part's own box (no transform factor)",
+            Mathf.Abs(world.x - box.x) <= 0.002f && Mathf.Abs(world.y - box.y) <= 0.002f);
+        Report(key + " dressing moves no localScale", sr.transform.localScale == before);
+        if (expectTiled)
+            Report(key + " keeps the canvas' own scale (canvas " + canvasMeters.ToString("0.000")
+                + " m > box " + Mathf.Min(box.x, box.y).ToString("0.000") + " m: a crop, not a squeeze)",
+                canvasMeters >= Mathf.Min(box.x, box.y) - 0.0001f);
+
+        ArtParts.Forget(sr);
+        Object.DestroyImmediate(go);
+    }
+
+    private static int BodyCount(SpriteRenderer[] srs)
+    {
+        int n = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            if (srs[i] == null)
+                continue;
+            if (srs[i].GetComponent<Collider2D>() != null
+                || srs[i].GetComponent<Rigidbody2D>() != null)
+                n++;
+        }
+        return n;
     }
 
     // The ART-0 finding: a wide slab stretched the fill. Spawn the slab through
