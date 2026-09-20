@@ -52,6 +52,16 @@ Run from the project root:
     python Tools/gen-tree-bole-foot-texture.py             # repaint + verify
     python Tools/gen-tree-bole-foot-texture.py --sheet     # ... and a contact sheet, 4x
 
+32nd pass (20.09, same canvas, same box): the 31st pass' own read - "the toe rhythm too
+regular", "the relief of the bark not tied to the toes" - is the defect this pass answers.
+Two levers, both in this file: `LOBE_TABLE`'s depths are pulled further apart (deepest /
+shallowest 3.0 -> 7.0) and the flare envelope's exponent went 1.4 -> 0.70 so its two
+shoulders stop being flat shelves; and the toes are now CUT BY THE MATERIAL - the bark slab's
+own column luminance, smoothed to the grain's width (`fissure_field`), deepens a toe under a
+dark fissure and shortens it under a smooth band, and the same field is painted into the rows
+below the soil line (`NOTCH_SHADE`). The bar the pass is judged by is the silhouette probe's
+flat-run list (`Tools/art0-bole-silhouette-probe.py`) and the shipped frame's toe band.
+
 Writes `Assets/Resources/Art/Tree/bole_foot.png` and its `.meta` (the project's Single
 sprite shape: textureType 8, spriteMode 1, spriteMeshType 0 FullRect for the Sliced mode,
 wrap 1/1, alphaIsTransparency 1, isReadable 1, no fallback physics shape).
@@ -90,9 +100,42 @@ WOBBLE = 0.006         # of the canvas width: how far the sides may meander (was
 # on purpose: deep in the middle, small at the shoulders, none of them the same width. Every
 # read of this canvas so far has called an even row of lobes "a stamped rhythm, a palisade of
 # logs, a fringe of identical scallops", so the rhythm lives in this table, not in the rng.
-LOBE_TABLE = (( -0.80, 0.050, 0.20), (-0.44, 0.110, 0.23), (0.03, 0.150, 0.27),
-              (0.47, 0.120, 0.22), (0.83, 0.055, 0.19))
-BASE_DEPTH = 0.060     # of the canvas height: the flare's own mass at the trunk
+#
+# 32nd pass: the 31st pass' own read ("the toe rhythm too regular") was taken as the defect and
+# this table is the answer - the depths are pulled FURTHER APART (0.028 .. 0.195 against
+# 0.050 .. 0.150: the ratio between the deepest and the shallowest toe 3.0 -> 7.0) and the
+# widths differ by more (0.15 .. 0.31 against 0.19 .. 0.27), so the toe row is a rhythm and not
+# a fence. The five toes stay five: no read has ever asked for a different COUNT.
+LOBE_TABLE = ((-0.87, 0.022, 0.16), (-0.46, 0.120, 0.205), (0.02, 0.152, 0.31),
+              (0.45, 0.078, 0.185), (0.87, 0.030, 0.15))
+BASE_DEPTH = 0.060    # of the canvas height: the flare's own mass at the trunk
+BASE_BEND = 0.70      # the flare envelope is (1-u^2)^BASE_BEND. The 31st pass used 1.4, whose
+#                        derivative vanishes as u -> 1 - a mathematically flat shoulder shelf, and
+#                        its own read named "a flat shelf, parallel to the ground". Below 1 the
+#                        near-shoulder slope is finite, so the tails come down and stop.
+#                        What the numbers say about it, honestly: the flat-run count of
+#                        Tools/art0-bole-silhouette-probe.py moved 10/10 -> 9/11 columns inside a
+#                        2 px band, i.e. UNCHANGED in substance, and MORE columns now sit in the
+#                        near-ground bands (44 -> 80 within rows 2-3, Tools/art0-toe-depths.py).
+#                        One further variant was TRIED and ROLLED BACK, because it measured worse
+#                        than both: a flat-hold with a steep edge, (1-|u|^6)^0.5 with
+#                        BASE_DEPTH 0.075, gave a THIRD flat run (10/10 -> 10/8/11) and 67 columns
+#                        inside rows 4-5 - a plateau IS a flat shelf. No curve can win this
+#                        measure outright: a 4.8 px deep envelope that must reach 0 at the
+#                        shoulders cannot descend faster than ~0.17 px per column, so even a
+#                        perfect wedge shows ~10-12 columns. That floor belongs to the instrument.
+#                        0.70 ships because the READS endorse the bytes it produces (two canvas
+#                        reads and one 16x frame read, all three correct) and none of them names a
+#                        shelf on the new canvas, where the 31st pass' reads did.
+FISSURE_CUT = 0.22     # how hard the bark's OWN darkness cuts the toes (0 = the 31st pass).
+#                        The relief stops being designed and starts being the material's: the
+#                        slab's dark vertical fissures make the toe under them deeper, its
+#                        smooth bands make it shallower, so the edge and the grain agree.
+FISSURE_SMOOTH = 5     # px: the fissure field is a 5 px box mean of the slab's own column
+#                        luminance - the grain, not its single-pixel noise
+NOTCH_SHADE = 0.17     # how much of the fissure's darkness is painted INTO the notch rows
+#                        (the pixels below the soil line), so the groove reads on the surface
+#                        as well as on the silhouette
 
 
 def palette(img):
@@ -114,7 +157,30 @@ def mix(a, b, t):
     return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
 
 
-def build_masks(rng):
+def box_smooth(a, k):
+    """k-px box mean with the edges held (np.convolve 'same' would tilt the ends)."""
+    if k <= 1:
+        return a
+    pad = k // 2
+    ext = np.concatenate([np.full(pad, a[0]), a, np.full(pad, a[-1])])
+    return np.convolve(ext, np.ones(k) / float(k), mode="valid")
+
+
+def fissure_field(slab):
+    """The slab's OWN vertical grain as a 0..1 field per canvas column: 1 = the darkest groove.
+
+    The 31st pass' read named "the relief of the bark not tied to the toes" - the toe rhythm was
+    a designed table sitting on a material that has a rhythm of its own. So the toes are cut by
+    the bark itself now: this field is the column luminance of the very slab the canvas paints
+    with, smoothed to the grain's width and normalised between its 12th and 88th percentile.
+    """
+    grey = np.asarray(slab.convert("L")).astype(np.float64)
+    col = box_smooth(grey.mean(axis=0), FISSURE_SMOOTH)
+    lo, hi = np.percentile(col, 12.0), np.percentile(col, 88.0)
+    return np.clip((hi - col) / max(1.0, hi - lo), 0.0, 1.0)
+
+
+def build_masks(rng, fiss):
     """The silhouette as ONE closed curve: the bole's sides, then the flare's scalloped underside.
 
     Four reads of the earlier cuts, and the silhouette probe behind them, converge on one
@@ -150,18 +216,22 @@ def build_masks(rng):
         u = (x - cx) / shoulder
         if abs(u) >= 1.0:
             return 0.0
-        # the flare's overall mass: deepest at the trunk, tapering to nothing at the shoulders
-        base = h * BASE_DEPTH * (1.0 - u * u) ** 1.4
-        # ... plus the toe lobes of LOBE_TABLE, each a smooth bump of its own width and depth.
-        # Two earlier envelopes of this canvas (sine waves, then a single envelope) both
-        # measured a long run within 1 px of one row - "the roots hanging from a flat board" -
-        # because a smooth curve with a shallow slope is exactly what the eye calls flat. The
-        # lobes are strong enough that the peaks differ from the notches by 10-14 px.
+        # the flare's overall mass: deepest at the trunk, tapering to nothing at the shoulders -
+        # BASE_BEND < 1 keeps this curve's ends STEEP (see BASE_BEND for what that is and is not
+        # worth, measured).
+        base = h * BASE_DEPTH * (1.0 - u * u) ** BASE_BEND
+        # ... plus the toe lobes of LOBE_TABLE, each a smooth bump of its own width and depth -
+        # but CUT BY THE MATERIAL: the slab's own dark fissure under a toe lets it reach further
+        # down, a smooth band of the same slab stops it short, so the silhouette's rhythm and
+        # the bark's grain are the same rhythm ("the relief of the bark not tied to the toes").
+        col = int(min(CANVAS_W * SUPER - 1, max(0.0, x)))
+        cut = 1.0 + FISSURE_CUT * (fiss[min(CANVAS_W - 1, col // SUPER)] - 0.5) * 2.0
+        toe = 0.0
         for (x_frac, d_frac, w_frac) in LOBE_TABLE:
             t = (u - x_frac) / w_frac
             if abs(t) < 1.0:
-                base += h * d_frac * math.cos(math.pi * t * 0.5) ** 2
-        return base
+                toe += h * d_frac * math.cos(math.pi * t * 0.5) ** 2
+        return base + toe * cut
 
     # the bole's sides: they curve outward as they go down (COLUMN_BEND), a couple of pixels of
     # meander so the silhouette is not a machine rectangle
@@ -210,7 +280,8 @@ def paint(seed=SEED):
     oy = rng.randrange(0, bark.height - CANVAS_H)
     slab = bark.crop((ox, oy, ox + CANVAS_W, oy + CANVAS_H))
 
-    mask, ground, lobes, cx, base_half, top_half = build_masks(rng)
+    fissure = fissure_field(slab)
+    mask, ground, lobes, cx, base_half, top_half = build_masks(rng, fissure)
     m = np.asarray(mask).astype(np.float64) / 255.0
     rgb = np.asarray(slab).astype(np.float64)
 
@@ -250,6 +321,24 @@ def paint(seed=SEED):
                 if y > ty + r * dy * 0.45:
                     rgb[y, x] *= 0.86
 
+    # the material's fissures are painted into the notch rows as well as cut into the edge: the
+    # rows below the soil line take up to NOTCH_SHADE of the local groove's darkness, strongest
+    # at the column's own toe tip, so a groove runs down the surface and off the edge instead of
+    # stopping dead at the silhouette.
+    lows = np.zeros(CANVAS_W, dtype=np.int64)
+    for x in range(CANVAS_W):
+        col_ink = np.nonzero(m[:, x] > 0.4)[0]
+        lows[x] = int(col_ink.max()) if col_ink.size else -1
+    depth_px = np.clip(lows - int(round(ground)), 0, None).astype(np.float64)
+    shade = np.ones((CANVAS_H, CANVAS_W), dtype=np.float64)
+    ys_all = np.arange(CANVAS_H, dtype=np.float64)
+    for x in range(CANVAS_W):
+        if depth_px[x] <= 0.0:
+            continue
+        below = np.clip((ys_all - ground) / depth_px[x], 0.0, 1.0) ** 1.2
+        shade[:, x] = 1.0 - NOTCH_SHADE * fissure[x] * below
+    rgb *= shade[:, :, None]
+
     alpha = (m * 255.0).clip(0, 255).astype(np.uint8)
     out = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), "RGB").convert("RGBA")
     out.putalpha(Image.fromarray(alpha))
@@ -271,7 +360,7 @@ def paint(seed=SEED):
         if y >= 1:
             arr[y - 1, x, :3] *= 0.90
     out = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA")
-    return out, tones, soil, ground
+    return out, tones, soil, ground, fissure
 
 
 def write_meta(png_path, pixels_per_unit, readable, alpha, guid):
@@ -322,7 +411,7 @@ BOXES = (("Poplar", 0.1400, 0.1991), ("Pine", 0.1600, 0.1800), ("Willow", 0.2000
 LENSES = (("catalogue tree", 414.21), ("yard", 117.40))
 
 
-def report(img, path, tones, soil, ground):
+def report(img, path, tones, soil, ground, fissure):
     a = np.asarray(img.convert("RGBA")).astype(np.float64)
     ink = a[:, :, 3] > 8
     # A toe whose tip runs past the canvas' own bottom edge is cut off flat by it: measured on
@@ -338,6 +427,34 @@ def report(img, path, tones, soil, ground):
           % (ink.mean(), (a[:, :, 3] > 250).mean(), tones, soil))
     print("ART-0-BOLE-FOOT ink on the canvas bottom row = %d px, deepest inked row = %d of %d"
           % (cut, int(np.nonzero(ink.any(axis=1))[0].max()), img.height - 1))
+
+    # 32nd pass witnesses: the five toes as the canvas' OWN rows, and how much of that rhythm
+    # is the material's own. `depth` is px below the soil line; `fiss` is the bark's darkness
+    # under that toe (0 = its smoothest band, 1 = its darkest groove).
+    lows = np.zeros(img.width, dtype=np.int64)
+    for x in range(img.width):
+        c = np.nonzero(ink[:, x])[0]
+        lows[x] = int(c.max()) if c.size else -1
+    depth = lows - int(round(ground))
+    cx_c = img.width * 0.5
+    shoulder_c = img.width * COLUMN_BASE * 0.5 * 0.995
+    print("ART-0-BOLE-FOOT the five toes (depth below the soil line, px) and the bark under them:")
+    for i, (xf, df, wf) in enumerate(LOBE_TABLE):
+        x = int(round(cx_c + xf * shoulder_c))
+        print("    toe %d at x %3d: depth %2d px  fissure %.3f  %s"
+              % (i + 1, x, max(0, int(depth[x])), fissure[min(img.width - 1, max(0, x))],
+                 "deepest" if max(0, int(depth[x])) == max(0, int(depth.max())) else ""))
+    print("ART-0-BOLE-FOOT toes depth %d..%d px (spread %d), table depths %.3f..%.3f"
+          % (max(0, int(depth[depth > 0].min())), int(depth.max()),
+             int(depth.max()) - max(0, int(depth[depth > 0].min())),
+             min(d[1] for d in LOBE_TABLE), max(d[1] for d in LOBE_TABLE)))
+    sel = depth > 0
+    if sel.sum() > 8:
+        f = fissure[:img.width][sel].astype(np.float64)
+        d = depth[sel].astype(np.float64)
+        corr = float(np.corrcoef(f, d)[0, 1])
+        print("ART-0-BOLE-FOOT the edge and the grain: corr(fissure, depth) = %+.3f over the %d "
+              "columns below the soil line" % (corr, int(sel.sum())))
     print("ART-0-BOLE-FOOT the foot box per species (width = 1.25 x base, height = width/3.6):")
     worst = 0.0
     for name, bw, bh in BOXES:
@@ -378,12 +495,12 @@ def sheet(img):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    img, tones, soil, ground = paint()
+    img, tones, soil, ground, fissure = paint()
     path = os.path.join(OUT_DIR, "bole_foot.png")
     img.save(path, "PNG", optimize=True)
     guid = existing_guid(path) or new_guid(random.Random(11))
     write_meta(path, int(PPU), True, True, guid)
-    bottom = report(img, path, tones, soil, ground)
+    bottom = report(img, path, tones, soil, ground, fissure)
     if "--sheet" in os.sys.argv:
         sheet(img)
     ok = abs(CANVAS_W / float(CANVAS_H) - 3.6) < 1e-9 and bottom == 0

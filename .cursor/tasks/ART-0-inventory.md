@@ -160,3 +160,20 @@ pair), and two 4x zooms of the shipped still both report organic jagged silhouet
 leaflets and no texture-crop edge. Nothing was moved, on purpose. What is still open there: the
 rig's own module seams and the base gap (the 17th pass' item), and the 1171 leaf parts under
 0.02 m that keep the material - the owner list in the report is their population.
+
+**The base gap is CLOSED (31st pass) and the foot is painted (32nd pass)** -
+`Trials/Runs/art-0-bolefoot-31st-report.md`, `Trials/Runs/art-0-bolefoot-32nd-report.md`. The
+17th pass' "base gap" was one row of pixels with a geometric cause (the trunk's own cards start
+1.25 mm above the ground line and the rasterizer's centre rule paints a full row of backdrop
+under the bole): the tree now draws a painted bole flare on the base part's own slot
+(`ArtParts.DressTreeFoot`, `Art/Tree/bole_foot.png`, box 1.25x the base box wide, bottom
+0.30 x height BELOW the ground). The 32nd pass repainted that canvas: the toe depths spread
+4.0x -> 6.0x (measured by the new `Tools/art0-toe-depths.py`), and the toes are now cut by the
+bark MATERIAL's own grain (`fissure_field`, `corr(fissure, depth) = +0.450`; `NOTCH_SHADE`
+carries the same grooves below the soil line), which is what the 31st pass' read asked for.
+Three blind reads (two canvases, one 16x frame) all chose the new canvas; one 8x frame read
+missed the change and is recorded as a miss (`Tools/art0-crop-diff.py`: 138 of 1210 px of that
+crop differ). Still open in this family: the bole's ~33 flat `Tiled` bark cards and its two
+measured backdrop pockets (a single painted bole canvas would close both - a bigger art
+decision), and the two shoulder runs the silhouette probe still reports (9 / 11 columns inside
+a 2 px band; the instrument's own floor for a 4.8 px envelope is ~10-12, so no curve wins it).
