@@ -63,6 +63,10 @@ using UnityEngine;
 // the arms latched. Per-side read-back for the get-up and the recorder:
 // HandContactL/R, PressPhaseL/R (0 idle 1 lift 2 press 3 hold 4 plant),
 // PressStrokeExtensionL/R, PressShoulderLiftL/R, PressLiftMax, PressStrokesL/R.
+// The maxima are RUN-scoped since arms cycle 10 (a reset by BeginStroke cannot
+// make a published maximum fall); the stroke in flight is read from
+// PressLastStrokeExtensionL/R, PressLastStrokeShoulderExtL/R and
+// PressLastStrokeShoulderLiftL/R.
 [DefaultExecutionOrder(10)]
 public class ArmDrive : MonoBehaviour
 {
@@ -294,20 +298,36 @@ public class ArmDrive : MonoBehaviour
     public float ArmTargetElbowR { get; private set; }
     public int PressStrokesL { get; private set; }
     public int PressStrokesR { get; private set; }
-    // Largest elbow extension of the last stroke, degrees (the acceptance wants
-    // more than 20).
+    // Largest elbow extension over the WHOLE RUN, degrees (the acceptance wants
+    // more than 20). Run-scoped since arms cycle 10: every one of these maxima
+    // used to be reset by `BeginStroke`, so the number the recorder published was
+    // the LAST stroke's, and a run whose final stroke is cut off by the end of
+    // the trial published 0.000 for a press that really extended -- the "strokes
+    // 0.0 deg" reading on p_arms81 (its own CSV reaches 75.80 deg on that side).
+    // The last stroke's own value is kept separately below (PressLastStroke*).
     public float PressStrokeExtensionL { get; private set; }
     public float PressStrokeExtensionR { get; private set; }
-    // Largest shoulder extension the last stroke achieved, degrees.
+    // Largest shoulder extension over the whole run, degrees.
     public float PressStrokeShoulderExtL { get; private set; }
     public float PressStrokeShoulderExtR { get; private set; }
-    // Largest pelvis rise measured inside one press stroke, metres.
+    // Largest pelvis rise measured inside one press stroke, metres: this one is
+    // already run-scoped (`TrackStroke` only ever raises it, nothing resets it),
+    // so cycle 9's note calling it stroke-scoped was wrong about this column.
     public float PressLiftMax { get; private set; }
-    // Largest shoulder rise measured inside one press stroke, per side, metres:
-    // the palm is latched on the slab, so this is the push itself, not the
-    // pelvis (which only follows if the legs hold).
+    // Largest shoulder rise over the whole run, per side, metres: the palm is
+    // latched on the slab, so this is the push itself, not the pelvis (which
+    // only follows if the legs hold).
     public float PressShoulderLiftL { get; private set; }
     public float PressShoulderLiftR { get; private set; }
+    // The last stroke's own maxima, so the run-scoped numbers above lose no
+    // information: read these when the question is about one stroke, the ones
+    // above when the question is what the run ever achieved.
+    public float PressLastStrokeExtensionL { get; private set; }
+    public float PressLastStrokeExtensionR { get; private set; }
+    public float PressLastStrokeShoulderExtL { get; private set; }
+    public float PressLastStrokeShoulderExtR { get; private set; }
+    public float PressLastStrokeShoulderLiftL { get; private set; }
+    public float PressLastStrokeShoulderLiftR { get; private set; }
     // Lateral offset of the latched palm from the shoulder pivot, metres.
     public float PressPlantOffsetL { get; private set; }
     public float PressPlantOffsetR { get; private set; }
@@ -416,6 +436,12 @@ public class ArmDrive : MonoBehaviour
     private readonly int[] strokeCount = new int[2];
     private readonly float[] strokeExt = new float[2];
     private readonly float[] strokeShoulderExt = new float[2];
+    // Run-scoped copies of the three stroke maxima above (arms cycle 10). Never
+    // reset, including by BeginStroke: this is what the published maxima read,
+    // so a trial that ends mid-stroke still reports what the press achieved.
+    private readonly float[] runStrokeExtMax = new float[2];
+    private readonly float[] runShoulderExtMax = new float[2];
+    private readonly float[] runShoulderLiftMax = new float[2];
     private readonly float[] contactSamples = new float[2];
     private readonly float[] contactHits = new float[2];
     // Matched press window state: latched on the down edge, monotone maxima.
@@ -1080,10 +1106,20 @@ public class ArmDrive : MonoBehaviour
             PressHandContactFractionR = contactHits[SideR] / contactSamples[SideR];
         PressStrokesL = strokeCount[SideL];
         PressStrokesR = strokeCount[SideR];
-        PressStrokeExtensionL = strokeExt[SideL];
-        PressStrokeExtensionR = strokeExt[SideR];
-        PressStrokeShoulderExtL = strokeShoulderExt[SideL];
-        PressStrokeShoulderExtR = strokeShoulderExt[SideR];
+        // Run-scoped, read from the never-reset copies: a stroke in flight must
+        // not be able to make the published maximum fall (arms cycle 10).
+        PressStrokeExtensionL = runStrokeExtMax[SideL];
+        PressStrokeExtensionR = runStrokeExtMax[SideR];
+        PressStrokeShoulderExtL = runShoulderExtMax[SideL];
+        PressStrokeShoulderExtR = runShoulderExtMax[SideR];
+        PressShoulderLiftL = runShoulderLiftMax[SideL];
+        PressShoulderLiftR = runShoulderLiftMax[SideR];
+        PressLastStrokeExtensionL = strokeExt[SideL];
+        PressLastStrokeExtensionR = strokeExt[SideR];
+        PressLastStrokeShoulderExtL = strokeShoulderExt[SideL];
+        PressLastStrokeShoulderExtR = strokeShoulderExt[SideR];
+        PressLastStrokeShoulderLiftL = strokeShoulderLift[SideL];
+        PressLastStrokeShoulderLiftR = strokeShoulderLift[SideR];
 
         if (armDebug > 0f) LogArmState();
     }
@@ -1158,21 +1194,23 @@ public class ArmDrive : MonoBehaviour
         {
             strokeStall[i] += dt;
         }
+        // The run-scoped copy of every maximum is raised here and NEVER reset
+        // (BeginStroke does not touch it), so the published maximum is the run's,
+        // not the last stroke's (arms cycle 10).
+        if (strokeExt[i] > runStrokeExtMax[i]) runStrokeExtMax[i] = strokeExt[i];
         float shoulderAngle = shoulder[i] != null ? shoulder[i].jointAngle : 0f;
         float shoulderExt = shoulderAngle - strokeStartShoulder[i];
         if (shoulderExt > strokeShoulderExt[i]) strokeShoulderExt[i] = shoulderExt;
+        if (strokeShoulderExt[i] > runShoulderExtMax[i]) runShoulderExtMax[i] = strokeShoulderExt[i];
         float pelvisY = pelvisBody != null ? pelvisBody.position.y : 0f;
         float lift = pelvisY - strokeStartPelvisY[i];
         if (lift > PressLiftMax) PressLiftMax = lift;
         // The palm is latched on the slab through the stroke, so the shoulder
         // pivot rising is the push itself, independent of what the legs do.
         float shoulderLift = ShoulderPivotWorld(i).y - strokeStartShoulderY[i];
-        if (shoulderLift > strokeShoulderLift[i])
-        {
-            strokeShoulderLift[i] = shoulderLift;
-            if (i == SideL) PressShoulderLiftL = shoulderLift;
-            else PressShoulderLiftR = shoulderLift;
-        }
+        if (shoulderLift > strokeShoulderLift[i]) strokeShoulderLift[i] = shoulderLift;
+        if (strokeShoulderLift[i] > runShoulderLiftMax[i])
+            runShoulderLiftMax[i] = strokeShoulderLift[i];
     }
 
     // ─── plant geometry ───

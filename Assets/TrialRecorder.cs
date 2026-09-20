@@ -1914,7 +1914,11 @@ public class TrialRecorder
         // Arm drive, per side. armSwingFraction: how much of the run the walk
         // counter swing was engaged. armHandContactFraction*: real palm-on-ground
         // contacts while the body is down (handGrounded* is only the slop test).
-        // armPressStroke*: the last stroke of the fall press.
+        // armPressStroke*: the fall press's own maxima over the WHOLE RUN since
+        // arms cycle 10 (they used to be the last stroke's, so a trial ending
+        // mid-stroke published 0.000 for a press that really extended). The
+        // stroke in flight is not published; ArmDrive keeps it as
+        // PressLastStroke* for a reader inside the engine.
         AppendNum(json, "armSwingFraction",
             samples > 0 ? samplesArmSwingOn / (float)samples : 0f);
         AppendNum(json, "armHandContactFractionL",
@@ -1934,9 +1938,9 @@ public class TrialRecorder
         AppendNum(json, "armPressShoulderLiftL", armDrive != null ? armDrive.PressShoulderLiftL : 0f);
         AppendNum(json, "armPressShoulderLiftR", armDrive != null ? armDrive.PressShoulderLiftR : 0f);
         // ─── The MATCHED press window (arms cycle 8) ───
-        // The two numbers above are stroke scoped, and on the press-OFF control
-        // no stroke ever starts, so they read 0.000 there by construction and the
-        // control arm of any A/B is empty. These open on the DOWN EDGE instead
+        // The numbers above are stroke scoped and zero on the press-OFF control,
+        // where no stroke ever starts, so that arm of any A/B is empty. These
+        // open on the DOWN EDGE instead
         // and are sampled while the body is down, so the press-ON run and the
         // press-OFF run of one build report the same columns over the same
         // simulated seconds. armPressWindowRiseL/R is the shoulder-pivot rise,
