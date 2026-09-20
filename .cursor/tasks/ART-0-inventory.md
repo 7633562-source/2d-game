@@ -58,9 +58,11 @@ downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the ar
 2. Campfire (flame/embers) - the three logs DELIVERED (`art-0-logs-19th-report.md`), the flame core
    painted (`art-0-flame-1909m-report.md`); sparks/smoke/embers stay procedural by decision.
 3. Flowers (`PlantFlower`) - DELIVERED (`art-0-flower-20th-report.md`: `petal`, `petal_tip`, `cup`,
-   `calyx`, `disk` in `Art/Flower/`). Still missing -> `gap 3b`: the foliage (`Leaflet*`/`Leaf_*`, the
-   12 kinds' boxes span aspect 0.21-1.8 so one canvas cannot serve them), the lavender spike, the
-   autumn hip (`Spent`).
+   `calyx`, `disk` in `Art/Flower/`). Gap 3b, the FOLIAGE - DELIVERED (`art-0-leaflet-23rd-report.md`:
+   `Art/Flower/leaf.png` + `leaf_erect.png`, one painted leaf-pair canvas per leaflet family, the rig's
+   16-card collage stepping aside; the family split 1.667-1.944 against 0.333-0.571 with
+   `ArtParts.LeafFamilyWide` 0.8, worst per-kind aspect error 1.364x on Iris). Still missing -> `gap 3b`:
+   the lavender spike (`Spike_i`) and the autumn hip (`Spent*`) - flat boxes, no canvas yet.
 4. Any Human clothing layer if the game shows one (skin/fabric/denim exist as materials but no cut
    garment sprites). OPEN.
 5. UI/HUD icons - out of scope for this scene unless Yury asks. OPEN.

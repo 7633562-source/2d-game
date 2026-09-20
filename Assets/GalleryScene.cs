@@ -492,10 +492,12 @@ public class GalleryScene : MonoBehaviour
             flowerParts += ArtParts.DressFlower(flower.transform, true);
         }
         Add(root, "flower bed  (rose, daisy, tulip, sunflower)",
-            "Art/Flower/petal.png + petal_tip.png + cup.png + calyx.png + disk.png",
+            "Art/Flower/petal.png + petal_tip.png + cup.png + calyx.png + disk.png"
+            + " + leaf.png / leaf_erect.png",
             ArtLibrary.HasArt(ArtParts.FlowerPetalKey),
             "PlantFlower.BuildFlower dresses its own petals, " + flowerParts + " parts on the row"
-            + " (foliage, lavender spike and the autumn hip are still boxes: ART-0 gap 3b)");
+            + " (the foliage is painted too now, one canvas per leaflet family: ART-0 gap 3b"
+            + " delivered; the lavender spike and the autumn hip are still boxes)");
 
         ScaleBarAt(root, x - 1.4f, "berry");
         RowBounds["berry"] = new Bounds(new Vector3(x + 1.35f, 0.8f, 0f), new Vector3(7.6f, 3.4f, 0f));

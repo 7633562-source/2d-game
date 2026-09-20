@@ -27,7 +27,11 @@ EXTRA = [("Art/Campfire/core.png", "Campfire/core"),
          ("Art/Flower/petal_tip.png", "Flower/petal_tip"),
          ("Art/Flower/cup.png", "Flower/cup"),
          ("Art/Flower/calyx.png", "Flower/calyx"),
-         ("Art/Flower/disk.png", "Flower/disk")]
+         ("Art/Flower/disk.png", "Flower/disk"),
+         # ART-0 gap 3b (20.09): the flower's foliage - one canvas per leaflet family, the
+         # same luminance convention (shape in alpha, the kind's tint multiplies it).
+         ("Art/Flower/leaf.png", "Flower/leaf"),
+         ("Art/Flower/leaf_erect.png", "Flower/leaf_erect")]
 EXPECT_PPU = {"ground_fill": 128, "ground_cap": 100, "sky": 32, "sign_finish": 100}
 # Everything on the Albedo path needs CPU pixels (Sprite.Create / GetPixelBilinear); the
 # four Level pictures are only ever taken as Sprites, so they are not readable on purpose.

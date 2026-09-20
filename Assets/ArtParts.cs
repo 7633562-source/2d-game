@@ -13,6 +13,11 @@ using UnityEngine;
 // rectangle-equals-collider contract, not a missing texture: a missing texture
 // is ArtLibrary.Albedo(key) == null and must be drawn as a labelled ArtMissing
 // tile by the caller.
+//
+// The flower's leaflet is the one part the rig draws as a COLLAGE (16 flat cards
+// under the leaf's Visual, the part's own sprite switched off). `DressFlower`
+// takes that sprite back for a painted leaf-pair canvas and switches the cards
+// off, keeping the two aimed `Petiole` cards - see DressFlowerLeaves (ART-0 gap 3b).
 public static class ArtParts
 {
     public const float BarkTileMeters = 0.5f;
@@ -37,10 +42,36 @@ public static class ArtParts
     public const string FlowerCalyxKey = "Flower/calyx";
     public const string FlowerDiskKey = "Flower/disk";
 
+    // --- Flower FOLIAGE (ART-0 gap 3b, 20.09) -----------------------------------------
+    // One canvas per leaflet family, drawn in the leaf part's own box aspect and Sliced onto
+    // that box - the painted-parts rule (one part, one PNG; the box is the mapping). The
+    // rig paints a leaf as a COLLAGE of 16 flat cards (PlantFlower.PaintLeafMidrib: Blade,
+    // BladeTip, Midrib, MidribTip, Petiole, PetioleTip, Tip, TipTip, TipR, TipRTip, BladeR,
+    // BladeRTip, MidribR, MidribRTip, Leaflet0/1, LeafletTip0/1), each one flat tint with
+    // hard corners, and the petals painted in the 20th pass next to them carry a ramp - so
+    // the two halves of one plant no longer looked like the same drawing. The cards step
+    // aside for the canvas; the two aimed `Petiole` cards stay, because their direction is
+    // computed at build time from the stem join and a static canvas cannot aim.
+    public const string FlowerLeafKey = "Flower/leaf";
+    public const string FlowerLeafErectKey = "Flower/leaf_erect";
+
+    // The family split, by the LEAF PART's own box aspect (`ApplyKind` gives each kind its
+    // own leafSize): the broad leaflet pair is 1.667-1.944, the erect blade is 0.333-0.571,
+    // a factor-3 gap, so one threshold separates them with room to spare. Each canvas is
+    // drawn in the geometric mean box of its family: the worst aspect error in the set is
+    // 1.364x (Iris), and `Tools/gen-flower-leaf-textures.py` prints the whole table.
+    public const float LeafFamilyWide = 0.8f;
+
     public static readonly string[] FlowerKeys =
     {
-        FlowerPetalKey, FlowerTipKey, FlowerCupKey, FlowerCalyxKey, FlowerDiskKey
+        FlowerPetalKey, FlowerTipKey, FlowerCupKey, FlowerCalyxKey, FlowerDiskKey,
+        FlowerLeafKey, FlowerLeafErectKey
     };
+
+    public static string FlowerLeafKeyFor(float boxAspect)
+    {
+        return boxAspect >= LeafFamilyWide ? FlowerLeafKey : FlowerLeafErectKey;
+    }
 
     // A drawn part bigger than this is a unit mix-up, not a plant part.
     public const float MaxPartMeters = 40f;
@@ -76,6 +107,7 @@ public static class ArtParts
         public SpriteDrawMode mode;
         public SpriteTileMode tileMode;
         public Vector2 size;
+        public bool enabled;
         public bool valid;
     }
 
@@ -83,6 +115,13 @@ public static class ArtParts
     // back exactly the sprite the part was built with.
     private static readonly Dictionary<SpriteRenderer, Saved> Originals =
         new Dictionary<SpriteRenderer, Saved>();
+
+    // The flower leaf collage's cards this dress switched OFF (everything under the leaf's
+    // Visual except the aimed Petiole). Kept as a set, not as a flag on the card: the
+    // toggle then re-enables exactly what it hid and nothing else.
+    private static readonly HashSet<SpriteRenderer> HiddenCards =
+        new HashSet<SpriteRenderer>();
+
 
     // Name -> art key for the plant family only. Creature and human parts are
     // NOT matched here on purpose: their binding is ART-1b / ART-2 / ART-3 and
@@ -140,6 +179,8 @@ public static class ArtParts
     // name: a renderer is dressed only when a PlantFlower sits above it, so calling this on
     // a scene root (GalleryScene.SetRealArt does) cannot repaint a tree, a berry or the
     // yard's decor flowers, whose part names collide. Returns the number of parts redrawn.
+    // Two passes: the bloom (petals / lip / cup / sepals / disk, one canvas per role) and
+    // the foliage (one canvas per leaflet part, the rig's card collage stepping aside).
     public static int DressFlower(Transform root, bool real)
     {
         if (root == null)
@@ -165,10 +206,109 @@ public static class ArtParts
                 dressed++;
         }
 
+        dressed += DressFlowerLeaves(root, real);
+
         if (real && dressed > 0)
             Debug.Log("ART-PARTS flowers dressed=" + dressed + "/" + renderers.Length
                 + " root=" + root.name);
         return dressed;
+    }
+
+    // --- the foliage (ART-0 gap 3b) ---------------------------------------------------
+    // The leaf part is a HumanSegment named "Leaf_i" whose own sprite the rig switches OFF
+    // (`PaintLeafMidrib`: leaf.sprite.enabled = false) and replaces with a collage of cards
+    // hanging under `Visual`. The canvas takes that sprite back: the part's own box IS the
+    // canvas' box (one bone, one PNG), and the cards that drew the leaflet pair step aside.
+    // The `Petiole` / `PetioleTip` cards stay: the rig AIMS them at the stem join with
+    // PlantTree.AimPictureAlongY, and a static canvas cannot aim.
+    // The part is found by its COMPONENT, not by a renderer name: HumanSegment keeps its
+    // picture on a child GameObject called "Visual", so the renderer never carries the
+    // part's name (`InitializeVisualOnly`).
+    private static int DressFlowerLeaves(Transform root, bool real)
+    {
+        if (!real && HiddenCards.Count > 0)
+        {
+            // The toggle puts back exactly the cards this dress switched off.
+            int back = 0;
+            foreach (SpriteRenderer card in HiddenCards)
+            {
+                if (card == null)
+                    continue;
+                card.enabled = true;
+                back++;
+            }
+            Debug.Log("ART-PARTS leaf restore cardsBackOn=" + back + " of " + HiddenCards.Count);
+            HiddenCards.Clear();
+        }
+
+        HumanSegment[] parts = root.GetComponentsInChildren<HumanSegment>(true);
+        int dressed = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.visual == null || part.sprite == null)
+                continue;
+            if (!IsLeafPart(part.gameObject.name))
+                continue;
+            // Scoped by the HOST COMPONENT, exactly like the bloom pass: PlantStrawberry
+            // builds its own "Leaf_i" HumanSegments, and they carry Art/Strawberry/leaf.png.
+            if (part.GetComponentInParent<PlantFlower>() == null)
+                continue;
+
+            SpriteRenderer sr = part.sprite;
+            Vector2 box = BoxOf(sr);
+            if (box.x <= 0.0001f || box.y <= 0.0001f)
+                continue;
+
+            string key = FlowerLeafKeyFor(box.x / box.y);
+            if (string.IsNullOrEmpty(key) || ArtLibrary.Albedo(key) == null)
+                continue;   // no canvas: the caller shows a labelled ArtMissing tile
+
+            // enable: this renderer is disabled by the rig on purpose, and the canvas is
+            // what re-enables it. Dress() remembers the state it found (see Saved.enabled),
+            // so real=false puts the part back to a switched-off collage sprite.
+            if (!Dress(sr, key, 0f, real, true, true))
+                continue;
+            if (!real)
+                continue;   // restoring: Dress() has just put the part's own sprite back,
+                            // and the cards were switched on by the block above. Nothing
+                            // else to do - hiding them here was the first gate's bug.
+
+            dressed++;
+            HideLeafCards(part.visual, key);
+        }
+        return dressed;
+    }
+
+    private static bool IsLeafPart(string name)
+    {
+        return !string.IsNullOrEmpty(name)
+            && name.StartsWith("Leaf", System.StringComparison.Ordinal);
+    }
+
+    // Everything the canvas replaces under the leaf's Visual, except the aimed stalk and the
+    // leaf's own renderer. That renderer sits ON this very GameObject (HumanSegment keeps its
+    // picture on the child object `visual`), so a plain GetComponentsInChildren would switch
+    // the canvas itself off right after the dress put it on - it did, in the first gate run.
+    private static void HideLeafCards(Transform visual, string key)
+    {
+        SpriteRenderer[] cards = visual.GetComponentsInChildren<SpriteRenderer>(true);
+        int hidden = 0;
+        for (int i = 0; i < cards.Length; i++)
+        {
+            SpriteRenderer card = cards[i];
+            if (card == null || !card.enabled)
+                continue;
+            if (card.gameObject == visual.gameObject)
+                continue;   // the leaf part's own picture: the canvas lives here
+            if (card.gameObject.name.IndexOf("Petiole", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                continue;   // the aimed stalk, its direction is the rig's business
+            card.enabled = false;
+            HiddenCards.Add(card);
+            hidden++;
+        }
+        Debug.Log("ART-PARTS leaf " + visual.parent.name + " canvas=" + key
+            + " cardsHidden=" + hidden + " kept=Petiole*");
     }
 
     private static string FlowerKeyDeep(SpriteRenderer sr)
@@ -280,7 +420,16 @@ public static class ArtParts
     // renderer's own tint in place: the flower canvases carry the shading as grey and the
     // part's kind colour is the tint, so whiting it out would drop the kind (and the
     // canvas comes back through it). Every other caller keeps the old behaviour.
-    public static bool Dress(SpriteRenderer sr, string key, float tileMeters, bool real, bool keepColor = false)
+    // enable=true switches the renderer ON as part of the dress: the flower's leaf part is
+    // built with its sprite switched off (`PaintLeafMidrib` hides it behind the collage),
+    // and the canvas is what takes that slot back. Only reached once the canvas is in hand.
+    public static bool Dress(
+        SpriteRenderer sr,
+        string key,
+        float tileMeters,
+        bool real,
+        bool keepColor = false,
+        bool enable = false)
     {
         if (sr == null)
             return false;
@@ -294,6 +443,7 @@ public static class ArtParts
                 mode = sr.drawMode,
                 tileMode = sr.tileMode,
                 size = sr.size,
+                enabled = sr.enabled,
                 valid = true
             };
             Originals[sr] = saved;
@@ -306,6 +456,7 @@ public static class ArtParts
             sr.drawMode = saved.mode;
             sr.tileMode = saved.tileMode;
             sr.size = saved.size;
+            sr.enabled = saved.enabled;   // a part the rig had switched off stays off
             return true;
         }
 
@@ -378,6 +529,8 @@ public static class ArtParts
         if (!keepColor)
             sr.color = Color.white;
         sr.size = box;
+        if (enable)
+            sr.enabled = true;
 
         // NOTE: sr.bounds read here is not trustworthy - Unity rebuilds the
         // sprite mesh on the next frame, so a Sliced/Tiled conversion still

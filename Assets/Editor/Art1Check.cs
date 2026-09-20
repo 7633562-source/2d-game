@@ -44,6 +44,7 @@ public static class Art1Check
         CheckFlameCore();
         CheckFireLogs();
         CheckFlowerParts();
+        CheckFlowerFoliage();
         CheckMaterialPeriod();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
@@ -544,6 +545,142 @@ public static class Art1Check
         Object.DestroyImmediate(go);
     }
 
+    // ART-0 gap 3b (20.09): the flower's FOLIAGE. The leaf part is a HumanSegment whose own
+    // sprite the rig switches off behind a collage of 16 flat cards; the canvas takes that
+    // sprite back and the cards step aside (all but the two aimed Petiole cards). Checked on
+    // two kinds, one from each family: the canvas must be the one its box aspect asks for,
+    // the part must keep its own box (Sliced, size == the box), the transform must not move,
+    // and the gallery's toggle must put the collage back exactly as it was.
+    private static void CheckFlowerFoliage()
+    {
+        ArtLibrary.RealArtEnabled = true;
+        CheckLeafRig(FlowerKind.Rose, ArtParts.FlowerLeafKey, 2);
+        CheckLeafRig(FlowerKind.Iris, ArtParts.FlowerLeafErectKey, 2);
+        CheckLeafRig(FlowerKind.Sunflower, ArtParts.FlowerLeafKey, 4);
+    }
+
+    private static void CheckLeafRig(FlowerKind kind, string want, int expectLeaves)
+    {
+        GameObject go = new GameObject("Art1CheckLeaf_" + kind);
+        PlantFlower plant = (PlantFlower)go.AddComponent(PlantFlower.ComponentType(kind));
+        plant.seed = 11;
+        plant.BuildFlower();
+        Vector3 scale = go.transform.localScale;
+
+        // The leaf PART is a HumanSegment named "Leaf_i"; its picture lives on a child
+        // GameObject called "Visual" (HumanSegment.InitializeVisualOnly), so the part is
+        // found by its component - the same way ArtParts.DressFlowerLeaves finds it.
+        HumanSegment[] parts = go.GetComponentsInChildren<HumanSegment>(true);
+        int leaves = 0, withCanvas = 0, badFamily = 0, badBox = 0, whiteTint = 0;
+        int hiddenCards = 0, keptPetioles = 0, bodies = 0, petioleOff = 0, stillOn = 0;
+        float aspect = 0f;
+        Vector2 leafWorld = Vector2.zero;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.visual == null || part.sprite == null)
+                continue;
+            if (!part.gameObject.name.StartsWith("Leaf", System.StringComparison.Ordinal))
+                continue;
+
+            leaves++;
+            SpriteRenderer sr = part.sprite;
+            Vector2 box = ArtParts.BoxOf(sr);
+            aspect = box.y > 0.0001f ? box.x / box.y : 0f;
+            leafWorld = ArtParts.WorldBoxOf(sr);
+            if (ArtParts.FlowerLeafKeyFor(aspect) != want)
+                badFamily++;
+            string canvas = want.Substring(want.LastIndexOf('/') + 1);
+            if (!sr.enabled || sr.sprite == null || sr.sprite.texture == null
+                || sr.sprite.texture.name != canvas)
+                continue;
+            withCanvas++;
+            if (sr.drawMode != SpriteDrawMode.Sliced)
+                badBox++;
+            if (Mathf.Abs(sr.size.x - box.x) > 0.001f || Mathf.Abs(sr.size.y - box.y) > 0.001f)
+                badBox++;
+            if (sr.color == Color.white)
+                whiteTint++;
+
+            // The collage under this part's Visual: every card off but the aimed stalk.
+            SpriteRenderer[] cards = part.visual.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int c = 0; c < cards.Length; c++)
+            {
+                SpriteRenderer card = cards[c];
+                if (card == null || card.gameObject == part.visual.gameObject)
+                    continue;   // the leaf's own picture: the canvas lives on the Visual itself
+                bool petiole = card.gameObject.name.IndexOf("Petiole",
+                    System.StringComparison.OrdinalIgnoreCase) >= 0;
+                if (petiole)
+                {
+                    if (card.enabled)
+                        keptPetioles++;
+                    else
+                        petioleOff++;      // the aimed stalk must survive the dress
+                }
+                else if (card.enabled)
+                    stillOn++;
+                else
+                    hiddenCards++;
+                if (card.GetComponent<Collider2D>() != null
+                    || card.GetComponent<Rigidbody2D>() != null)
+                    bodies++;
+            }
+        }
+
+        Debug.Log("ART-1A-CHECK INFO leaf " + kind + " leaves=" + leaves + " withCanvas="
+            + withCanvas + " boxAspect=" + aspect.ToString("0.000") + " canvas=" + want
+            + " cardsHidden=" + hiddenCards + " petiolesKept=" + keptPetioles
+            + " leafBox=" + leafWorld.x.ToString("0.0000") + "x"
+            + leafWorld.y.ToString("0.0000") + "m");
+        Report("flower " + kind + " has its leaf parts (" + leaves + ")", leaves == expectLeaves);
+        Report("flower " + kind + " every leaf part carries Art/" + want + ".png",
+            withCanvas == leaves);
+        Report("flower " + kind + " every leaf part draws the canvas its box aspect asks for",
+            badFamily == 0 && withCanvas > 0);
+        Report("flower " + kind + " every leaf part keeps its own box (Sliced, size == box)",
+            badBox == 0);
+        Report("flower " + kind + " every leaf part keeps the kind colour (tint not white)",
+            whiteTint == 0);
+        Report("flower " + kind + " the collage stepped aside (" + hiddenCards
+            + " cards off, " + keptPetioles + " petioles kept, " + petioleOff + " stalks lost, "
+            + stillOn + " still on)",
+            stillOn == 0 && hiddenCards > 0 && keptPetioles > 0 && petioleOff == 0);
+        Report("flower " + kind + " leaf dressing moves no localScale", go.transform.localScale == scale);
+        Report("flower " + kind + " leaf renderers carry no body (rule zero)", bodies == 0);
+
+        // The gallery's toggle, in reverse: the collage comes back, the canvas goes.
+        ArtParts.DressFlower(go.transform, false);
+        int backOn = 0, canvasOff = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            HumanSegment part = parts[i];
+            if (part == null || part.visual == null || part.sprite == null)
+                continue;
+            if (!part.gameObject.name.StartsWith("Leaf", System.StringComparison.Ordinal))
+                continue;   // only the collage matters here: other parts' children are
+                            // their own business (the bloom's spot cards, the disk plate)
+            if (!part.sprite.enabled)
+                canvasOff++;
+            SpriteRenderer[] cards = part.visual.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int c = 0; c < cards.Length; c++)
+            {
+                if (cards[c] != null && cards[c].enabled
+                    && cards[c].gameObject != part.visual.gameObject)
+                    backOn++;
+            }
+        }
+        Debug.Log("ART-1A-CHECK INFO leaf " + kind + " restore: canvasOff=" + canvasOff
+            + " cardsBackOn=" + backOn);
+        Report("flower " + kind + " real=false puts the collage back", backOn == hiddenCards
+            + keptPetioles && canvasOff == leaves);
+
+        SpriteRenderer[] all = go.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < all.Length; i++)
+            ArtParts.Forget(all[i]);
+        Object.DestroyImmediate(go);
+    }
+
     // ART-0 22nd pass: a MATERIAL keeps its authored world period, so a part smaller than
     // one tile shows a CROP of the canvas at the canvas' own scale instead of the whole
     // canvas squeezed into the part. Measured on the shipped canvases: which draw mode the
@@ -883,9 +1020,12 @@ public static class Art1Check
         Row(sb, "flower cup (tulip/lily/crocus/daffodil vessel)", "Art/Flower/cup.png");
         Row(sb, "flower calyx (sepal + sepal tip)", "Art/Flower/calyx.png");
         Row(sb, "flower disk (daisy/sunflower head plate)", "Art/Flower/disk.png");
-        sb.AppendLine("  flower foliage (Leaflet*/Leaf_*) -> flat box: the boxes of the 12 kinds"
-            + " span aspect 0.21-1.8, one canvas cannot serve them (ART-0 gap 3b)");
-        sb.AppendLine("  flower lavender spike, autumn hip (Spent) -> flat box, no canvas yet (ART-0 gap 3b)");
+        Row(sb, "flower foliage, broad leaflet pair (rose, daisy, sunflower, poppy, violet, lavender)",
+            "Art/Flower/leaf.png");
+        Row(sb, "flower foliage, erect blade pair (tulip, lily, daffodil, crocus, iris, bluebell)",
+            "Art/Flower/leaf_erect.png");
+        sb.AppendLine("  flower lavender spike (Spike_i) -> flat box, no canvas yet (ART-0 gap 3b)");
+        sb.AppendLine("  flower autumn hip (Spent*) -> flat box, no canvas yet (ART-0 gap 3b)");
         Row(sb, "UI icons", "MISSING");
         Debug.Log(sb.ToString());
     }
