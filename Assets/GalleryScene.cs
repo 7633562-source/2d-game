@@ -476,21 +476,38 @@ public class GalleryScene : MonoBehaviour
         // the spent hip in this row). Both new entries sit BETWEEN the summer kinds on purpose:
         // the row's `RowBounds` - and so the camera the `flower` still is taken with - is
         // unchanged, which is what makes this pass' before/after pair the same camera.
+        // 26th pass: a seventh entry, an AUTUMN CROCUS, again between two kinds and inside the
+        // same bound. It is the only corm kind in the frame, so the same still now carries the
+        // corm STEM canvas (`Flower/stem_stout`, the 25th pass' open item 1) and the TALL hip
+        // canvas (`Flower/hip_tall`, this pass' change) - neither of which any earlier capture
+        // could show, because no corm kind and no tall-box hip was ever in a captured scene.
+        //
+        // The crocus is APPENDED, not inserted: `plant.seed = 11 + i` gives each plant its lean
+        // and height, so inserting it would have re-seeded the three kinds after it and moved
+        // their pictures (the first capture of this pass, `art0hip26`, shows exactly that). Its
+        // POSITION comes from `flowerAt[6]`, so the bed still reads rose, lavender, daisy,
+        // crocus, tulip, autumn rose, sunflower while the six accepted plants keep the seeds -
+        // and so the pictures - the 25th pass drew.
+        // - and this pass did NOT want a longer name if it costs a collision. The bed's labels
+        // are already too wide for their spacing (`lavender (spike)`'s tail runs into `daisy`,
+        // `(autumn hip)` into `sunflower` - pre-existing, both reads in the report); the second
+        // entry tried here, `crocus (corm, autumn hip)`, was ~700 px wide and added a third
+        // collision ON TOP of the two, so it was shortened before the delivered capture.
         FlowerKind[] flowerRow =
         {
             FlowerKind.Rose, FlowerKind.Lavender, FlowerKind.Daisy,
-            FlowerKind.Tulip, FlowerKind.Rose, FlowerKind.Sunflower
+            FlowerKind.Tulip, FlowerKind.Rose, FlowerKind.Sunflower, FlowerKind.Crocus
         };
-        float[] flowerAt = { 2.300f, 2.725f, 3.150f, 4.000f, 4.425f, 4.850f };
+        float[] flowerAt = { 2.300f, 2.725f, 3.150f, 4.000f, 4.425f, 4.850f, 3.575f };
         PlantSeason[] flowerSeason =
         {
             PlantSeason.Summer, PlantSeason.Summer, PlantSeason.Summer,
-            PlantSeason.Summer, PlantSeason.Autumn, PlantSeason.Summer
+            PlantSeason.Summer, PlantSeason.Autumn, PlantSeason.Summer, PlantSeason.Autumn
         };
         string[] flowerName =
         {
             "rose", "lavender (spike)", "daisy",
-            "tulip", "rose (autumn hip)", "sunflower"
+            "tulip", "rose (autumn hip)", "sunflower", "crocus (corm)"
         };
         int flowerParts = 0;
         for (int i = 0; i < flowerRow.Length; i++)
@@ -512,14 +529,15 @@ public class GalleryScene : MonoBehaviour
             ItemLabel(labelHost.transform, flowerName[i]);
             flowerParts += ArtParts.DressFlower(flower.transform, true);
         }
-        Add(root, "flower bed  (rose, lavender, daisy, tulip, autumn rose, sunflower)",
+        Add(root, "flower bed  (rose, lavender, daisy, crocus, tulip, autumn rose, sunflower)",
             "Art/Flower/petal.png + petal_tip.png + cup.png + calyx.png + disk.png"
-            + " + leaf.png / leaf_erect.png + spike.png + hip.png",
+            + " + leaf.png / leaf_erect.png + spike.png + hip.png / hip_tall.png / hip_wide.png",
             ArtLibrary.HasArt(ArtParts.FlowerPetalKey),
             "PlantFlower.BuildFlower dresses its own petals, foliage, spikes, hip and stem ("
-            + flowerParts + " parts on the row): the lavender spike, the autumn hip and the stem are"
-            + " painted canvases now - Art/Flower/spike.png, hip.png, stem.png and stem_stout.png"
-            + " (ART-0 gap 3b closed)");
+            + flowerParts + " parts on the row). The autumn hip is THREE canvases chosen by the"
+            + " drawn box aspect - hip.png (round family), hip_tall.png (Tulip/Lily/Crocus/Bluebell)"
+            + " and hip_wide.png (Poppy alone) - and the corm crocus draws stem_stout.png; worst"
+            + " per-kind stretch 1.430x before, 1.113x after");
 
         ScaleBarAt(root, x - 1.4f, "berry");
         RowBounds["berry"] = new Bounds(new Vector3(x + 1.35f, 0.8f, 0f), new Vector3(7.6f, 3.4f, 0f));

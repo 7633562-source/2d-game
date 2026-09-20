@@ -69,10 +69,18 @@ downscaled (512x512 is plenty for grass/dirt/bark at this camera scale) - the ar
    drawn box aspect through `ArtParts.StemKeyFor` / `StemFamilyStout` 0.112, the rig's `Cone*` cards
    stepping aside, the winter `Frost*` / `WinterBud*` chips staying on the cane; worst per-kind aspect
    error 1.52x on Daffodil, 1.23x on the corm pair. **Gap 3b is now CLOSED**: every part of the flower
-   rig carries a painted canvas. Left in the set: the knot pattern is one canvas for all ten stalk
-   kinds, the hip canvas' aspect error on the tall kinds (1.35x Poppy / 1.37x Bluebell and Crocus), the
-   corm canvas has gate evidence but no frame read yet, and the level's / yard's DECOR flowers
-   (`YardAmbient.AddHousePart` builds its own petals) are flat cards of their own, not this rig.
+   rig carries a painted canvas. The hip is THREE canvases since the 26th pass
+   (`art-0-hip-26th-report.md`): `Art/Flower/hip.png` (round family), `hip_tall.png`
+   (Tulip/Lily/Crocus/Bluebell), `hip_wide.png` (Poppy), chosen by the drawn box aspect through
+   `ArtParts.HipKeyFor` / `HipFamilyTall` 0.906 / `HipFamilyWide` 1.268, and each canvas PAINTS its
+   form pre-squashed for its own family (`gen-flower-spike-textures.py`'s `hip_form_scale` 1.000 /
+   1.457 / 0.764 + `fitted_map`), so the world form the eye gets is the round hip's up to the family's
+   own box spread: worst per-kind error 1.536x -> 1.116x (tall), 1.320x -> 1.010x (Poppy), the round
+   family byte-identical at 1.077x. Left in the set: the knot pattern is one canvas for all ten stalk
+   kinds, the round family's own 1.077x spread (Daisy/Sunflower, untouched by design - that canvas is
+   the accepted reference), the corm canvas has gate evidence but no frame read yet, and the level's /
+   yard's DECOR flowers (`YardAmbient.AddHousePart` builds its own petals) are flat cards of their
+   own, not this rig.
 4. Any Human clothing layer if the game shows one (skin/fabric/denim exist as materials but no cut
    garment sprites). OPEN.
 5. UI/HUD icons - out of scope for this scene unless Yury asks. OPEN.

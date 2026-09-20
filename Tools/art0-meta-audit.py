@@ -34,9 +34,12 @@ EXTRA = [("Art/Campfire/core.png", "Campfire/core"),
          ("Art/Flower/leaf_erect.png", "Flower/leaf_erect"),
          # ART-0 gap 3b, the last two rows (24th pass, 20.09): the lavender spike and the
          # autumn hip. Same luminance convention (shape in alpha, the kind's tint multiplies
-         # it), so they must be readable too.
+         # it), so they must be readable too. The hip is three canvases since the 26th pass
+         # (the box aspect picks the family): hip.png, hip_tall.png, hip_wide.png.
          ("Art/Flower/spike.png", "Flower/spike"),
          ("Art/Flower/hip.png", "Flower/hip"),
+         ("Art/Flower/hip_tall.png", "Flower/hip_tall"),
+         ("Art/Flower/hip_wide.png", "Flower/hip_wide"),
          # ART-0 gap 3b, the last flat element (25th pass, 20.09): the stalk and the two corm
          # kinds' stem. Same luminance convention (shape in alpha, the kind's tint multiplies it),
          # so they must be readable too.

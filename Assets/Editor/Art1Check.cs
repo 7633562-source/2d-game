@@ -694,8 +694,21 @@ public static class Art1Check
         ArtLibrary.RealArtEnabled = true;
         CheckHeadRig(FlowerKind.Lavender, PlantSeason.Summer, ArtParts.FlowerSpikeKey, 4, 0);
         CheckHeadRig(FlowerKind.Lavender, PlantSeason.Autumn, ArtParts.FlowerSpikeKey, 4, 0);
+        // The hip is chosen by the drawn box aspect (26th pass). One rig per family, plus the two
+        // ends of the tall family and the flat Poppy: these are the boxes the live set spans
+        // (0.6957 Tulip .. 0.8205 Lily | 1.0000 Daisy .. 1.1562 Iris | 1.4062 Poppy).
         CheckHeadRig(FlowerKind.Rose, PlantSeason.Autumn, ArtParts.FlowerHipKey, 0, 1);
+        CheckHeadRig(FlowerKind.Daisy, PlantSeason.Autumn, ArtParts.FlowerHipKey, 0, 1);
+        CheckHeadRig(FlowerKind.Lily, PlantSeason.Autumn, ArtParts.FlowerHipTallKey, 0, 1);
+        CheckHeadRig(FlowerKind.Crocus, PlantSeason.Autumn, ArtParts.FlowerHipTallKey, 0, 1);
+        CheckHeadRig(FlowerKind.Tulip, PlantSeason.Autumn, ArtParts.FlowerHipTallKey, 0, 1);
+        CheckHeadRig(FlowerKind.Poppy, PlantSeason.Autumn, ArtParts.FlowerHipWideKey, 0, 1);
         CheckHeadRig(FlowerKind.Rose, PlantSeason.Summer, null, 0, 0);
+        // Measured, not assumed: a SPRING rig draws the petal fan, not the spent head
+        // (`spentHead` is autumn-only), so no hip canvas may appear there. The first version of
+        // this pass asserted a hip in spring and the gate failed it.
+        CheckHeadRig(FlowerKind.Crocus, PlantSeason.Spring, null, 0, 0);
+        CheckHeadRig(FlowerKind.Poppy, PlantSeason.Spring, null, 0, 0);
     }
 
     private static void CheckHeadRig(
@@ -709,7 +722,7 @@ public static class Art1Check
         Vector3 scale = go.transform.localScale;
 
         int spikes = 0, hips = 0, withCanvas = 0, badBox = 0, whiteTint = 0, wrongCanvas = 0;
-        int hiddenCards = 0, stillOn = 0, keptSepals = 0, keptDisk = 0, bodies = 0;
+        int hiddenCards = 0, stillOn = 0, keptSepals = 0, keptDisk = 0, bodies = 0, badFamily = 0;
         Vector2 spikeWorld = Vector2.zero, hipWorld = Vector2.zero;
         float spikeAspect = 0f, hipAspect = 0f;
 
@@ -741,6 +754,9 @@ public static class Art1Check
             {
                 hipAspect = box.y > 0.0001f ? box.x / box.y : 0f;
                 hipWorld = ArtParts.WorldBoxOf(sr);
+                // The canvas the family asks for, off the SAME box the dress read.
+                if (ArtParts.HipKeyFor(hipAspect) != want)
+                    badFamily++;
             }
 
             string canvas = CanvasName(want);
@@ -794,6 +810,7 @@ public static class Art1Check
         Debug.Log("ART-1A-CHECK INFO head " + kind + " " + season + " spikes=" + spikes
             + " hips=" + hips + " withCanvas=" + withCanvas
             + " spikeAspect=" + spikeAspect.ToString("0.000") + " hipAspect=" + hipAspect.ToString("0.000")
+            + " hipFamily=" + (hips > 0 ? ArtParts.HipKeyFor(hipAspect) : "none")
             + " canvas=" + (want ?? "none") + " cardsHidden=" + hiddenCards
             + " sepalsKept=" + keptSepals + " diskKept=" + keptDisk
             + " spikeBox=" + spikeWorld.x.ToString("0.0000") + "x" + spikeWorld.y.ToString("0.0000") + "m"
@@ -813,6 +830,9 @@ public static class Art1Check
             int wantParts = expectSpikes + expectHips;
             Report("flower " + kind + " " + season + " every head part carries Art/" + want + ".png",
                 withCanvas == wantParts);
+            Report("flower " + kind + " " + season + " the hip draws the canvas its box aspect asks"
+                + " for (HipKeyFor " + (hips > 0 ? ArtParts.HipKeyFor(hipAspect) : "no hip") + ")",
+                badFamily == 0);
             Report("flower " + kind + " " + season + " no head part draws another canvas",
                 wrongCanvas == 0);
             Report("flower " + kind + " " + season + " every head part keeps its own box (Sliced,"
@@ -828,7 +848,16 @@ public static class Art1Check
             bodies == 0);
 
         ArtParts.DressFlower(go.transform, false);
-        int backOn = 0, canvasOff = 0, headParts = 0;
+        int backOn = 0, canvasOff = 0, headParts = 0, nestedParts = 0;
+        // A nested PART is not a card of the collage: the autumn `Disk` is a HumanSegment of its
+        // own (PlantFlower line 226 parents it to the bloom) with its own picture and its own
+        // canvas, and counting it here is what failed the first version of this pass on Daisy and
+        // Poppy - the two kinds whose diskSize is not zero.
+        List<SpriteRenderer> nested = new List<SpriteRenderer>();
+        HumanSegment[] kids = go.GetComponentsInChildren<HumanSegment>(true);
+        for (int i = 0; i < kids.Length; i++)
+            if (kids[i] != null && kids[i].sprite != null)
+                nested.Add(kids[i].sprite);
         for (int i = 0; i < parts.Length; i++)
         {
             HumanSegment part = parts[i];
@@ -848,12 +877,19 @@ public static class Art1Check
             SpriteRenderer[] cards = part.GetComponentsInChildren<SpriteRenderer>(true);
             for (int c = 0; c < cards.Length; c++)
             {
-                if (cards[c] != null && cards[c].enabled && cards[c] != part.sprite)
-                    backOn++;
+                if (cards[c] == null || !cards[c].enabled || cards[c] == part.sprite)
+                    continue;
+                if (nested.Contains(cards[c]))
+                {
+                    nestedParts++;      // the Disk part's own picture: not a collage card
+                    continue;
+                }
+                backOn++;
             }
         }
         Debug.Log("ART-1A-CHECK INFO head " + kind + " " + season + " restore: canvasOff="
-            + canvasOff + " cardsBackOn=" + backOn + " headParts=" + headParts);
+            + canvasOff + " cardsBackOn=" + backOn + " headParts=" + headParts
+            + " nestedPartsKept=" + nestedParts);
         if (!string.IsNullOrEmpty(want))
             Report("flower " + kind + " " + season + " real=false puts the head cards back",
                 canvasOff == headParts && backOn == hiddenCards + keptSepals + keptDisk

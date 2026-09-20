@@ -72,12 +72,46 @@ public static class ArtParts
     //     `SpentR`, `SpentRTip`, `SpentCap*`, `SpentCapFill*`).
     // Both canvases are drawn in the part's own box: the spike's box is `bloomSize` of one kind
     // (0.028 x 0.050 m, aspect 0.560) so its four parts are drawn EXACTLY, the hip's is the
-    // geometric mean of the eleven bloom boxes (0.0802 x 0.0834 m, aspect 0.962, worst kind
-    // error 1.430x on Poppy) - both tables are printed by `Tools/gen-flower-spike-textures.py`.
+    // geometric mean of its own family's live boxes (one canvas for all eleven kinds until the
+    // 26th pass - see the three keys below).
     // The rig's `Sepal*` (calyx) cards and the spent `Disk` STAY: they are painted parts, not
     // cards, and a spent hip keeps its sepals.
+    //
+    // THREE canvases, not one (26th pass, 20.09). The boxes the dress READS are not the authored
+    // ones: `HumanSegment.CreateBodySprite` snaps the placeholder to whole pixels at 256 px/m with
+    // a 64 px minimum side and takes ppu from the width, so the drawn box aspect is an integer
+    // pixel ratio. The eleven kinds' live boxes run 0.6957 (Tulip) .. 0.8205 (Lily) | 1.0000
+    // (Daisy, Sunflower) .. 1.1562 (Iris) | 1.4062 (Poppy). ONE canvas cannot answer that: the
+    // dress maps the canvas onto the box, so the box shapes the drawn form whatever the canvas'
+    // aspect is, and one form painted at the same fractions of every box reads as a narrow hip on
+    // a Tulip and a flat pancake on a Poppy - measured as a 1.536x / 1.320x error against the
+    // round hip (`Tools/art0-hip-form-probe.py`, `Tools/art0-hip-lens-ab.py`). The split sits in
+    // the two gaps of that set, and each canvas paints its form PRE-SQUASHED for its own family
+    // (`gen-flower-spike-textures.py`'s `hip_form_scale` + `fitted_map`, which prints the whole
+    // table): worst per-kind error 1.536x -> 1.116x (Lily, tall), 1.010x (Poppy), the round
+    // family untouched at 1.077x. Each canvas is drawn in the geometric mean of ITS OWN family's
+    // live boxes.
+    //
+    // The hip exists in AUTUMN only (`PlantFlower` line 222 `spentHead`): a spring or summer rig
+    // draws the petal fan instead, so these eleven boxes are the whole set a hip canvas is ever
+    // drawn in. The gate asserts that too - a spring rig takes no hip canvas.
     public const string FlowerSpikeKey = "Flower/spike";
-    public const string FlowerHipKey = "Flower/hip";
+    public const string FlowerHipKey = "Flower/hip";              // the round family (6 kinds)
+    public const string FlowerHipTallKey = "Flower/hip_tall";     // Tulip, Lily, Crocus, Bluebell
+    public const string FlowerHipWideKey = "Flower/hip_wide";     // Poppy alone: the flat bloom
+
+    // The two thresholds, at the geometric middle of each gap in the live set:
+    // sqrt(0.8205 * 1.0000) = 0.9058 and sqrt(1.1562 * 1.4062) = 1.2680. A box that drifts across
+    // one only swaps one hip canvas for another - it never leaves the hip undressed.
+    public const float HipFamilyTall = 0.906f;
+    public const float HipFamilyWide = 1.268f;
+
+    public static string HipKeyFor(float boxAspect)
+    {
+        if (boxAspect < HipFamilyTall)
+            return FlowerHipTallKey;
+        return boxAspect >= HipFamilyWide ? FlowerHipWideKey : FlowerHipKey;
+    }
 
     // --- The STEM (ART-0 gap 3b's last flat element, 25th pass) -------------------------
     // `PlantFlower` line 128 builds ONE `HumanSegment` named "Stem" per plant and paints it with
@@ -117,7 +151,9 @@ public static class ArtParts
     public static readonly string[] FlowerKeys =
     {
         FlowerPetalKey, FlowerTipKey, FlowerCupKey, FlowerCalyxKey, FlowerDiskKey,
-        FlowerLeafKey, FlowerLeafErectKey
+        FlowerLeafKey, FlowerLeafErectKey, FlowerSpikeKey,
+        FlowerHipKey, FlowerHipTallKey, FlowerHipWideKey,
+        FlowerStemKey, FlowerStemStoutKey
     };
 
     public static string FlowerLeafKeyFor(float boxAspect)
@@ -398,14 +434,16 @@ public static class ArtParts
             if (part.GetComponentInParent<PlantFlower>() == null)
                 continue;
 
-            string key = HeadKeyFor(part);
-            if (string.IsNullOrEmpty(key) || ArtLibrary.Albedo(key) == null)
-                continue;   // no canvas: the caller shows a labelled ArtMissing tile
-
             SpriteRenderer sr = part.sprite;
             Vector2 box = BoxOf(sr);
             if (box.x <= 0.0001f || box.y <= 0.0001f)
                 continue;
+
+            // The canvas is asked for by the part's BOX, like the stem and the leaf: the eleven
+            // kinds' live box aspects split into three hip families (see HipKeyFor).
+            string key = HeadKeyFor(part, box);
+            if (string.IsNullOrEmpty(key) || ArtLibrary.Albedo(key) == null)
+                continue;   // no canvas: the caller shows a labelled ArtMissing tile
 
             // enable: the rig switched this renderer off on purpose, and the canvas is what
             // takes that slot back. Dress() remembers the state it found (Saved.enabled), so
@@ -422,8 +460,9 @@ public static class ArtParts
     }
 
     // "Spike_i" is the lavender raceme; a "Bloom" that carries a `Spent*` card is the autumn
-    // seed head. Nothing else in the flower rig answers for a canvas here.
-    private static string HeadKeyFor(HumanSegment part)
+    // seed head, whose canvas is chosen by the drawn box aspect. Nothing else in the flower rig
+    // answers for a canvas here.
+    private static string HeadKeyFor(HumanSegment part, Vector2 box)
     {
         string name = part.gameObject.name;
         if (!string.IsNullOrEmpty(name)
@@ -431,7 +470,7 @@ public static class ArtParts
             return FlowerSpikeKey;
         if (string.Equals(name, "Bloom", System.StringComparison.Ordinal)
             && HasCardNamed(part.transform, "Spent"))
-            return FlowerHipKey;
+            return box.y > 0.0001f ? HipKeyFor(box.x / box.y) : FlowerHipKey;
         return null;
     }
 
