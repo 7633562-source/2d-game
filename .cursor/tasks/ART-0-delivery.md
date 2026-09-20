@@ -1432,3 +1432,53 @@ new geometry is the one the rule describes. Full numbers:
 
 
 
+
+## Thirty-first pass 20.09 (artist) - the base gap is named, measured, and closed with a painted bole foot
+
+Carried since the 17th pass: "the trunk's own module seams and the base gap". Re-proved on today's
+bytes before touching anything, and it is not a texture problem - it is one row of pixels with a
+geometric cause. `Tools/art0-bole-slit-probe.py`: row 1045, columns 867..895 at the bole's foot are
+EXACTLY the gallery backdrop `(76,82,92)`, 29 px, 100% - not a shadow, not bark. `ArtBoleProbe`
+(`Assets/Editor/ArtBoleProbe.cs`, runner `art0-bole-probe.sh`) named the layers and rendered the frame
+with each off: `GroundStrip` (order -2) and `GroundStrip/Surface` (order -1) both start at world
+y = +0.00000 m; the bole's own card `Stump/Visual/ConeCore` (order 0) bottoms out at y = +0.00125 m and
+the base part's disabled slot at +0.00062 m. Screen row 1045 spans world y -0.0007 .. +0.0017, its
+centre is at +0.0005, and neither the dirt nor the trunk covers it - so the rasterizer paints one whole
+row of backdrop. With the ground off the row is still backdrop, with the base off the ink above it
+disappears: neither layer owned it. That row is also the "flare cut flat at the top edge of the soil".
+
+**One picture change:** `Assets/Resources/Art/Tree/bole_foot.png` (288x80 px, aspect 3.6000,
+md5 `41d023091d6ff461d2ceb527c4767b69`), painted by `Tools/gen-tree-bole-foot-texture.py` in the bark
+material's own tones sampled off the shipped tile, at the material's own scale (1024 px/m), soil line at
+0.300 of its height. `ArtParts.DressTreeFoot` draws it once per tree on the base part's own slot
+(`Stump/Visual`), box = `1.25 x` the base part's box width and `width / 3.6` tall, i.e. the box aspect is
+the canvas aspect for every species (generator: worst aspect error 0.0000 over the five gallery species),
+bottom edge `0.30 x height` BELOW the part's box - 0.0146-0.0229 m of roots in the soil where the
+rasterizer needed 1.7 mm. `Art1Check.CheckTreeFoot` asserts it: `oak base=0.2000x0.2188m
+foot=0.2500x0.0694m local=(0.0000,-0.0955) bottom=-0.02021m baseBottom=0.00062m below=0.02083m
+mode=Sliced order=0/0 tex=bole_foot`, renderers 1829 -> 1830, no body, no localScale moved, `real=false`
+removes it again.
+
+**Evidence.** `art1-gate.sh` 381 OK / 0 FAIL / 0 compile errors; `art0-import-gate.sh` 0 failures;
+`art0-meta-audit.py` problems=0. Shipped stills, same lens, same pipeline: the new capture `art0bole31`
+vs `art0leaf29` differs by **226 pixels, all of them in `x 847..925, y 1045..1051`** - the bole's
+footprint and the rows the foot paints; the gap row goes 1 px -> 0 exact backdrop and the four rows above
+the dirt 195 -> 154. On the pass' probe frame the same row is 29/29 backdrop -> 0/29 (sample now bark
+`(149,116,80)`). Two blind pairwise reads (`Tools/art0-ab-tight.py`, seeds 7 and 13, sides drawn from the
+seed, map opened after the pick) both picked the `art0leaf29` panel as the one showing "a thin band of
+flat grey-blue background between the trunk and the ground". Import settings read back after import:
+`textureType 8`, `spriteMode 1`, `spriteMeshType 0`, `alphaIsTransparency 1`, `wrapU/wrapV 1`,
+`isReadable 1`, `spritePixelsToUnits 1024`; `ArtLibrary.Albedo` (line 139) is
+`Resources.Load<Texture2D>("Art/" + key)`, so the key `Tree/bole_foot` lands on that file.
+
+**Left open, with numbers.** (1) The canvas' look is this pass' weakest part: four cuts, four reads, the
+same class of complaint each time (a flat edge at the bottom of the flare), and the silhouette probe's
+residual is 10 columns within a 2 px band on the two shoulders. I would ship it; I would not call it
+finished. (2) The trunk's module seams above the foot are untouched on purpose (one picture per cycle):
+~33 flat cards on the base part alone, each a `Tiled` crop of the 0.5 m bark material, so a 0.11 m bole
+shows ~2.5x-magnified grain and every card restarts the pattern; two vertical backdrop pockets inside the
+bole (`x 859..861 y 861..890`, 80% exact backdrop; `x 901..903 y 831..885`) are the same phenomenon
+between cards. The change that closes both is one painted bole canvas taking the base part's own slot
+with the cards stepping aside - the mechanism the flower's leaf and this tree's leaf cards already use -
+and it is a bigger art decision than this pass was scoped for. Full numbers:
+`Trials/Runs/art-0-bolefoot-31st-report.md`.

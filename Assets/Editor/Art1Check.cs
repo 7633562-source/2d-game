@@ -49,6 +49,7 @@ public static class Art1Check
         CheckFlowerStems();
         CheckMaterialPeriod();
         CheckTreeLeafCards();
+        CheckTreeFoot();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
         CheckSlabStretch(6f);
@@ -1603,6 +1604,127 @@ public static class Art1Check
                 canvasMeters >= Mathf.Min(box.x, box.y) - 0.0001f);
 
         ArtParts.Forget(sr);
+        Object.DestroyImmediate(go);
+    }
+
+    // ART-0 31st pass: the tree's bole foot (`ArtParts.DressTreeFoot`). The picture claim is
+    // narrow and measurable, so it is asserted exactly: one renderer per tree, on the base
+    // part's own slot, its box aspect IS the canvas' aspect, its bottom edge is BELOW the
+    // part's own box (i.e. below the ground line the level draws its dirt to), it carries no
+    // body, and the dress moves no scale anywhere on the rig.
+    private static void CheckTreeFoot()
+    {
+        Texture2D canvas = ArtLibrary.Albedo(ArtParts.TreeBoleFootKey);
+        Report("tree bole foot Art/Tree/bole_foot.png (Albedo)", canvas != null);
+        if (canvas != null)
+            Debug.Log("ART-1A-CHECK INFO boleFoot " + canvas.width + "x" + canvas.height + " px aspect "
+                + (canvas.width / (float)canvas.height).ToString("0.000") + " readable="
+                + canvas.isReadable + " key=" + ArtParts.TreeBoleFootKey + " aspect constant="
+                + ArtParts.TreeBoleFootAspect.ToString("0.000") + " soil="
+                + ArtParts.TreeBoleFootSoil.ToString("0.00"));
+        Report("tree bole foot canvas aspect == ArtParts.TreeBoleFootAspect",
+            canvas != null && Mathf.Abs(canvas.width / (float)canvas.height
+                - ArtParts.TreeBoleFootAspect) <= 0.0005f);
+
+        ArtLibrary.RealArtEnabled = true;
+        GameObject go = new GameObject("Art1CheckTreeFoot");
+        PlantTree tree = go.AddComponent<PlantTree>();
+        tree.kind = TreeKind.Oak;
+        tree.seed = 11;
+        tree.rig = TreeRig.Static;
+        tree.BuildTree();
+
+        SpriteRenderer[] srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+        int bodiesBefore = BodyCount(srs);
+        int renderersBefore = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            if (srs[i] != null)
+                renderersBefore++;
+        }
+        Vector3[] scaleBefore = new Vector3[srs.Length];
+        for (int i = 0; i < srs.Length; i++)
+        {
+            if (srs[i] != null)
+                scaleBefore[i] = srs[i].transform.localScale;
+        }
+
+        ArtParts.DressAll(go.transform, true, ArtLibrary.Bark, ArtLibrary.Leaf, "");
+
+        SpriteRenderer slot = ArtParts.FindTreeBaseSlot(go.transform);
+        Report("oak has a base part to put a foot on (" + ArtParts.TreeBasePartName + "/Visual)",
+            slot != null);
+        Transform foot = slot != null ? slot.transform.Find(ArtParts.TreeBoleFootName) : null;
+        Report("oak base carries exactly one " + ArtParts.TreeBoleFootName, foot != null
+            && foot.GetComponentsInChildren<SpriteRenderer>(true).Length == 1);
+
+        if (slot != null && foot != null)
+        {
+            SpriteRenderer sr = foot.GetComponent<SpriteRenderer>();
+            Vector2 box = ArtParts.BoxOf(slot);
+            float expectWidth = box.x * ArtParts.TreeBoleFootWidth;
+            float expectHeight = expectWidth / ArtParts.TreeBoleFootAspect;
+            Vector2 world = ArtParts.WorldBoxOf(sr);
+            float slotBottom = slot.transform.position.y
+                - box.y * 0.5f * Mathf.Abs(slot.transform.lossyScale.y);
+            // from the transform, not from sr.bounds: Unity rebuilds a Sliced mesh on the next
+            // frame, so bounds still reports the Simple box in the frame the dress ran (the
+            // note in ArtParts.Dress says the same).
+            float footBottom = sr.transform.position.y - world.y * 0.5f;
+            Debug.Log("ART-1A-CHECK INFO boleFoot oak base=" + box.x.ToString("0.0000") + "x"
+                + box.y.ToString("0.0000") + "m foot=" + world.x.ToString("0.0000") + "x"
+                + world.y.ToString("0.0000") + "m local=(" + sr.transform.localPosition.x.ToString("0.0000")
+                + ", " + sr.transform.localPosition.y.ToString("0.0000") + ") bottom="
+                + footBottom.ToString("0.00000") + "m baseBottom=" + slotBottom.ToString("0.00000")
+                + "m below=" + (slotBottom - footBottom).ToString("0.00000") + "m mode=" + sr.drawMode
+                + " order=" + sr.sortingOrder + "/" + slot.sortingOrder + " tex="
+                + (sr.sprite != null && sr.sprite.texture != null ? sr.sprite.texture.name : "none"));
+
+            Report("oak foot draws Art/Tree/bole_foot.png, Sliced",
+                sr != null && sr.drawMode == SpriteDrawMode.Sliced && sr.sprite != null
+                && sr.sprite.texture != null && sr.sprite.texture.name == "bole_foot");
+            Report("oak foot box is 1.25x the base box wide, aspect "
+                + ArtParts.TreeBoleFootAspect.ToString("0.0"),
+                Mathf.Abs(world.x - expectWidth) <= 0.0005f
+                && Mathf.Abs(world.y - expectHeight) <= 0.0005f);
+            Report("oak foot bottom is BELOW the base part's box (the ground line)",
+                footBottom < slotBottom);
+            Report("oak foot reaches at least the canvas' soil share below the ground ("
+                + (expectHeight * ArtParts.TreeBoleFootSoil).ToString("0.0000") + " m)",
+                slotBottom - footBottom >= expectHeight * ArtParts.TreeBoleFootSoil - 0.0002f);
+            Report("oak foot draws on the base part's own sorting order",
+                sr.sortingOrder == slot.sortingOrder);
+            Report("oak foot carries no body (rule zero)",
+                sr.GetComponent<Collider2D>() == null && sr.GetComponent<Rigidbody2D>() == null
+                && foot.GetComponent<Collider2D>() == null
+                && foot.GetComponent<Rigidbody2D>() == null);
+        }
+
+        SpriteRenderer[] after = go.GetComponentsInChildren<SpriteRenderer>(true);
+        int renderersAfter = 0, moved = 0;
+        for (int i = 0; i < after.Length; i++)
+        {
+            if (after[i] != null)
+                renderersAfter++;
+        }
+        for (int i = 0; i < srs.Length && i < scaleBefore.Length; i++)
+        {
+            if (srs[i] != null && srs[i].transform.localScale != scaleBefore[i])
+                moved++;
+        }
+        Report("oak foot adds exactly one renderer (" + renderersBefore + " -> " + renderersAfter + ")",
+            renderersAfter == renderersBefore + 1);
+        Report("oak foot moves no localScale", moved == 0 && go.transform.localScale == Vector3.one);
+        Report("oak foot adds no body (rule zero)",
+            BodyCount(after) == bodiesBefore);
+
+        ArtParts.DressAll(go.transform, false, ArtLibrary.Bark, ArtLibrary.Leaf, "");
+        SpriteRenderer slotBack = ArtParts.FindTreeBaseSlot(go.transform);
+        Report("oak foot real=false removes the object again",
+            slotBack != null && slotBack.transform.Find(ArtParts.TreeBoleFootName) == null);
+
+        for (int i = 0; i < srs.Length; i++)
+            ArtParts.Forget(srs[i]);
         Object.DestroyImmediate(go);
     }
 

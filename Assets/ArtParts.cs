@@ -683,11 +683,147 @@ public static class ArtParts
                 dressed++;
         }
 
+        // The tree's own FOOT, once every renderer above has its picture (see the constants
+        // near TreeBoleFootKey): the base's cards stop 1.25 mm short of the ground line and
+        // the frame shows a row of backdrop under the bole because of it.
+        if (real)
+            dressed += DressTreeFoot(root);
+        else
+            RemoveTreeFoot(root);
+
         if (real)
             Debug.Log("ART-PARTS dressed=" + dressed + "/" + renderers.Length + " root=" + root.name
                 + " giantSkips=" + GiantSkips + " emptySkips=" + EmptySkips
                 + " reverted=" + RevertedMoves);
         return dressed;
+    }
+
+    // --- The tree's BOLE FOOT (ART-0 31st pass, 20.09) ----------------------------------
+    // The measured defect, on the shipped still `art0leaf29_tree.png` (Tools/art0-bole-hole-
+    // probe.py, Tools/art0-bole-frame-read.py): at the bole's base, row 1045, columns 867..895
+    // are EXACTLY the backdrop (76, 82, 92) - 29 px, 0.070 m, 100% of the row's width across
+    // the trunk, one row ABOVE the dirt's own top edge (row 1046). `ArtBoleProbe` then named
+    // the layers: the ground's top edge and every tree part's lowest box are both at world
+    // y = 0.000 (GroundStrip order -2, Surface -1, the trunk's parts order 0), and the
+    // bole's core card's box bottoms out at +0.00125 m. So the gap is 1.25 mm of nothing
+    // between the dirt and the trunk, and the rasterizer's centre-sample rule turns those
+    // 0.5 px into one whole row of backdrop - which is what the eye reads as "a gap at the
+    // base" and "the flare cut flat at the top edge of the soil". With the ground OFF the row
+    // is still backdrop, with the base OFF the ink above it disappears: neither layer owns it.
+    //
+    // The foot canvas (`Art/Tree/bole_foot`, Tools/gen-tree-bole-foot-texture.py) is a bole
+    // flare painted in the bark MATERIAL's own tones, sampled off the shipped tile (p50
+    // 137,90,49 ... p08 62,42,22), at the material's own scale. It is drawn ONCE per tree, in
+    // the base part's own slot (`Stump/Visual`), on a box:
+    //   width  = 1.25 x the base part's own box width,
+    //   height = width / 3.6 (the canvas' aspect - so the box aspect IS the canvas aspect for
+    //            every species and the generator prints 0.0000 error for all five),
+    //   bottom = 0.30 x height BELOW the ground line (the canvas' own soil line), i.e. the
+    //            roots sit in the soil.
+    // The buried part is width/3.6 x 0.30 = 0.083 x width: 0.021 m on a 0.20 m base - an order
+    // of magnitude more than the 1.7 mm the rasterizer needs, and a root flare rather than a
+    // cut. Nothing here
+    // carries a body, and no rig number is touched: it is one more SpriteRenderer under a
+    // child that `PlantTree.InitializeVisualOnly` already made picture-only, and `Art1Check`
+    // asserts both of those (`CheckTreeFoot`).
+    public const string TreeBoleFootKey = "Tree/bole_foot";
+    public const string TreeBoleFootName = "BoleFoot";
+    public const string TreeBasePartName = "Stump";   // PlantTree.CreateWood("Stump", ...)
+    public const float TreeBoleFootAspect = 3.6f;     // the canvas' width / height
+    public const float TreeBoleFootWidth = 1.25f;     // of the base part's own box width
+    public const float TreeBoleFootSoil = 0.30f;      // of the canvas' height is below the ground
+
+    // The one place the foot is added. Idempotent: a second dress reuses the object it made
+    // (the gallery's R key toggles real art on and off), and a rig with no base part, no
+    // canvas or no box is left exactly as it was - the renderer count of a dressed tree is
+    // only +1 when the foot really landed.
+    public static int DressTreeFoot(Transform root)
+    {
+        SpriteRenderer slot = FindTreeBaseSlot(root);
+        if (slot == null)
+            return 0;
+
+        Texture2D tex = ArtLibrary.Albedo(TreeBoleFootKey);
+        if (tex == null)
+            return 0;
+
+        Vector2 box = BoxOf(slot);
+        if (box.x <= 0.0001f || box.y <= 0.0001f)
+            return 0;
+
+        float width = box.x * TreeBoleFootWidth;
+        float height = width / TreeBoleFootAspect;
+        if (height <= 0.0001f)
+            return 0;
+
+        Transform foot = slot.transform.Find(TreeBoleFootName);
+        if (foot == null)
+        {
+            GameObject go = new GameObject(TreeBoleFootName);
+            go.transform.SetParent(slot.transform, false);
+            foot = go.transform;
+        }
+        foot.SetAsLastSibling();   // over the base's cards, which sit on the same sorting order
+
+        SpriteRenderer sr = foot.GetComponent<SpriteRenderer>();
+        if (sr == null)
+            sr = foot.gameObject.AddComponent<SpriteRenderer>();
+
+        // `Tiled(key, width)` puts the canvas' width at `width` metres, so the sprite's own
+        // size IS the box below and the Simple -> Sliced conversion has nothing to re-scale
+        // (the trap Art1Check guards for the dress in general).
+        sr.sprite = ArtLibrary.Tiled(TreeBoleFootKey, width);
+        sr.sortingLayerID = slot.sortingLayerID;
+        sr.sortingOrder = slot.sortingOrder;
+        sr.color = Color.white;
+        sr.drawMode = SpriteDrawMode.Sliced;
+        sr.size = new Vector2(width, height);
+        // The slot's origin is the base part's centre, so the foot's own bottom edge lands
+        // TreeBoleFootSoil x height BELOW the part's box - below the ground line the level
+        // draws its dirt to.
+        sr.transform.localPosition =
+            new Vector3(0f, -box.y * 0.5f - height * TreeBoleFootSoil + height * 0.5f, 0f);
+        return 1;
+    }
+
+    // Put the picture back the way the rig built it: the object did not exist before the
+    // dress, so it goes. (Edit mode cannot defer a Destroy to the end of the frame and have
+    // the next ReadAll see it gone - Art1Check reverts and re-reads in the same frame.)
+    public static void RemoveTreeFoot(Transform root)
+    {
+        SpriteRenderer slot = FindTreeBaseSlot(root);
+        if (slot == null)
+            return;
+        Transform foot = slot.transform.Find(TreeBoleFootName);
+        if (foot == null)
+            return;
+        SpriteRenderer sr = foot.GetComponent<SpriteRenderer>();
+        if (sr != null)
+            Forget(sr);
+        if (Application.isPlaying)
+            UnityEngine.Object.Destroy(foot.gameObject);
+        else
+            UnityEngine.Object.DestroyImmediate(foot.gameObject);
+    }
+
+    // The base part's OWN sprite slot: the rig switches it off (PaintVisualConeFill paints the
+    // bole as a collage of cards) and keeps its box, which is the one box on the tree whose
+    // bottom edge is the part's bottom edge - i.e. the ground line.
+    public static SpriteRenderer FindTreeBaseSlot(Transform root)
+    {
+        if (root == null)
+            return null;
+        SpriteRenderer[] all = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < all.Length; i++)
+        {
+            SpriteRenderer sr = all[i];
+            if (sr == null || sr.gameObject.name != "Visual")
+                continue;
+            Transform part = sr.transform.parent;
+            if (part != null && Has(part.gameObject.name, TreeBasePartName))
+                return sr;
+        }
+        return null;
     }
 
     // The renderer's own name first, then its parents: the rigs put the picture
