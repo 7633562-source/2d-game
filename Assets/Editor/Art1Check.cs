@@ -48,6 +48,7 @@ public static class Art1Check
         CheckFlowerHeads();
         CheckFlowerStems();
         CheckMaterialPeriod();
+        CheckTreeLeafCards();
         CheckSlabStretch(8f);
         CheckSlabStretch(32f);
         CheckSlabStretch(6f);
@@ -1301,12 +1302,252 @@ public static class Art1Check
             + smallestOf[1].ToString("0.000") + "m/" + smallestName[2] + " "
             + smallestOf[2].ToString("0.000") + "m");
 
+        // The LEAF half of the rig, banded on its own (29th pass). The bands above are
+        // dominated by the bark details (BarkCrackTip 0.002 m), so "1441 leaf parts" says
+        // nothing about the parts a leaf canvas would be drawn on: this line names them.
+        LeafBandReport(srs);
+        LeafAspectReport(srs);
+
         Report("oak every bark/leaf part is Tiled (" + (barkParts + leafParts)
             + " parts, 0 in Sliced)", barkParts + leafParts > 0 && notTiled == 0);
         Report("oak dressing moves no localScale", go.transform.localScale == rootScale
             && movedScale == 0);
         Report("oak dressing adds no body (rule zero)",
             BodyCount(go.GetComponentsInChildren<SpriteRenderer>(true)) == bodiesBefore);
+
+        for (int i = 0; i < srs.Length; i++)
+            ArtParts.Forget(srs[i]);
+        Object.DestroyImmediate(go);
+    }
+
+    // The oak's LEAF half on its own (ART-0 29th pass). A leaf canvas can only be drawn on
+    // a part that IS a leaf: this line says which of the 1441 leaf-textured renderers are
+    // leaves (a box of centimetres, an aspect of its own) and which are detail cards of a
+    // bigger mass, so a later pass cannot aim a leaf canvas at a 2 mm vein by mistake.
+    private static void LeafBandReport(SpriteRenderer[] srs)
+    {
+        int tiny = 0, small = 0, upper = 0, mid = 0, big = 0;
+        string bigName = "-", bigBox = "-", midName = "-", midBox = "-";
+        float biggest = 0f;
+        string[] names = new string[6];
+        float[] sizes = new float[6];
+        for (int i = 0; i < sizes.Length; i++)
+        {
+            names[i] = "-";
+            sizes[i] = float.MaxValue;
+        }
+
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null || sr.sprite == null || sr.sprite.texture == null)
+                continue;
+            if (sr.sprite.texture.name != ArtLibrary.Leaf)
+                continue;
+            Vector2 box = ArtParts.WorldBoxOf(sr);
+            if (box.x <= 0.0001f || box.y <= 0.0001f)
+                continue;
+            float minSide = Mathf.Min(box.x, box.y);
+            if (minSide < 0.02f) tiny++;
+            else if (minSide < 0.05f) small++;
+            else if (minSide < 0.10f) upper++;
+            else if (minSide < 0.30f) mid++;
+            else big++;
+            if (minSide > biggest)
+            {
+                biggest = minSide;
+                bigName = sr.gameObject.name;
+                bigBox = box.x.ToString("0.000") + "x" + box.y.ToString("0.000")
+                    + "m aspect " + (box.x / box.y).ToString("0.00");
+            }
+            if (minSide >= 0.05f && minSide < 0.10f && midName == "-")
+            {
+                midName = sr.gameObject.name;
+                midBox = box.x.ToString("0.000") + "x" + box.y.ToString("0.000")
+                    + "m aspect " + (box.x / box.y).ToString("0.00");
+            }
+            for (int s = 0; s < sizes.Length; s++)
+            {
+                if (minSide < sizes[s])
+                {
+                    for (int t = sizes.Length - 1; t > s; t--)
+                    {
+                        sizes[t] = sizes[t - 1];
+                        names[t] = names[t - 1];
+                    }
+                    sizes[s] = minSide;
+                    names[s] = sr.gameObject.name;
+                    break;
+                }
+            }
+        }
+
+        Debug.Log("ART-1A-CHECK INFO oak-leaf bands=<0.02m:" + tiny + " 0.02-0.05m:" + small
+            + " 0.05-0.10m:" + upper + " 0.10-0.30m:" + mid + " >=0.30m:" + big
+            + " biggest=" + bigName + " (" + bigBox + ")"
+            + " mid=" + midName + " (" + midBox + ")"
+            + " smallest=" + names[0] + " " + sizes[0].ToString("0.000") + "m/"
+            + names[1] + " " + sizes[1].ToString("0.000") + "m/"
+            + names[2] + " " + sizes[2].ToString("0.000") + "m");
+    }
+
+    // The leaf parts' BOX ASPECTS, per size band, for the cycle that wants to draw a leaf on
+    // them: an aspect family split needs the numbers, not a guess.
+    private static void LeafAspectReport(SpriteRenderer[] srs)
+    {
+        string[] bandName = { "<0.02m", "0.02-0.05m", "0.05-0.10m", "0.10-0.30m", ">=0.30m" };
+        int[] count = new int[bandName.Length];
+        float[][] aspects = new float[bandName.Length][];
+        System.Collections.Generic.List<float>[] list =
+            new System.Collections.Generic.List<float>[bandName.Length];
+        for (int i = 0; i < list.Length; i++)
+            list[i] = new System.Collections.Generic.List<float>();
+
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null || sr.sprite == null || sr.sprite.texture == null)
+                continue;
+            if (sr.sprite.texture.name != ArtLibrary.Leaf)
+                continue;
+            Vector2 box = ArtParts.WorldBoxOf(sr);
+            if (box.x <= 0.0001f || box.y <= 0.0001f)
+                continue;
+            float minSide = Mathf.Min(box.x, box.y);
+            int b = minSide < 0.02f ? 0 : minSide < 0.05f ? 1 : minSide < 0.10f ? 2
+                : minSide < 0.30f ? 3 : 4;
+            count[b]++;
+            list[b].Add(box.x / box.y);
+        }
+
+        for (int b = 0; b < bandName.Length; b++)
+        {
+            aspects[b] = list[b].ToArray();
+            System.Array.Sort(aspects[b]);
+            if (count[b] == 0)
+                continue;
+            float[] a = aspects[b];
+            Debug.Log("ART-1A-CHECK INFO oak-leaf-aspect " + bandName[b] + " n=" + count[b]
+                + " aspect min=" + a[0].ToString("0.00")
+                + " p25=" + a[a.Length / 4].ToString("0.00")
+                + " med=" + a[a.Length / 2].ToString("0.00")
+                + " p75=" + a[(a.Length * 3) / 4].ToString("0.00")
+                + " max=" + a[a.Length - 1].ToString("0.00"));
+        }
+    }
+
+    // The tree's leaf CARDS (ART-0 29th pass). The oak's leaf parts are 0.002-0.5 m and the
+    // ones the eye can see are 0.02-0.12 m, where a window of the 0.5 m `leaf` tile is a
+    // solid green plate edged by the part's own rectangle (87 % ink, a cut leaf on 100 % of
+    // the window's borders - Tools/art0-leaf-window-probe.py). From this pass a part in that
+    // band draws the painted leaf canvas, one leaf in its own box, Sliced; a part at or above
+    // the band keeps the material. Both halves are asserted here, on the real rig, with the
+    // rule-zero pair (no localScale moved, no body added) and the toggle.
+    private static void CheckTreeLeafCards()
+    {
+        Texture2D card = ArtLibrary.Albedo(ArtParts.TreeLeafCardKey);
+        Report("tree leaf card Art/Tree/leaf_card.png (Albedo)", card != null);
+        if (card != null)
+            Debug.Log("ART-1A-CHECK INFO leafCard " + card.width + "x" + card.height
+                + " readable=" + card.isReadable + " key=" + ArtParts.TreeLeafCardKey);
+        Report("tree leaf card readable (Sprite.Create needs CPU pixels)",
+            card != null && card.isReadable);
+
+        ArtLibrary.RealArtEnabled = true;
+        GameObject go = new GameObject("Art1CheckLeafCards");
+        PlantTree tree = go.AddComponent<PlantTree>();
+        tree.kind = TreeKind.Oak;
+        tree.seed = 11;
+        tree.rig = TreeRig.Static;
+        tree.BuildTree();
+
+        SpriteRenderer[] srs = go.GetComponentsInChildren<SpriteRenderer>(true);
+        int bodiesBefore = BodyCount(srs);
+        Vector3 rootScale = go.transform.localScale;
+        Vector3[] scaleBefore = new Vector3[srs.Length];
+        Vector2[] boxBefore = new Vector2[srs.Length];
+        Sprite[] spriteBefore = new Sprite[srs.Length];
+        SpriteDrawMode[] modeBefore = new SpriteDrawMode[srs.Length];
+        for (int i = 0; i < srs.Length; i++)
+        {
+            if (srs[i] == null)
+                continue;
+            scaleBefore[i] = srs[i].transform.localScale;
+            boxBefore[i] = ArtParts.BoxOf(srs[i]);
+            spriteBefore[i] = srs[i].sprite;
+            modeBefore[i] = srs[i].drawMode;
+        }
+
+        int dressed = ArtParts.DressAll(go.transform, true, ArtLibrary.Bark, ArtLibrary.Leaf, "");
+
+        int cardParts = 0, cardWrongCanvas = 0, cardNotSliced = 0, cardMoved = 0, cardBoxMoved = 0;
+        int massParts = 0, massWrongCanvas = 0, massNotTiled = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            SpriteRenderer sr = srs[i];
+            if (sr == null || sr.sprite == null || sr.sprite.texture == null)
+                continue;
+            string tex = sr.sprite.texture.name;
+            if (tex != ArtLibrary.Leaf && tex != ArtParts.TreeLeafCardKey.Replace("Tree/", ""))
+                continue;
+
+            Vector3 scale = sr.transform.lossyScale;
+            float side = Mathf.Min(boxBefore[i].x * Mathf.Abs(scale.x),
+                                   boxBefore[i].y * Mathf.Abs(scale.y));
+            bool wantCard = side >= ArtParts.TreeLeafCardMinMeters
+                && side < ArtParts.TreeLeafCardMaxMeters;
+
+            if (wantCard)
+            {
+                cardParts++;
+                if (tex != ArtParts.TreeLeafCardKey.Replace("Tree/", ""))
+                    cardWrongCanvas++;
+                if (sr.drawMode != SpriteDrawMode.Sliced)
+                    cardNotSliced++;
+                if (sr.transform.localScale != scaleBefore[i])
+                    cardMoved++;
+                Vector2 drawn = ArtParts.WorldBoxOf(sr);
+                if (Mathf.Abs(drawn.x - boxBefore[i].x * Mathf.Abs(scale.x)) > 0.002f
+                    || Mathf.Abs(drawn.y - boxBefore[i].y * Mathf.Abs(scale.y)) > 0.002f)
+                    cardBoxMoved++;
+            }
+            else
+            {
+                massParts++;
+                if (tex != ArtLibrary.Leaf)
+                    massWrongCanvas++;
+                if (sr.drawMode != SpriteDrawMode.Tiled)
+                    massNotTiled++;
+            }
+        }
+
+        Debug.Log("ART-1A-CHECK INFO oak-leaf-card dressed=" + dressed + " cards=" + cardParts
+            + " band=" + ArtParts.TreeLeafCardMinMeters.ToString("0.00") + "-"
+            + ArtParts.TreeLeafCardMaxMeters.ToString("0.00") + "m mass=" + massParts
+            + " wrongCanvas=" + (cardWrongCanvas + massWrongCanvas));
+
+        Report("oak every leaf card in the band draws Art/Tree/leaf_card.png ("
+            + cardParts + " parts)", cardParts > 0 && cardWrongCanvas == 0);
+        Report("oak every leaf card keeps its own box (Sliced, size == box)",
+            cardNotSliced == 0 && cardBoxMoved == 0);
+        Report("oak every leaf part at or above the band keeps the leaf tile ("
+            + massParts + " parts, Tiled)", massParts > 0 && massWrongCanvas == 0 && massNotTiled == 0);
+        Report("oak leaf cards move no localScale", cardMoved == 0
+            && go.transform.localScale == rootScale);
+        Report("oak leaf cards add no body (rule zero)",
+            BodyCount(go.GetComponentsInChildren<SpriteRenderer>(true)) == bodiesBefore);
+
+        ArtParts.DressAll(go.transform, false, ArtLibrary.Bark, ArtLibrary.Leaf, "");
+        int backWrong = 0;
+        for (int i = 0; i < srs.Length; i++)
+        {
+            if (srs[i] == null)
+                continue;
+            if (srs[i].sprite != spriteBefore[i] || srs[i].drawMode != modeBefore[i])
+                backWrong++;
+        }
+        Report("oak leaf cards real=false puts every part back (" + srs.Length + " renderers)",
+            backWrong == 0);
 
         for (int i = 0; i < srs.Length; i++)
             ArtParts.Forget(srs[i]);

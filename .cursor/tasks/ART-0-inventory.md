@@ -120,3 +120,31 @@ into bundled per-part sprites (split sheet -> crops -> `Resources/Art/...`) was 
 why every scene shows transparent rectangles: the rectangles are the contract, the pixels behind them
 never arrived. The gallery task therefore includes completing that pipeline step, not just building a
 scene.
+
+## Update 20.09.2026 - what the pictures are NOW (ART-0 29th pass)
+
+The pipeline step above is done and the loaders now find real pixels. Shipped, all under
+`Assets/Resources/` and all read back off their own `.meta` by `Tools/art0-meta-audit.py`:
+
+| key | file | what it is |
+|---|---|---|
+| `Art/Human/*` (10) | leg/foot crops of `LegacyArt/Human/*` | the body's parts, one PNG per bone |
+| `Art/Dog/*` (10), `Art/Crow/*` (9) | crops of the legacy sheets | the animals' parts |
+| `Art/skin`, `fabric`, `denim`, `dirt`, `grass`, `bark`, `leaf` | downscaled legacy materials | the seven tiled surfaces |
+| `Art/Apple/{fruit,leaf}`, `Art/Strawberry/{berry,leaf,stem}` | legacy + painted leaves | the fruit |
+| `Art/Campfire/{core,log_a,log_b,log_c}` | painted | the fire |
+| `Art/Flower/*` | painted, luminance in alpha | the flower's foliage |
+| `Level/{ground_fill,ground_cap,sky,sign_finish}` | painted | the four the README was waiting for |
+| **`Art/Tree/leaf_card` (29th pass, 20.09)** | **painted, `Tools/gen-tree-leaf-textures.py`** | **one leaf, drawn Sliced in a leaf part's own box for parts of 0.02-0.12 m** |
+
+The tree's leaf parts are the case the material could not cover: the rig's leaf parts are
+0.002-0.5 m and the material's own leaves are 0.068-0.127 m, so a part of 0.02-0.12 m showed a
+crop that is 87 % ink with a cut leaf on 100 % of the window borders
+(`Tools/art0-leaf-window-probe.py`) - a green plate edged by the part's own rectangle, which is
+what three reads of `art0leaf28_tree.png` named. From the 29th pass such a part draws the
+painted leaf card (`ArtParts.TreeLeafCardKey`, one branch in `DressAll`), a part at or above
+0.12 m keeps the material. **Still open, measured**: the small green chips ON the trunk are NOT
+drawn by those cards - the whole frame difference between `art0leaf28` and `art0leaf29` is
+confined to y 31-253 and the trunk rows 300-1000 are 0.0 % changed - so their owner is a
+leaf-material part at or above 0.12 m that overlaps the trunk; name it with an editor probe
+before moving anything. Report `Trials/Runs/art-0-leaf-card-29th-report.md`.

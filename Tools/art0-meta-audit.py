@@ -44,7 +44,12 @@ EXTRA = [("Art/Campfire/core.png", "Campfire/core"),
          # kinds' stem. Same luminance convention (shape in alpha, the kind's tint multiplies it),
          # so they must be readable too.
          ("Art/Flower/stem.png", "Flower/stem"),
-         ("Art/Flower/stem_stout.png", "Flower/stem_stout")]
+         ("Art/Flower/stem_stout.png", "Flower/stem_stout"),
+         # ART-0 29th pass (20.09): the tree's leaf CARD - one painted leaf drawn Sliced in
+         # the part's own box for leaf parts of 0.02-0.12 m. Colour canvas with a transparent
+         # margin (not a luminance one: it carries the leaf's own greens), read through
+         # Albedo -> Tiled -> Sprite.Create, so it must be readable too.
+         ("Art/Tree/leaf_card.png", "Tree/leaf_card")]
 EXPECT_PPU = {"ground_fill": 128, "ground_cap": 100, "sky": 32, "sign_finish": 100}
 # Everything on the Albedo path needs CPU pixels (Sprite.Create / GetPixelBilinear); the
 # four Level pictures are only ever taken as Sprites, so they are not readable on purpose.

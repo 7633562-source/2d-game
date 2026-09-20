@@ -62,6 +62,30 @@ public static class ArtParts
     // 1.364x (Iris), and `Tools/gen-flower-leaf-textures.py` prints the whole table.
     public const float LeafFamilyWide = 0.8f;
 
+    // --- The tree's LEAF CARDS (ART-0 29th pass, 20.09) ----------------------------------
+    // A leaf-named part of the TREE is dressed with the `leaf` MATERIAL - a 512 px canvas
+    // `Tiled` at `LeafTileMeters` = 0.5 m, i.e. 1024 px/m, whose own leaves are 70-130 px =
+    // 0.068-0.127 m long, one per 73 px cell. The rig's leaf parts (Art1Check INFO
+    // `oak-leaf`, this pass) are 0.002-0.5 m and the ones the eye can see are 0.02-0.12 m,
+    // so a 0.04 m part showed a 41 px window of a field whose leaves are 1.7-3x LONGER than
+    // the part: `Tools/art0-leaf-window-probe.py` measures every such window at 87 % ink
+    // with a CUT leaf on 100 % of its borders. That is a solid green plate edged by the
+    // part's own rectangle - three vision reads of `art0leaf28_tree.png` named it as
+    // "flat rectangular plates, hard stepped edges" in the crown and "flat green chips,
+    // they do not read as oak leaves" on the trunk.
+    //
+    // So a leaf CARD (a part between TreeLeafCardMinMeters and TreeLeafCardMaxMeters, i.e.
+    // a leaf-shaped thing of centimetres, NOT a surface) draws the painted leaf canvas
+    // instead - one leaf in the part's own box, transparent margin, `Sliced` - which is the
+    // flower's foliage mechanism (`Flower/leaf.png`, `Tools/gen-flower-leaf-textures.py`).
+    // A part at or above TreeLeafCardMaxMeters keeps the material: at that size a window of
+    // the field holds nine or more leaves and reads as the mass a crown is made of.
+    // Below the MINIMUM the part is under 8 px at the closest lens the gallery has, and
+    // the material's crop is a tone either way.
+    public const string TreeLeafCardKey = "Tree/leaf_card";
+    public const float TreeLeafCardMinMeters = 0.02f;
+    public const float TreeLeafCardMaxMeters = 0.12f;
+
     // --- The lavender SPIKE and the autumn HIP (ART-0 gap 3b, the last two rows, 24th pass) -
     // Two more card collages, one canvas each, the same mechanism as the leaf:
     //   * the lavender spike (`spikeCount = 4` in ApplyKind) is a HumanSegment named "Spike_i"
@@ -637,6 +661,24 @@ public static class ArtParts
                 continue;
 
             float tile = TileMetersFor(sr.gameObject.name, key, woodTileMeters, leafTileMeters);
+
+            // The tree's leaf CARDS (29th pass): a leaf part of centimetres is a drawing,
+            // not a surface, so the painted leaf canvas takes it and the material's crop
+            // stays on the parts big enough to be a mass. Only the TREE family: a caller
+            // that passes its own leaf key (the strawberry's Art/Strawberry/leaf) keeps it.
+            if (real && key == leafKey && key == ArtLibrary.Leaf
+                && ArtLibrary.Albedo(TreeLeafCardKey) != null)
+            {
+                Vector2 card = WorldBoxOf(sr);
+                float side = Mathf.Min(card.x, card.y);
+                if (side >= TreeLeafCardMinMeters && side < TreeLeafCardMaxMeters)
+                {
+                    if (Dress(sr, TreeLeafCardKey, 0f, true))
+                        dressed++;
+                    continue;
+                }
+            }
+
             if (Dress(sr, key, tile, real))
                 dressed++;
         }
