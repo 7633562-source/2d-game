@@ -39,6 +39,22 @@ inside the bone. Fill the rectangle, or leave empty space on purpose
 Generated capsules (no painted key) still overlap at the hinge
 (`VisualSize` 1.18 / 1.26). Painted parts do not.
 
+## The draw mode owns the size, never the transform
+
+Assign the draw mode **before** the picture and the size
+(`ArtParts.Dress`: mode, `sprite`, `size`, `color`). Unity keeps the
+current world box when a `Simple` renderer is converted to
+`Sliced`/`Tiled` and writes it as the transform's `localScale`, so the
+old order (picture, `size`, mode) left every tiled part drawn at the
+canvas' own natural size: a `bark` limb of 0.10 × 0.30 m with the
+0.5 m period came out 0.50 × 0.50 m (scale 5.00 / 1.68), a petal
+1.28× / 1.60× its box. Where the canvas aspect equals the box aspect
+(the padded human parts, the three logs) the factor is ~1, which is
+why the frames looked right. With the mode first the factor is
+exactly 1 and the dress writes `sprite` / `size` / `color` only.
+Evidence: `Art1Check.ScaleAudit`, the check `dressing moves no
+localScale`, `Trials/Runs/art-0-dressorder-21st-report.md`.
+
 ## Joints
 
 A hard outline on the cut face becomes a dark seam when two bones
