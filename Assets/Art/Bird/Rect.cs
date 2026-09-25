@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 // ART-B1 (23.09, Yury): "У птицей должны быть текстуры в виде прозрачных прямоугольников."
@@ -58,6 +59,156 @@ public static class BirdArtRect
         "Eye", "Nict", "Lid", "Crop", "Tongue", "Wattle", "CombFront", "CombBack"
     };
 
+    // ─── ART-BW2: the fan plates' own FORM ───────────────────────────────────────────────
+    // ART-BW1 closed with the tone landed and the reads naming the FORM instead: "blunt /
+    // capsule plates", "blocky primitives", a serrated rear edge, and, verbatim from the
+    // session's own files - "прямолинейные тупые прямоугольники без сужения к концам",
+    // "острия - просто углы сдвинутых плит", "нет плавной градации формы", "absence of any
+    // soft edge transition... only blocky primitives", "minimal variation in the taper
+    // profile across the fan". So this pass draws the plate itself: the wedge silhouette
+    // (Bird.cs, B-WING-5..10 - still the build's own picture and the physics runs' sprite)
+    // is replaced for the DRESSED look by this canvas, the same last-paint slot the tone
+    // uses. Sprite only - no collider, no joint, no drive value, no Bird.cs number is read
+    // or written; the canvas honours the same contract the wedge did (picture width x the
+    // plate's own length, pivot centred), so the plate's drawn box does not move.
+    //
+    // What the canvas answers, one item per read:
+    //  * a feathered margin (PlateFeatherMeters, an anti-aliased band along every edge) -
+    //    "no soft edge transition", the hard aliased tips;
+    //  * a fuller root and a longer, drawn-out point whose last 10 % only fades to
+    //    PlateTipFloor, so the tip stays readable - "no narrowing to the ends";
+    //  * a three-shape family by the plate's own index (PlateFamily: body taper, tip power,
+    //    a curved leading side, the feather's own bend) - "minimal variation in the taper
+    //    profile", the mechanical saw rhythm;
+    //  * each family slot's point could end a little deeper inside the box (tipInset, tried at
+    //    1.2 % / 2.2 % of the length to stagger the tips' own line) - probe 14 priced the
+    //    stagger out at the take's own scale (the rim's worst notch 19.9 -> 24.8 mm), so the
+    //    7th element stands at 0: the row's rhythm is the family's job, not a sub-pixel shift.
+    // The family was tuned twice in the round: the first pass took the reads' "washed /
+    // ghost / motion-blur" verdict on its soft tips (the 0.45-coverage fade over the last
+    // 10 %), so the point now holds PlateTipFloor = 0.72 and fades over 5-8 %; the feather
+    // margin and every other element of the pass stand.
+    //  * the picture width 58 -> 64 mm (40 -> 46 for the secondaries), so the neighbouring
+    //    plates close in on each other - the visible gaps and the rim's notches. Priced on
+    //    the bird lane's own notch instrument (Tools/_art-bw2-final.py, the tip insets at 0):
+    //    mean 12.1 -> 8.8 mm, worst 19.4 -> 19.9 mm, 24 peaks for 20 plates.
+    // The tone is untouched: FanFill, the fill alpha, the dark core.
+    public const float PlateWidthPrimary = 0.064f;
+    public const float PlateWidthSecondary = 0.046f;
+    // The feathered margin, metres: the ramp every plate's edge ends with. 3.2 mm is ~2 px
+    // at the take's own 635 px/m and ~8 px on the x4 sheet - soft, without dissolving the
+    // silhouette (a 4.3 mm ramp priced as "weapon/мыло" in the round's own pricing reads).
+    public const float PlateFeatherMeters = 0.0032f;
+    // The drawn-out point's coverage at its very end (0 = gone, 1 = a hard needle). The first
+    // pass ran 0.45 and the reads called the tips washed, ghostly, motion-blurred; 0.72 keeps
+    // the point's ink while the margin still feathers it.
+    public const float PlateTipFloor = 0.72f;
+
+    // One row per family slot: body taper (B, P), tip power, the side curve, the feather's
+    // own bend (x the length), how much of the length the point fades over, and how deep
+    // inside the box the point ends (the tips' own stagger - 0 for every slot; the stagger
+    // was withdrawn, see the probe-14 note above).
+    private static readonly float[][] PlateFamily =
+    {
+        new[] { 0.62f, 1.15f, 1.95f, 0.14f, 0.022f, 0.06f, 0.000f },
+        new[] { 0.68f, 1.45f, 2.20f, 0.12f, -0.018f, 0.05f, 0.000f },
+        new[] { 0.58f, 1.00f, 2.50f, 0.17f, 0.014f, 0.08f, 0.000f },
+    };
+
+    private static readonly Dictionary<string, Sprite> PlateSprites =
+        new Dictionary<string, Sprite>();
+
+    // The plate's canvas: white, the shape lives in alpha, drawn in the plate's own aspect
+    // (picture width x length) at the wedge's 1024 texels/m, so the sprite measures exactly
+    // what the wedge measured. Root row at the texture top, the tip at the bottom - the
+    // wedge's own convention (the plate's local -Y is the tip).
+    public static Sprite PlateCanvas(float width, float length, int variant)
+    {
+        const float pixelsPerMeter = 1024f;
+        int w = Mathf.Clamp(Mathf.RoundToInt(width * pixelsPerMeter), 8, 512);
+        int h = Mathf.Clamp(Mathf.RoundToInt(length * pixelsPerMeter), 16, 2048);
+        int v = ((variant % PlateFamily.Length) + PlateFamily.Length) % PlateFamily.Length;
+        string key = w + "x" + h + "v" + v;
+        Sprite cached;
+        if (PlateSprites.TryGetValue(key, out cached) && cached != null)
+            return cached;
+
+        float[] f = PlateFamily[v];
+        float bodyB = f[0], bodyP = f[1], tipP = f[2], curve = f[3], bend = f[4], fade = f[5];
+        float ins = f[6];
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+        // Bilinear, not the wedge's Point: the canvas' edge is a ramp a few texels wide and
+        // the take samples it at 635 px/m, so the sampler must average, not pick.
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Clamp;
+        Color[] px = new Color[w * h];
+        float half = w * 0.5f;
+        float ramp = Mathf.Max(1f, PlateFeatherMeters * pixelsPerMeter);
+        for (int y = 0; y < h; y++)
+        {
+            float s = 1f - (float)y / (h - 1);   // 0 at the root edge, 1 at the box's tip edge
+            float se = s / (1f - ins);            // the plate's own span: the point ends at se = 1
+            if (se > 1f) se = 1f;
+            float swell = Mathf.Sin(Mathf.PI * se);
+            float hw = half * (1f - bodyB * Mathf.Pow(se, bodyP)) * (1f - Mathf.Pow(se, tipP));
+            float off = bend * h * swell;                         // the feather's own curve
+            float wide = hw * (1f + curve * swell);               // the leading side
+            float narrow = hw * (1f - curve * 0.7f * swell);      // the trailing side
+            float end = 1f;
+            if (fade > 0.0001f && se > 1f - fade)
+                end = Mathf.Lerp(PlateTipFloor, 1f, (1f - se) / fade);
+            for (int x = 0; x < w; x++)
+            {
+                float d = x + 0.5f - half - off;
+                float side = d >= 0f ? wide : narrow;
+                float ad = Mathf.Abs(d);
+                float a = ad <= side - ramp ? 1f : (ad >= side ? 0f : (side - ad) / ramp);
+                px[y * w + x] = new Color(1f, 1f, 1f, a * end);
+            }
+        }
+        tex.SetPixels(px);
+        tex.Apply(false, false);
+        Sprite created = Sprite.Create(tex, new Rect(0f, 0f, w, h), new Vector2(0.5f, 0.5f),
+            w / width, 0, SpriteMeshType.FullRect);
+        PlateSprites[key] = created;
+        return created;
+    }
+
+    // The plate's own index off its name: "<side>Primary7" / "<side>Secondary2"; the family
+    // slot is that index mod three, so neighbours differ and the fan's rhythm stops being
+    // mechanical. Bird.BuildWingFan is the only namer.
+    public static int PlateIndex(string partName)
+    {
+        if (string.IsNullOrEmpty(partName))
+            return 0;
+        int i = partName.Length;
+        while (i > 0 && partName[i - 1] >= '0' && partName[i - 1] <= '9')
+            i--;
+        if (i >= partName.Length)
+            return 0;
+        int k;
+        return int.TryParse(partName.Substring(i), out k) ? k : 0;
+    }
+
+    // The plate's picture swap. The plate's own length comes off the sprite it already
+    // carries (the wedge measures picture width x length, the box sprite measures the box) -
+    // no Bird.cs number is read. A physics-only run draws nothing, and the wedge is not
+    // built there either, so no canvas is built: the picture costs a row take nothing.
+    public static void DressPlate(SpriteRenderer sr, string partName)
+    {
+        if (sr == null || sr.sprite == null)
+            return;
+        if (HeadlessTrial.Active && !HeadlessTrial.VisualCapture)
+            return;
+        bool primary = partName.IndexOf("Primary", System.StringComparison.Ordinal) >= 0;
+        float width = primary ? PlateWidthPrimary : PlateWidthSecondary;
+        float length = sr.sprite.bounds.size.y;
+        if (length <= 0.001f)
+            return;
+        sr.sprite = PlateCanvas(width, length, PlateIndex(partName));
+        sr.drawMode = SpriteDrawMode.Simple;
+    }
+
     // -1 = not forced (the RealArtEnabled flag decides), 0 = off, 1 = on.
     private static int _forced = -1;
 
@@ -110,7 +261,11 @@ public static class BirdArtRect
             Transform part = sr.transform.parent;
             string partName = part != null ? part.name : sr.gameObject.name;
             if (IsFanPlate(partName))
+            {
                 c = FanFill;
+                // ART-BW2: the plate's own picture - see PlateCanvas above.
+                DressPlate(sr, partName);
+            }
             c.a = FillAlpha;
             sr.color = c;
         }
