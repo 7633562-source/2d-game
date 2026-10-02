@@ -1,0 +1,24 @@
+# cover_elbow - baked by Tools/art-h5f-cover-bake.py (ART-H5f R2).
+# The joint frame J: origin = the hinge, x right, y up (the
+# root's rest axes); the crop is the joint's own metres.
+# blend=parent: the cover rides the parent segment's transform,
+# world = Mparent*(p + Qp) - it must NOT rotate with the child:
+# the crease the child vacates has to stay painted.
+# short=parent: the owner's squash moves the parent;
+# the shape is the rest limb (parent+child at v=0) with its
+# interior notches filled - every wedge at v<=0.4 is inside it.
+# tone: the child's own paint, its tone smeared above the child's
+# edge, darkening toward the joint (falloff=0.22).
+scale=3000.0000
+x0=-0.064000
+y0=-0.062000
+w=0.128000
+h=0.118000
+upx=0.000000
+upy=1.000000
+qpx=0.000000
+qpy=-0.165000
+qcx=0.000000
+qcy=0.170000
+blend=parent
+side=near

@@ -1,0 +1,62 @@
+---
+description: C# and 2D physics conventions for scripts in Assets
+alwaysApply: true
+---
+
+# Physics
+
+Forces and torques — only in `FixedUpdate`. Nothing physical in `Update`.
+
+Segment size is set by sprite size and collider size, not by scale:
+
+```csharp
+// ❌ BAD — distorts physics and child objects
+transform.localScale = new Vector3(size.x, size.y, 1f);
+
+// ✅ GOOD
+sprite.drawMode = SpriteDrawMode.Sliced;
+sprite.size = size;
+collider.size = size;
+```
+
+The X axis is “forward–back”, not “left–right”. There is no separate lateral axis in
+the sagittal model, so you cannot spread paired limbs along X:
+`hipHalfSpacing` and `shoulderHalfSpacing` enter the joint anchors, and the human
+will stand in a real lunge. Spread only the picture — the sprite lives on
+the child `Visual`, physics on the segment itself:
+
+```csharp
+// ❌ BAD — shifts the body; that is a step forward, not a viewpoint
+thigh.transform.localPosition = new Vector3(sideOffset, y, 0);
+
+// ✅ GOOD — only what is drawn moves
+thigh.SetVisualOffset(sideOffset);
+```
+
+Check such a change with a run: a purely visual change must give
+bitwise the same CSV as before it.
+
+Torque is always applied to both bodies of the joint (Newton’s third law):
+
+```csharp
+rbSelf.AddTorque(torque, ForceMode2D.Force);
+joint.connectedBody.AddTorque(-torque, ForceMode2D.Force);
+```
+
+For joint control use antagonist muscles (`direction` +1/-1),
+not `HingeJoint2D.useMotor`.
+
+# Code
+
+All comments MUST be in English (see `docs-english.mdc`). Translate leftover
+Russian comments; do not keep them “because they are old”. Do not mass-rewrite
+English comments: explain why and the physical meaning, not restate the line.
+
+Look up joints, muscles, and `Transform` once in `Awake`, not
+every frame through `transform.Find` or `GetComponents`.
+
+Check `null` before use: the body is assembled dynamically, and
+a segment may be missing.
+
+Put parameters in public fields with `[Header]` and do not overwrite them
+hard in `Start` — otherwise the Inspector is useless.

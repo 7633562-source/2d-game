@@ -1,0 +1,142 @@
+---
+description: Work split — dispatcher designs, executor programs
+alwaysApply: true
+---
+
+# Roles
+
+Roles are a function, not a model: whoever sits in the chat with the human
+is the dispatcher, whoever they are. The model may change; the split does not.
+
+**Dispatcher (chat with the human)** — architecture and acceptance. Decides
+what to change and in which layer, sets the contract and done criteria.
+Does not run trial series or paste CSV into the thread.
+
+**Executor (a new agent for one task)** — implementation. Reads
+`.cursor/rules`, `CURRENT.md`, and `Trials/Runs/opt_agent_proposals.md`
+(own section), edits files, runs the stand, returns a table of numbers.
+Do not pass the dispatcher's chat history — it costs more than every
+source file in the project. The proposals file is a brief, not a GO card.
+
+A two- or three-line fix is cheaper in chat than spinning an executor.
+Delegate work, not every assignment.
+
+Documents are English only, always (`docs-english.mdc`).
+
+# Language Rules for Agents
+Russian exists only in live chat with Yury. Everything else is English,
+always — existing and new (`docs-english.mdc`). Translate leftover Russian;
+rename leftover Russian file names. Git commit messages are English.
+
+# Who takes which task (thrifty mode, 25.08)
+
+Tokens count. The dispatcher answers short: decision, table, next step.
+No CSV, no reciting rules, no trial series from the human chat.
+
+- **Ordinary executor** — Grok 4.6 xHigh Fast. Code, CLI, runs, summaries,
+  rule edits for an already accepted design.
+- **Profile physics** — Claude. Torque signs, SPD / PD, inertia and damper,
+  balance loop, "why they fell". The card must say this is physics;
+  otherwise Grok. Claude does not run series and does not edit look.
+- **Grok Bot (separate app)** — background clerk: compare summaries to
+  `stable-pd`, draft cards, scout papers. Not Unity, not physics.
+  Ready roster and prompts: `Tools/grok-bot-roster.txt`. Grok Bot weekly
+  limit ≠ the Cursor Models pool in the editor.
+
+## Grok 4.6 delegation policy (token save for this chat)
+
+Goal: keep dispatcher tokens for decisions. Send Grok 4.6 only routine work
+with a known acceptance target.
+
+Give to **Grok 4.6**:
+- deterministic routine runs (fixed command matrix, fixed labels);
+- coefficient sweeps inside an already accepted model, with no new design;
+- summary extraction from `Trials/Runs/*.json` into short tables;
+- `applied`/argument verification and mismatch checks;
+- mechanical rule/doc pointer updates after a decision is already made;
+- repeat regressions after a small local edit.
+
+Keep in dispatcher chat (do not delegate to Grok):
+- unclear bugs without a stable repro;
+- any task that changes layer ownership or public contracts;
+- torque-sign, SPD/PD, inertia, damping, or "why it fell" analysis;
+- new body topology (extra segments/joints/masses) and acceptance criteria design;
+- decisions that require choosing between multiple plausible physics hypotheses.
+
+Quick gate before spawning Grok:
+1. Is the task executable by a fixed checklist?
+2. Is pass/fail defined by existing metrics/baselines?
+3. If Grok returns wrong, can the dispatcher correct it without redesign?
+If any answer is "no", keep the task in dispatcher chat (or use profile physics).
+
+After a closed stage — a new dispatcher chat. Do not copy the thread:
+`CURRENT.md`, `.cursor/ROSTER.md`, the rules, and
+`Trials/Baselines/stable-pd/` are full memory. Profiles: `.cursor/agents/`.
+Do not continue old wave chats.
+
+# Watching a long executor
+
+If the executor did not answer in the time the task should take, or the
+user asked for status, do not treat "no notification" as still working.
+Check available status and actual results on disk. On timeout or resume
+error, accept what is already saved, name the unfinished part, and restart
+only that piece as a shorter task. Do not invent a current step from a
+"running" status alone.
+
+- What the executor may not decide
+
+- Invent new layers or move responsibility between them.
+- Rename public fields that other scripts and the stand read.
+- Change the torque-sign convention.
+- Bring back anything forbidden in `balance-actuators.mdc`.
+- Delete or rename `Trials/Baselines/*`, `Trials/Runs/*`,
+  `.cursor/tasks/archive/`.
+- Commit directly to `master` without passing the Gatekeeper checklist (clean candidate, matching fingerprint, verified run-trial acceptance).
+
+# Git Branching Rules for Agents (College Decision 2026-09-01)
+1. `master` is reserved strictly for accepted, clean, verified code.
+2. Agents working on new features or experiments must work in isolated branches (`feat/*` or `exp/*`).
+3. NEVER run `git checkout` while the Unity Editor process is running (prevents Library corruption and fingerprint divergence).
+4. For parallel agent runs, use `git worktree` and pass isolated `-BuildFolder` / `-TrialFolder` parameters to `run-trial.ps1`.
+5. Merging into `master` requires a clean workspace (`gitDirty=false`), verified build fingerprint, and a passing acceptance test against `stable-pd`.
+
+If the assignment contradicts physics — do not silently redo the design;
+return the numbers and describe the contradiction.
+
+# Task card (dispatcher writes)
+
+1. One sentence: what must become different.
+2. Layer: body / actuators / sensors / control. Do not touch others.
+3. Contract: which fields and signatures must stay.
+4. Acceptance: `Trials/Baselines/stable-pd/` and `current-front.mdc`.
+   Folder `current/` is the outdated ostrich-knee baseline.
+   A new baseline only if the card said so.
+5. Forbids and report form — a table of numbers, no CSV dumps.
+
+# Acceptance (dispatcher)
+
+Do not take a report on faith: read the changed files and the `*.json`
+summaries. That is how a mismatch was caught — the report said "falls at
+24 N·s" while the summary had `fell: false`; the threshold was unstable,
+not passed.
+
+# Handoff (state file)
+
+Every executor run ends by appending a short handoff block to
+`Trials/Runs/handoff.md` (create if absent). One block, under ~20 lines:
+
+- DONE — what changed (files + fields).
+- TRIALS — labels and key numbers (`fell`, `pelvisDrop`,
+  `swingFootGroundedFraction`, `walkSwapCount`).
+- NEXT — the single next step.
+
+The next executor reads `handoff.md` first, then `.cursor/rules` and
+`CURRENT.md`. `handoff.md` is a state log, not design. The dispatcher may
+pass `--resume <session_id>` to continue the same CLI session.
+
+# Token thrift
+
+- Project memory is the rules and the baseline, not the thread.
+- After a closed stage, start a new dispatcher chat.
+- Tune coefficients with stand arguments, not a player rebuild.
+- Unity Editor is closed while the executor builds the player.

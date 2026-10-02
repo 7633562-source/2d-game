@@ -1,0 +1,2203 @@
+---
+description: Segmented bird physics — lift from a flap, do not mix with the human
+globs: Assets/Bird*.cs, Assets/BirdFlight.cs, Assets/BodyAero.cs
+alwaysApply: false
+---
+
+# Bird
+
+A separate model. Do not touch `Human`, `BalanceController`, or the
+`HeadlessTrial` stand.
+
+Layer: body `Bird`, actuators `Muscle` / `JointFriction` (ragdoll only),
+flight `BirdFlight` + drag `BodyAero`, sensor `BirdSensors`,
+control `BirdController`. Who sets `mode` (the brain) is
+`.cursor/rules/ai.mdc`; this file is flap and landing physics, not
+behavior.
+
+## Handshake with agent `ai`
+
+Colleague: profile `ai`, law `.cursor/rules/ai.mdc`. They write **what**
+the bird wants. This profile writes **how** the body flies.
+
+| | Agent `ai` | Agent `bird` (this file) |
+|---|---|---|
+| Writes | `mode` / `SetFacing` (`BirdDrive`, `BirdWander`, `BirdFlockDrive`) | lift, flap, `walkThrust`, PD, perch, pose |
+| Must not write | `AddForce`, `BirdFlight` formula, `flapFrequency` | `FactionMember`, vision/hearing, fear of a human |
+| Sensors | world see/hear (own layer, later) | `BirdSensors` — inner ear and feet, not eyes |
+
+Do not invent `BirdIntent`, `Vision`, `Hearing`, or `FactionMember` here.
+
+`takeoffDelay` Stand→Fly is a **demo timer**, not the brain. Flock
+landing in `TickFlock` may set `mode = Sit` and zero the delay —
+that is contact rest, not faction. `BirdDrive` (card `BIRD-2`) decides
+in `Update`; it must not fight the landing write in the same physics
+step (`sitHold` after touchdown).
+
+Flock eye origin later is the **body** (`headVisual` has no
+`Rigidbody2D`). Ragdoll eye origin is `Head`. Facing is
+`BirdController.facing` (±1): ahead is that sign along X, not a street
+left/right. Do not use `CameraFollow` or `Light2D` as sight.
+
+Turn (flock): do **not** `localScale` the `Rigidbody2D` / perch and do
+**not** rotate the body 180° (legs would point at the sky). Put neck,
+wings, tail, legs under `Look` and set `lookRoot.localScale.x = facing`.
+Thrust heading is `Rot(pitch) * (facing, 0)`; pitch goal is
+`target * facing` (+8° right, −8° left). Walk thrust uses the same sign.
+Ragdoll stay +X until a card. CLI: `-birdFacing` / `-birdTurnAfter`.
+Play: `Bird` / `BirdFlock50` default `birdDriveKind` wander (BIRD-3 / BIRD-4).
+Dirt forage: brain writes Glide then Walk/Peck (`BirdWander` phase
+Forage). Body already sinks (`glideSink` / dirt land flap) and nods
+Peck. Do not teleport Sit. Do not invent `BirdMode.Forage`.
+Prey stoop stays `birdDriveKind` prey. Sit pitch is 0 (not the 12° flare).
+Night Sit tucks the head under the near wing (`nightRoostAmp`, from
+`DayNightCycle.Night01`). Picture only — the clock already stretches
+`sitMin`; this is the read of that rest. 0 in scenes without a clock.
+Sit `idleHop` raises the near foot to the head (`sitScratchAmp`) —
+Wander already writes the fidget; both legs used to crouch, so the
+third idle read as a twitch. Night roost and land ruffle skip it.
+`sitScratchAmp` 0 restores the bob. Not a scratch force.
+Sit `idleHop` slits that lid (`sitScratchLidAmp`) — Wander already
+writes the kick; the round stare made scratch a spasm. Same Walk
+lid. Blink and night roost keep the shut. Preen, hop-turn, and
+land ruffle skip. `sitScratchLidAmp` 0 restores the stare. Not a
+lid force.
+Sit `idleHop` drops the pupil (`sitScratchEyeAmp`) — Wander already
+writes the kick; the slit still left rest-Y, so scratch read as
+a horizon kick. Same Walk/Peck slot toward the foot. Lid rides
+the child. Peck forage drop stays Peck. Sit idlePreen drop stays
+preen. Attack nict stays the pale cover. Night roost, land
+ruffle, and hop-turn skip. `sitScratchEyeAmp` 0 restores the
+rest pupil. Not a look force.
+Sit `idleHop` flicks the far wing (`sitScratchWingAmp`) — Wander
+already writes the kick; the foot, slit, and pupil were live,
+both wings stayed tucked, so scratch still read as a twitching
+sit. Plus from −90 (hop shrug), not preen. Near stays folded.
+Night roost, land ruffle, and hop-turn skip. `sitScratchWingAmp`
+0 restores the Sit fold. Not a lift force.
+Sit `idleHop` parts that bill (`sitScratchGapeAmp`) — Wander
+already writes the kick; the foot, slit, pupil, and wing were
+live, Sit look / preen gape stayed skipped, so scratch still
+flashed a shut bill on the kick. Same Walk part (~8°). Pulse
+with `idleHop` (toward the foot), not a hold — not a call.
+Preen nibble stays preen. Look-down owns `sitLookGapeAmp`.
+Hop-turn owns `sitTurnGapeAmp`. Night roost and land ruffle
+skip. Wattle hang rides the same kick (`sitScratchWattleAmp`).
+`sitScratchGapeAmp` 0 restores the shut bill. Not a
+grab force.
+Sit `idleHop` hitches that tail (`sitScratchTailAmp`) — Wander
+already writes the kick; the foot, slit, pupil, wing, and bill
+were live, Sit look / preen tail stayed skipped, so scratch
+still sat on the Sit drop (the old slow 14° envelope rode
+`sitScratchAmp`). Plus drops the free end. Hitch with the
+same 22 Hz rake as the foot, not a hold. Look owns
+`sitLookTailAmp`. Preen owns `sitPreenTailAmp`. Hop-turn
+owns `sitTurnTailAmp`. Sit ruffle owns `landSettleTailAmp`.
+Pad crouch / Alarm keep their own fans. Night roost skip.
+`sitScratchTailAmp` 0 restores the Sit drop. Not a pitch force.
+Sit `SetFacing` hops then plants (`sitTurnAmp`) — Wander already
+turns on the perch; Look scale alone read as a texture swap.
+Night roost and land ruffle skip it. Walk keeps the stride.
+`sitTurnAmp` 0 restores the instant flip. Not a yaw force.
+Sit hop-turn shrugs both wings (`sitTurnWingAmp`) — Wander
+already wrote the hop; legs, neck, and tail were live, Sit
+fold stayed put, so the about-face still read as a crouch
+twitch. Plus from −90 (hen hop shrug), not preen. Scratch
+owns the kick flick. Look / preen own the idle hitch. Walk
+hop-turn owns `walkTurnWingAmp`. `sitTurnWingAmp` 0 restores
+the Sit fold. Not a lift force.
+Sit hop-turn drops that pupil (`sitTurnEyeAmp`) — Wander
+already wrote the hop; legs, neck, tail, and wings were live,
+Sit look / preen / scratch stayed skipped, so the about-face
+still flashed a horizon stare. Same Walk/Peck slot toward
+the perch. Hold through the plant, not a pulse. Walk
+hop-turn stays on the dirt. Air turn owns `airTurnEyeAmp`.
+Look / preen / scratch drops stay theirs. Attack nict stays
+the pale cover. Lid rides the child (`sitTurnLidAmp`).
+`sitTurnEyeAmp` 0 restores the rest pupil. Not a look force.
+Sit hop-turn slits that lid (`sitTurnLidAmp`) — Wander
+already wrote the hop; legs, neck, tail, wings, and pupil
+were live, Sit look / preen / scratch stayed skipped, so
+the about-face still flashed a round stare on the perch
+drop. Same Walk lid over the pupil. Hold through the
+plant, not a pulse. Walk hop-turn stays on the dirt.
+Air turn owns `airTurnLidAmp`. Look / preen / scratch
+slits stay theirs. Attack nict stays the pale cover.
+Gape rides the same window (`sitTurnGapeAmp`).
+`sitTurnLidAmp` 0 restores the round pupil. Not a lid
+force.
+Sit hop-turn parts that bill (`sitTurnGapeAmp`) — Wander
+already wrote the hop; legs, neck, tail, wings, pupil, and
+lid were live, Sit look / preen / scratch stayed skipped,
+so the about-face still flashed a shut bill on the perch
+drop. Same Walk part (~8°). Hold through the plant, not a
+pulse. Walk hop-turn stays on the dirt. Air turn owns
+`airTurnGapeAmp`. Stride gape stays Walk. Peck Cos stays
+Peck. Cry keeps Alarm. Attack stoop stays Attack. Sit
+idlePreen nibble stays preen. Look-down owns
+`sitLookGapeAmp`. Scratch owns `sitScratchGapeAmp`.
+Wattle hang rides the same plant (`sitTurnWattleAmp`).
+`sitTurnGapeAmp` 0 restores the shut bill. Not a grab
+force.
+Sit hop-turn hangs that wattle (`sitTurnWattleAmp`) —
+Wander already wrote the hop; legs, neck, tail, wings, pupil,
+lid, and bill were live, Sit look / preen / scratch wattle
+stayed skipped, so the about-face still flashed a glued hen
+throat on the perch drop. Hang with `SitTurnGape01` (hold
+through the plant), not a shout. Cry shout stays Cry.
+Attack stoop stays Attack. Walk hop stays Walk. Look-down
+owns `sitLookWattleAmp`. Preen nibble owns `sitPreenWattleAmp`.
+Scratch hang owns `sitScratchWattleAmp`. Comb nod is independently
+gated (`sitTurnCombAmp`). Walk hop-turn hang is independently gated
+(`walkTurnWattleAmp`). Peck grab stays the
+head dip. `sitTurnWattleAmp` 0 restores the glued Sit throat.
+Not a hang force.
+Sit hop-turn nods that comb (`sitTurnCombAmp`) —
+Wander already wrote the hop; legs, neck, tail, wings, pupil,
+lid, bill, and wattle were live, Sit look / preen / scratch
+comb stayed skipped, so the about-face still flashed a glued
+hen crown on the perch drop. Nod with `SitTurnGape01` (hold
+through the plant), not a shout. Cartilage erects; wattle
+hang stays flesh (`sitTurnWattleAmp`). Cry shout stays Cry.
+Attack stoop stays glued (contrast). Walk hop stays Walk.
+Walk hop-turn nod is independently gated (`walkTurnCombAmp`).
+Look-down nod is independently gated (`sitLookCombAmp`).
+Preen nod is independently gated (`sitPreenCombAmp`). Scratch
+nod is independently gated (`sitScratchCombAmp`). Peck grab stays the
+head dip. `sitTurnCombAmp` 0 restores the glued Sit crown.
+Not a nod force.
+Sit hop-turn hitches that tail (`sitTurnTailAmp`) — Wander
+already wrote the hop; legs, neck, wings, pupil, lid, and
+bill were live, Sit look / preen / scratch tail stayed
+skipped, so the about-face still sat on `sitTurnAmp` (the
+hop envelope). Plus drops the free end. Hold through the
+plant, not a pulse — same sin as the hop, independently
+gated. Look owns `sitLookTailAmp`. Preen owns
+`sitPreenTailAmp`. Scratch owns `sitScratchTailAmp`. Sit
+ruffle owns `landSettleTailAmp`. Walk
+hop-turn owns `walkTurnTailAmp` on the dirt. Air turn owns
+`airTurnTailAmp`. Pad crouch / Alarm keep their own fans.
+`sitTurnTailAmp` 0 restores the Sit drop. Not a pitch
+force.
+Walk `SetFacing` plants then hops (`walkTurnAmp`) — Wander already
+turns on dirt; Look scale alone kept the gait, so the about-face
+read as a texture swap. Sit hop-turn stays on the perch. Thrust
+waits out the hop. `walkTurnAmp` 0 restores the instant flip.
+Not a yaw force.
+Walk hop-turn shrugs both wings (`walkTurnWingAmp`) — Wander
+already wrote the hop; legs, neck, and tail were live, Walk
+fold stayed put (stride hitch and hen hop skip the window),
+so the about-face still read as a crouch twitch. Plus from
+−90 (hen hop shrug), not preen. Sit hop-turn stays on the
+perch. Stride hitch and hen hop keep their gait. Air turn
+stays bank. `walkTurnWingAmp` 0 restores the Walk fold.
+Not a lift force.
+Walk hop-turn drops that pupil (`walkTurnEyeAmp`) — Wander
+already wrote the hop; legs, neck, tail, and wings were live,
+Walk scan stayed skipped, so the about-face still flashed a
+horizon stare. Same Walk/Peck slot toward the dirt. Hold
+through the plant, not a pulse. Sit hop-turn owns
+`sitTurnEyeAmp` on the perch. Air turn owns
+`airTurnEyeAmp`. Stride scan stays Walk. Peck
+forage drop stays Peck. Attack nict stays the pale cover.
+`walkTurnEyeAmp` 0 restores the rest pupil. Not a look force.
+Walk hop-turn slits that lid (`walkTurnLidAmp`) — Wander
+already wrote the hop; legs, neck, tail, wings, and pupil
+were live, Walk slit stayed skipped, so the about-face still
+flashed a round stare on the dirt drop. Same Walk lid over
+the pupil. Hold through the plant, not a pulse. Sit hop-turn
+owns `sitTurnLidAmp` on the perch. Air turn owns
+`airTurnLidAmp`. Stride slit stays Walk. Peck jab stays
+Peck. Attack nict stays the pale cover. `walkTurnLidAmp`
+0 restores the round pupil. Not a lid force.
+Walk hop-turn parts that bill (`walkTurnGapeAmp`) — Wander
+already wrote the hop; legs, neck, tail, wings, pupil, and
+lid were live, Walk gape stayed skipped, so the about-face
+still flashed a shut bill on the dirt drop. Same Walk part
+(~8°). Hold through the plant, not a pulse. Sit hop-turn
+owns `sitTurnGapeAmp` on the perch. Air turn owns
+`airTurnGapeAmp`. Stride gape stays Walk. Peck Cos stays
+Peck. Cry keeps Alarm. Attack stoop stays Attack.
+Wattle hang rides the same plant (`walkTurnWattleAmp`).
+`walkTurnGapeAmp` 0 restores the shut bill. Not a grab
+force.
+Walk hop-turn hangs that wattle (`walkTurnWattleAmp`) —
+Wander already wrote the hop; legs, neck, tail, wings, pupil,
+lid, and bill were live, Walk hop wattle stayed skipped, so
+the about-face still flashed a glued hen throat on the dirt
+drop. Hang with `WalkTurnGape01` (hold through the plant),
+not a shout. Cry shout stays Cry. Attack stoop stays Attack.
+Walk hop stays Walk. Sit look / preen / scratch / hop-turn
+keep their hang. Comb nod is independently gated
+(`walkTurnCombAmp`). Peck grab stays
+the head dip. `walkTurnWattleAmp` 0 restores the glued Walk
+throat. Not a hang force.
+Walk hop-turn hitches that tail (`walkTurnTailAmp`) — Wander
+already wrote the hop; legs, neck, wings, pupil, lid, and
+bill were live, Walk stride / hen hop tail stayed skipped,
+so the about-face still sat on `walkTurnAmp` (the hop
+envelope). Plus drops the free end. Hold through the
+plant, not a pulse — same sin as the hop, independently
+gated. Sit hop-turn owns `sitTurnTailAmp` on the perch.
+Stride owns `walkStrideTailAmp`. Hen hop owns
+`walkHopTailAmp`. Air turn owns `airTurnTailAmp`. Pad
+crouch / Alarm keep their own fans. `walkTurnTailAmp` 0
+restores the Sit drop. Not a pitch force.
+Fly/Glide `SetFacing` banks then cruises (`airTurnAmp`) — Wander
+already turns ±X in the air; Look scale plus `bankLook` still
+read as a mirrored stroke. Far wing up, near wing down,
+neck. Tail hitch is independently gated (`airTurnTailAmp`).
+Pupil drop is independently gated (`airTurnEyeAmp`).
+Lid slit is independently gated (`airTurnLidAmp`).
+Gape part is independently gated (`airTurnGapeAmp`).
+Pitch spring already softens 0.4 s. Do not extend the
+window: Glide may chatter ±X at the slot. Sit/Walk keep their
+hops. Dirt takeoff, pad first-air trail, landing flare, and Attack
+skip it. `airTurnAmp` 0 restores the instant flip. Not a yaw force.
+Fly/Glide `SetFacing` hitches that tail (`airTurnTailAmp`) —
+Wander already wrote the bank; wings and neck were live, the
+fan still rode `airTurnAmp`, so the about-face still sat on
+the bank envelope. Plus drops the free end. Hold through
+the bank, not a pulse — same sin as the bank, independently
+gated. Sit hop-turn owns `sitTurnTailAmp`. Walk hop-turn
+owns `walkTurnTailAmp`. Takeoff / landing flare / Alarm
+keep their own fans. `airTurnTailAmp` 0 restores the cruise
+stream. Not a pitch force.
+Fly/Glide `SetFacing` drops that pupil (`airTurnEyeAmp`) —
+Wander already wrote the bank; wings, neck, and tail were
+live, Fly/Glide stare stayed rest-Y, so the about-face still
+flashed a cruise horizon. Same Walk/Peck slot toward the
+bill. Hold through the bank, not a pulse. Sit hop-turn owns
+`sitTurnEyeAmp`. Walk hop-turn owns `walkTurnEyeAmp`.
+Landing flare owns `landEyeAmp`. Landing-flare lid
+owns `landLidAmp`. Landing-flare gape owns
+`landGapeAmp`. Dirt swoop owns `swoopEyeAmp`.
+Dirt-swoop lid owns `swoopLidAmp`. Dirt-swoop gape owns
+`swoopGapeAmp`. Takeoff climb owns `takeoffEyeAmp`.
+Takeoff-climb lid owns `takeoffLidAmp`. Takeoff-climb
+gape owns `takeoffGapeAmp`.
+Takeoff / Attack skip
+with `AirTurn01`.
+Alarm glance skip. Lid rides the child (`airTurnLidAmp`).
+`airTurnEyeAmp` 0 restores the cruise stare. Not a look force.
+Fly/Glide `SetFacing` slits that lid (`airTurnLidAmp`) —
+Wander already wrote the bank; wings, neck, tail, and pupil
+were live, Fly/Glide lid stayed skipped, so the about-face
+still flashed a round cruise stare on the drop. Same Walk
+lid over the pupil. Hold through the bank, not a pulse.
+Sit hop-turn owns `sitTurnLidAmp`. Walk hop-turn owns
+`walkTurnLidAmp`. Landing flare owns `landLidAmp`.
+Dirt swoop owns `swoopLidAmp`.
+Takeoff climb owns `takeoffLidAmp`.
+Takeoff / landing flare / Attack skip with `AirTurn01`.
+Alarm glance skip. Gape rides the same window
+(`airTurnGapeAmp`). Landing-flare gape owns
+`landGapeAmp`. Dirt-swoop gape owns `swoopGapeAmp`.
+Takeoff-climb gape owns `takeoffGapeAmp`.
+`airTurnLidAmp` 0 restores the cruise stare.
+Not a lid force.
+Fly/Glide `SetFacing` parts that bill (`airTurnGapeAmp`) —
+Wander already wrote the bank; wings, neck, tail, pupil,
+and lid were live, Fly/Glide gape stayed skipped, so the
+about-face still flashed a shut cruise bill on the drop.
+Same Walk part (~8°). Hold through the bank, not a pulse.
+Sit hop-turn owns `sitTurnGapeAmp`. Walk hop-turn owns
+`walkTurnGapeAmp`. Takeoff / landing flare / Attack skip
+with `AirTurn01`. Landing flare owns `landGapeAmp`.
+Dirt swoop owns `swoopGapeAmp`. Takeoff climb owns
+`takeoffGapeAmp`.
+Alarm glance skip. Peck Cos stays Peck.
+Cry keeps Alarm. Attack stoop stays Attack.
+`airTurnGapeAmp` 0 restores the cruise shut. Not a grab
+force.
+A dark pupil sits on Head Visual (`sitBlinkAmp`). Sit/Walk/Peck look
+was a blank yellow box; the eye blinks ~0.12 s every 2–5 s (same
+clock as the dog lids). Night roost holds it shut. Fly/Glide/Attack
+keep a stare. `sitBlinkAmp` 0 hides the eye. Not a blink force.
+Alarm glance Sit freeze independently skips that blink
+(`alarmLookSitBlinkAmp`) — hitch/crouch/grasp/hunch/tail were
+live, Sit still shut 0.12 s every 2–5 s, so Flee still flashed
+a commute lid on a startled perch, including hop-turn
+about-face (`AlarmLookSit` zeroes). Hold the stare (eye on).
+Walk scramble independently skips (`alarmLookWalkBlinkAmp`),
+including hop-turn about-face (`AlarmLookLeg` zeroes).
+Peck keeps the forage clock. Night roost keeps the shut.
+`alarmLookSitBlinkAmp` 0 restores the blink. Not a stare
+force.
+Sit `idleLook` glances that pupil (`sitLookEyeAmp`) — Wander already
+writes the weave; the neck turned, rest-Y stayed socket-forward,
+so look-around read as a nodding statue eye. Same Walk/Peck slot,
+signed with the neck (down toward the bill, up toward the nape).
+Lid stays open. Gape rides look-down (`sitLookGapeAmp`).
+Wattle hang rides the same look-down (`sitLookWattleAmp`).
+Peck / preen / scratch drops stay theirs. Attack
+nict stays the pale cover. Night roost, land ruffle, hop-turn,
+preen, and scratch skip. `sitLookEyeAmp` 0 restores the rest
+pupil. Not a look force.
+Sit `idleLook` counters that tail (`sitLookTailAmp`) — Wander
+already writes the weave; the neck and pupil turned, Sit drop
+6° stayed put, so look-around still read as a nodding statue
+perch. Opposite the neck: bill-down streams the free end,
+nape-up drops it. Scratch owns `sitScratchTailAmp`. Hop-turn
+owns `sitTurnTailAmp`. Sit ruffle owns `landSettleTailAmp`.
+Pad crouch / Alarm keep their own fans. Night roost, land
+ruffle, preen, and scratch skip.
+`sitLookTailAmp` 0 restores the Sit drop. Not a pitch force.
+Sit `idleLook` hitches the far wing (`sitLookWingAmp`) — Wander
+already writes the weave; the neck, pupil, and tail turned,
+Sit fold stayed put, so look-around still read as a nodding
+statue with a wagging tail. Opposite the neck: bill-down lifts
+the box, nape-up presses the tuck. Scratch owns the kick
+flick. Preen owns the near wing and its far-wing brace
+(`sitPreenWingAmp`). Hop-turn / pad hunch / Alarm keep their
+own folds. Night roost, land ruffle, preen, and scratch skip.
+`sitLookWingAmp` 0 restores the Sit fold. Not a lift force.
+Sit `idleLook` parts that bill on look-down (`sitLookGapeAmp`) —
+Wander already writes the weave; neck, pupil, tail, and wing
+were live, Sit look / scratch gape stayed skipped, so
+look-down still flashed a shut bill on the perch. Same Walk
+part (~8°). Scale with the weave (toward the bill), not a
+hold — look-up stays shut (not a call). Preen nibble stays
+preen. Hop-turn owns `sitTurnGapeAmp`. Scratch owns
+`sitScratchGapeAmp`. `sitLookGapeAmp` 0 restores the shut
+bill. Not a grab force.
+Sit `idleLook` hangs that wattle on look-down (`sitLookWattleAmp`) —
+Wander already writes the weave; neck, pupil, tail, wing, and
+bill were live, Sit look / preen / scratch wattle stayed
+skipped, so look-down still flashed a glued hen throat on
+the perch. Hang with `SitLookGape01` (toward the bill), not
+a hold — look-up stays glued (not a shout). Cry shout stays
+Cry. Attack stoop stays Attack. Walk hop stays Walk. Comb
+nod is independently gated (`sitLookCombAmp`). Preen nibble
+is independently gated (`sitPreenWattleAmp`). Scratch hang
+is independently gated (`sitScratchWattleAmp`). Hop-turn
+hang is independently gated (`sitTurnWattleAmp`). Walk
+hop-turn hang is independently gated (`walkTurnWattleAmp`).
+Peck grab stays the head dip. `sitLookWattleAmp` 0 restores
+the glued Sit throat. Not a hang force.
+Sit `idleLook` nods that comb on look-down (`sitLookCombAmp`) —
+Wander already wrote the weave; neck, pupil, tail, wing,
+bill, and wattle were live, Sit look / preen / scratch comb
+stayed skipped, so look-down still flashed a glued hen crown
+on the perch. Nod with `SitLookGape01` (toward the bill),
+not a shout — look-up stays glued (not a call). Cartilage
+erects; wattle hang stays flesh (`sitLookWattleAmp`). Cry
+shout stays Cry. Attack stoop stays glued (contrast). Walk
+hop stays Walk. Walk hop-turn nod is independently gated
+(`walkTurnCombAmp`). Sit hop-turn nod is independently gated
+(`sitTurnCombAmp`). Preen nod is independently gated
+(`sitPreenCombAmp`). Scratch nod is independently gated
+(`sitScratchCombAmp`). Peck grab
+stays the head dip. `sitLookCombAmp` 0 restores the glued
+Sit crown. Not a nod force.
+Sit `idlePreen` nods that comb on the nibble (`sitPreenCombAmp`) —
+Wander already wrote the reach; wing, slit, nibble, pupil,
+tail, far-wing brace, and wattle were live, Sit look /
+scratch comb stayed skipped, so grooming still flashed a
+glued hen crown on the perch. Nod with `SitPreenGape01`
+(the nibble), not a shout. Cartilage erects; wattle hang
+stays flesh (`sitPreenWattleAmp`). Cry shout stays Cry.
+Attack stoop stays glued (contrast). Walk hop stays Walk.
+Walk hop-turn nod is independently gated (`walkTurnCombAmp`).
+Sit hop-turn nod is independently gated (`sitTurnCombAmp`).
+Look-down nod is independently gated (`sitLookCombAmp`).
+Scratch nod is independently gated (`sitScratchCombAmp`).
+Peck grab stays the head dip.
+`sitPreenCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+Sit `idleHop` nods that comb on the kick (`sitScratchCombAmp`) —
+Wander already wrote the kick; foot, slit, pupil, wing, bill,
+tail, and wattle were live, Sit look / preen comb stayed
+skipped, so scratch still flashed a glued hen crown on the
+perch. Nod with `SitScratchGape01` (the kick), not a shout.
+Cartilage erects; wattle hang stays flesh (`sitScratchWattleAmp`).
+Cry shout stays Cry. Attack stoop stays glued (contrast).
+Walk hop stays Walk. Walk hop-turn nod is independently gated
+(`walkTurnCombAmp`). Sit hop-turn nod is independently gated
+(`sitTurnCombAmp`). Look-down nod is independently gated
+(`sitLookCombAmp`). Preen nod is independently gated
+(`sitPreenCombAmp`). Peck grab stays the head dip.
+`sitScratchCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+Sit `idlePreen` hangs that wattle on the nibble (`sitPreenWattleAmp`) —
+Wander already writes the reach; wing, slit, nibble, pupil,
+tail, and far-wing brace were live, Sit look / scratch /
+hop-turn wattle stayed skipped, so grooming still flashed a
+glued hen throat on the perch. Hang with `SitPreenGape01`
+(the nibble), not a shout. Cry shout stays Cry. Attack stoop
+stays Attack. Walk hop stays Walk. Look-down owns
+`sitLookWattleAmp`. Comb nod is independently gated
+(`sitPreenCombAmp`). Scratch hang
+is independently gated (`sitScratchWattleAmp`). Hop-turn
+hang is independently gated (`sitTurnWattleAmp`). Peck grab
+stays the head dip.
+`sitPreenWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+Sit `idleHop` hangs that wattle on the kick (`sitScratchWattleAmp`) —
+Wander already writes the kick; foot, slit, pupil, wing,
+bill, and tail were live, Sit look / preen / hop-turn
+wattle stayed skipped, so scratch still flashed a glued hen
+throat on the perch. Hang with `SitScratchGape01` (the
+kick), not a shout. Cry shout stays Cry. Attack stoop stays
+Attack. Walk hop stays Walk. Look-down owns
+`sitLookWattleAmp`. Preen nibble owns `sitPreenWattleAmp`.
+Comb nod is independently gated (`sitScratchCombAmp`).
+Hop-turn hang is independently
+gated (`sitTurnWattleAmp`). Peck
+grab stays the head dip. `sitScratchWattleAmp` 0 restores
+the glued Sit throat. Not a hang force.
+Sit `idlePreen` slits that lid (`sitPreenLidAmp`) — Wander already
+writes the reach; the round stare made grooming a stretch. Same
+Walk lid. Blink and night roost keep the shut. Scratch owns
+`sitScratchLidAmp`. Hop-turn skips. `sitPreenLidAmp` 0 restores
+the stare. Not a lid force.
+Sit `idlePreen` parts the bill (`sitPreenGapeAmp`) — Wander already
+writes the reach; the slit still left a shut beak, so grooming
+read as a squinting stretch. Same Walk part (~8°), nibble with
+`idlePreen`. Peck Cos and Attack stoop keep their own gape. Cry
+keeps Alarm. Night roost, land ruffle, and hop-turn skip.
+Hop-turn owns `sitTurnGapeAmp`. Look-down owns
+`sitLookGapeAmp`. Scratch owns `sitScratchGapeAmp`.
+`sitPreenGapeAmp` 0 restores
+the shut bill. Not a grab force.
+Sit `idlePreen` drops the pupil (`sitPreenEyeAmp`) — Wander already
+writes the reach; the slit and nibble still left rest-Y, so
+grooming read as a horizon stare. Same Walk/Peck slot toward
+the bill. Lid rides the child. Peck forage drop stays Peck.
+Attack nict stays the pale cover. Night roost, land ruffle,
+scratch, and hop-turn skip. `sitPreenEyeAmp` 0 restores the
+rest pupil. Not a look force.
+Sit `idlePreen` drops the tail (`sitPreenTailAmp`) — Wander
+already writes the reach; the wing, slit, nibble, and pupil
+were live, Sit drop 6° stayed put, so grooming still read as
+a stretching statue perch. Pulse with `idlePreen`. Look owns
+`sitLookTailAmp`. Scratch owns `sitScratchTailAmp`. Hop-turn
+owns `sitTurnTailAmp`. Sit ruffle owns `landSettleTailAmp`.
+Pad crouch / Alarm keep their own fans. Walk stride / hen hop
+stay Walk. Night roost, land
+ruffle, look, and scratch skip. `sitPreenTailAmp` 0 restores
+the Sit drop. Not a pitch force.
+Sit `idlePreen` hitches the far wing (`sitPreenWingAmp`) —
+Wander already writes the reach; the near wing, slit, nibble,
+pupil, and tail were live, Sit fold stayed put, so grooming
+still read as a stretching statue with one wing posed. Plus
+from −90 (brace), not more-negative (near already to the
+beak). Look owns the weave hitch. Scratch owns the kick
+flick. Hop-turn / pad hunch / Alarm keep their own folds.
+Night roost, land ruffle, look, and scratch skip.
+`sitPreenWingAmp` 0 restores the Sit fold. Not a lift force.
+Alarm then Fly/Walk glances back and fans the tail (`alarmLookAmp`) —
+BIRD-6 already cries and faces away; without this the flee stroke
+matches forage Fly. Beak gape stays 0.55 s; the glance holds ~1.15 s.
+`alarmLookAmp` 0 restores beak-only cry. Dirt Fly and pad first-air
+keep the takeoff coil; Attack/Peck/Glide keep their own neck. Not a
+flee force.
+The same glance drops that pupil (`alarmLookEyeAmp`) —
+neck and tail already glance; Fly/Walk stare stayed rest-Y,
+so Flee still flashed a forage horizon. Same Walk/Peck
+slot toward the bill. Scale with `AlarmLook`. Night roost
+skip. Cry keeps Alarm gape. Lid rides the child
+(`alarmLookLidAmp`). `alarmLookEyeAmp` 0 restores the
+forage stare. Not a look force.
+The same glance slits that lid (`alarmLookLidAmp`) —
+neck, tail, and pupil already glance; Fly/Walk lid
+stayed skipped, so Flee still flashed a round forage
+stare on the drop. Same Walk lid over the pupil. Scale
+with `AlarmLook`. Night roost skip. Cry keeps Alarm
+gape. Gape rides the same window (`alarmLookGapeAmp`).
+`alarmLookLidAmp` 0 restores the forage stare.
+Not a lid force.
+The same glance parts that bill (`alarmLookGapeAmp`) —
+neck, tail, pupil, and lid already glance; Fly/Walk gape
+stayed skipped (`WalkScanGape01` / `AirTurnGape01` skip
+`AlarmLook`), so Flee still flashed a shut forage bill
+after the 0.55 s cry on the 1.15 s glance. Same Walk
+part (~8°). Scale with `AlarmLook`. Night roost skip.
+Cry keeps Alarm (the 0.55 s shout). Peck Cos stays Peck.
+Attack stoop stays Attack. Wing hitch is independently
+gated (`alarmLookWingAmp`). Wattle hang is independently
+gated (`alarmLookWattleAmp`). Comb nod is independently
+gated (`alarmLookCombAmp`). `alarmLookGapeAmp` 0 restores
+the forage shut. Not a grab force.
+The same glance hangs that wattle (`alarmLookWattleAmp`) —
+neck, tail, pupil, lid, bill, and wings already glance after
+the 0.55 s shout; the Chicken throat mark stayed glued to
+Head Visual, so Flee still flashed a statue wattle on the
+1.15 s look-back. Scale with `AlarmLook`. Night roost skip.
+Cry keeps Alarm (the 0.55 s shout, listed first). Attack
+stoop stays Attack. Comb nod is independently gated
+(`alarmLookCombAmp`). Swoop wattle stays glued (hens skip
+swoop; crow unmarked). `alarmLookWattleAmp` 0 restores the
+glued glance throat. Not a hang force.
+The same glance nods that comb (`alarmLookCombAmp`) —
+neck, tail, pupil, lid, bill, wings, and wattle already
+glance after the 0.55 s shout; the Chicken crown stayed
+glued to Head Visual, so Flee still flashed a statue comb
+over a live throat on the 1.15 s look-back. Scale with
+`AlarmLook`. Night roost skip. Cry keeps Alarm (the 0.55 s
+shout, listed first). Attack stoop stays glued (contrast).
+Cartilage erects; wattle hang stays flesh
+(`alarmLookWattleAmp`). Swoop comb stays glued (hens skip
+swoop; crow unmarked). `alarmLookCombAmp` 0 restores the
+glued glance crown. Not a nod force.
+The same glance pins Fly / hitches Walk (`alarmLookWingAmp`) —
+neck, tail, pupil, lid, and bill already glance; Fly still
+beat cruise, so Flee still flashed a forage stroke after
+the 0.55 s cry on the 1.15 s glance. Fold −90 is along
+the back; slight plus presses the Fly box (stoop pin),
+not preen. Walk hitch is the hop shrug from the fold.
+Scale with `AlarmLook`. Night roost skip. Takeoff /
+landing flare / Attack pin keep their own wings. Walk
+stride / hen hop skip while `AlarmLook` is live. Cry
+keeps Alarm. `alarmLookWingAmp` 0 restores the cruise
+flap. Not a lift force.
+The same glance scrambles Walk (`alarmLookLegAmp`) —
+neck, tail, pupil, lid, bill, and wings already glance;
+Walk still forage-strode / hopped, so Flee still flashed
+a dirt commute after the 0.55 s cry on the 1.15 s glance.
+Faster than `walkFrequency` (hen hop / crow stride). Scale
+with `AlarmLook`. Hop-turn keeps the about-face. Fly tuck
+stays Fly. `walkThrust` still translates. Night roost skip.
+Cry keeps Alarm. Stride / hen hop skip while live.
+Walk startle blink is independently gated
+(`alarmLookWalkBlinkAmp`), including hop-turn about-face
+(`AlarmLookLeg` zeroes).
+`alarmLookLegAmp` 0 restores the forage gait. Not a run
+force.
+The same glance freezes Sit (`alarmLookSitAmp`) —
+neck, tail, pupil, lid, bill, Fly/Walk wings, and Walk legs already
+glance; Sit still forage-looked / preened / scratched, so
+Flee still flashed a perch commute after the 0.55 s cry on
+the 1.15 s glance until Walk/Fly. Freeze the fidget. Glance
+owns neck / tail / eye. Sit startle hitch is independently
+gated (`alarmLookSitWingAmp`). Sit startle crouch is
+independently gated (`alarmLookSitLegAmp`). Sit startle
+grasp is independently gated (`alarmLookSitGraspAmp`).
+Sit startle hunch is independently gated
+(`alarmLookSitHunchAmp`). Sit startle tail is independently
+gated (`alarmLookSitTailAmp`). Sit startle blink is independently gated
+(`alarmLookSitBlinkAmp`), including hop-turn about-face
+(`AlarmLookSit` zeroes).
+Walk startle blink is independently gated
+(`alarmLookWalkBlinkAmp`), including hop-turn about-face
+(`AlarmLookLeg` zeroes).
+Hop-turn keeps the about-face. Night roost skip. Cry keeps
+Alarm. Look / preen / scratch skip while live.
+`alarmLookSitAmp` 0 restores the forage fidget. Not a sit
+force.
+The same glance startles Sit fold (`alarmLookSitWingAmp`) —
+neck, tail, pupil, lid, bill, freeze, Fly pin, and Walk hitch
+already glance; Sit still tucked, so Flee still flashed a
+folded perch after the 0.55 s cry on the 1.15 s glance until
+Walk/Fly. Plus from −90 (hop shrug / Walk hitch), not preen.
+Scale with `AlarmLook`. Hop-turn keeps the about-face.
+Land ruffle keeps the plant. Night roost skip. Cry keeps
+Alarm. Fly pin / Walk hitch stay theirs. Sit startle crouch
+is independently gated (`alarmLookSitLegAmp`). Sit startle
+grasp is independently gated (`alarmLookSitGraspAmp`).
+Sit startle hunch is independently gated
+(`alarmLookSitHunchAmp`). Sit startle tail is independently
+gated (`alarmLookSitTailAmp`). Sit startle blink is
+independently gated (`alarmLookSitBlinkAmp`).
+`alarmLookSitWingAmp`
+0 restores the Sit fold. Not a lift force.
+The same glance crouches Sit plant (`alarmLookSitLegAmp`) —
+neck, tail, pupil, lid, bill, freeze, Fly pin, Walk hitch,
+and Sit hitch already glance; Sit still planted, so Flee
+still flashed a perched sit after the 0.55 s cry on the
+1.15 s glance until Walk/Fly. Extra tuck from `sitHip`
+(same sign as pad crouch), not a Walk scramble. Scale with
+`AlarmLook`. Hop-turn keeps the about-face. Land ruffle
+keeps the plant. Night roost skip. Cry keeps Alarm. Walk
+scramble stays Walk. Pad crouch stays the twig rest. Sit
+startle grasp is independently gated (`alarmLookSitGraspAmp`).
+Sit startle hunch is independently gated
+(`alarmLookSitHunchAmp`). Sit startle tail is independently
+gated (`alarmLookSitTailAmp`). Sit startle blink is
+independently gated (`alarmLookSitBlinkAmp`).
+`alarmLookSitLegAmp` 0 restores the Sit plant. Not a squat
+force.
+The same glance clenches Sit plant (`alarmLookSitGraspAmp`) —
+neck, tail, pupil, lid, bill, freeze, Fly pin, Walk hitch,
+Sit hitch, and Sit crouch already glance; Sit still planted
+the toes (pad wrap / dirt 0), so Flee still flashed a
+perched sit after the 0.55 s cry on the 1.15 s glance until
+Walk/Fly. Extra wrap (same sign as `sitGraspAmp`), not a
+Walk toe-drop. Scale with `AlarmLook`. Hop-turn keeps the
+about-face. Land ruffle keeps the plant. Night roost skip.
+Cry keeps Alarm. Walk scramble stays Walk. Pad wrap stays
+the twig rest. Scratch raise stays forage. Sit startle
+hunch is independently gated (`alarmLookSitHunchAmp`).
+Sit startle tail is independently gated
+(`alarmLookSitTailAmp`). Sit startle blink is independently
+gated (`alarmLookSitBlinkAmp`).
+`alarmLookSitGraspAmp` 0 restores the Sit plant feet. Not a
+grasp force.
+The same glance hunches Sit (`alarmLookSitHunchAmp`) —
+neck, tail, pupil, lid, bill, freeze, Fly pin, Walk hitch,
+Sit hitch, Sit crouch, and Sit grasp already glance; Sit
+still held the dirt-sit silhouette (pad retract / dirt 0
+extra), so Flee still flashed a perched sit after the
+0.55 s cry on the 1.15 s glance until Walk/Fly. Extra
+retract (same sign as `sitHunchAmp`), not a Walk scan.
+Scale with `AlarmLook`. Hop-turn keeps the about-face.
+Land ruffle keeps the plant. Night roost skip. Cry keeps
+Alarm. Walk scramble stays Walk. Pad hunch stays the twig
+rest. Hitch stays the startle flash (extra tuck after
+hitch). Scratch raise stays forage. Sit startle tail is
+independently gated (`alarmLookSitTailAmp`). Sit startle
+blink is independently gated (`alarmLookSitBlinkAmp`).
+`alarmLookSitHunchAmp` 0 restores the Sit silhouette. Not a
+hunch force.
+The same glance drops Sit tail (`alarmLookSitTailAmp`) —
+neck, pupil, lid, bill, freeze, Fly pin, Walk hitch, Sit
+hitch, Sit crouch, Sit grasp, and Sit hunch already glance;
+Sit still held the pad crouch drop / dirt 6° under the
+Fly/Walk 22° Max, so Flee still flashed a commute fan after
+the 0.55 s cry on the 1.15 s glance until Walk/Fly. Extra
+plus (same sign as pad crouch), not a Walk stride pump.
+Scale with `AlarmLook`. Hop-turn keeps the about-face.
+Land ruffle keeps the plant. Night roost skip. Cry keeps
+Alarm. Walk scramble stays Walk. Pad crouch stays the twig
+rest. Hitch stays the startle flash. Look / preen / scratch
+keep their own fans. Sit startle blink is independently
+gated (`alarmLookSitBlinkAmp`).
+`alarmLookSitTailAmp` 0 restores the Sit tail. Not a pitch
+force.
+The same glance holds Sit stare (`alarmLookSitBlinkAmp`) —
+neck, pupil, lid, bill, freeze, hitch, crouch, grasp, hunch,
+and tail already glance; Sit still shut 0.12 s every 2–5 s,
+so Flee still flashed a commute lid after the 0.55 s cry on
+the 1.15 s glance until Walk/Fly. Hold the stare (eye on),
+not a Walk forage blink. Scale with `AlarmLook`. Freeze or
+hop-turn: `AlarmLookSit` zeroes on about-face, so the perch
+dash still forage-blinked on `SetFacing`. Hop-turn owns the
+plant; this only keeps the stare. Night roost skip (already
+shut). Cry keeps Alarm. Walk scramble independently skips
+(`alarmLookWalkBlinkAmp`), including hop-turn about-face.
+Peck keeps the forage clock.
+Lid / pupil glance stay `alarmLookLidAmp` / `alarmLookEyeAmp`.
+`alarmLookSitBlinkAmp` 0 restores the Sit blink. Not a stare
+force.
+The same glance holds Walk stare (`alarmLookWalkBlinkAmp`) —
+neck, pupil, lid, bill, Fly pin, Walk hitch, Walk scramble,
+and Sit freeze stare already glance; Walk still shut 0.12 s
+every 2–5 s, so Flee still flashed a commute lid after the
+0.55 s cry on the 1.15 s glance. Hold the stare (eye on),
+not a Sit freeze blink. Scale with `AlarmLook`. Scramble or
+hop-turn: `AlarmLookLeg` zeroes on about-face, so the dirt
+dash still forage-blinked on `SetFacing`. Hop-turn owns the
+plant; this only keeps the stare. Night roost skip (already
+shut). Cry keeps Alarm. Sit freeze stays Sit. Sit hop-turn
+independently skips (`alarmLookSitBlinkAmp`). Peck keeps the
+forage clock. Lid / pupil glance stay `alarmLookLidAmp` /
+`alarmLookEyeAmp`.
+`alarmLookWalkBlinkAmp` 0 restores the Walk blink. Not a stare
+force.
+The same Alarm/Call shout bulges the gullet (`cryCropAmp`) —
+gape, neck lift, and the 1.15 s glance were live; the crop
+stayed off, so Flee still flashed a mute open-bill. Same Peck
+swallow sprite. Scale with `CryGape` (the 0.55 s shout), not
+the glance. Peck swallow keeps `peckCropAmp`. Attack stoop
+owns `stoopCropAmp`. Woodpecker
+drum stays the brace. `cryCropAmp` 0 restores the silent
+neck. Not a shout force.
+The same Alarm/Call shout shows that tongue (`cryTongueAmp`) —
+gape, neck lift, and crop were live; the bill stayed an empty
+orange box, so Flee still flashed a mute swallow. Scale with
+`CryGape` (the 0.55 s shout), not the glance. Peck grab stays
+shut-tongue. Attack stoop owns `stoopTongueAmp`. Glance 8° stays
+glance. `cryTongueAmp` 0 restores the empty bill. Not a
+shout force.
+The same Alarm/Call shout swings the hen wattle (`cryWattleAmp`) —
+gape, crop, and tongue were live; the Chicken throat mark stayed
+glued to Head Visual, so Flee still flashed a statue wattle.
+Scale with `CryGape` (the 0.55 s shout), not the glance. Comb
+nod is independently gated (`cryCombAmp`). Crow / woodpecker
+have no mark. Peck grab already rides the head dip. Attack
+stoop owns `stoopWattleAmp`. Glance hang is independently
+gated (`alarmLookWattleAmp`). Glance 8° stays glance. `cryWattleAmp` 0
+restores the statue. Not a shout force.
+The same Alarm/Call shout nods the hen comb (`cryCombAmp`) —
+gape, crop, tongue, and wattle were live; the Chicken crown
+stayed glued to Head Visual, so Flee still flashed a statue
+comb over a live throat. Cartilage erects (stretch + small
+tilt); wattle hang stays flesh (`cryWattleAmp`). Scale with
+`CryGape` (the 0.55 s shout), not the glance. Crow /
+woodpecker have no mark. Peck grab already rides the head
+dip. Attack stoop stays Attack. Walk hop nod is
+independently gated (`walkCombAmp`). Walk hop-turn nod is
+independently gated (`walkTurnCombAmp`). Glance nod is
+independently gated (`alarmLookCombAmp`). Glance 8° stays glance.
+`cryCombAmp` 0 restores the glued crown. Not a shout force.
+Facing flip softens pitch spring 0.4 s — wander turns ±X in the air.
+`BirdWander` now enters Glide `glideLead` before fly ends (agent `ai`).
+BIRD-5: dirt is not home — the brain writes Fly toward `homeX`. This
+profile still Sit+Settle on contact in `TickFlock` (one physics step);
+the brain overwrites dirt on the next `Update`. Enable the perch and
+the glide flare when `PlantTree.NearPerch`, not only when height above
+flat dirt is < 0.45 m (a twig is higher). Facing-flip soft pitch does
+not extend if already in the 0.4 s window — Glide may chatter ±X at
+the slot.
+Visual look (agent `artist`, 30.08): Look mirror is enough — capsules/ellipse
+are symmetric, no new texture. Keep `DimFar` / sorting after the flip
+(near wing stays bright and in front). Do not move `Body/Visual` under
+`Look` until a directed albedo exists.
+
+Two builds:
+
+| `BirdRig` | Where | Bodies |
+|---|---|---|
+| `Ragdoll` | stance stand (`-bird` without `-birdRig flock`) | joints and muscles |
+| `Flock` | scene, flock | **one** `Rigidbody2D`; wings and legs are look |
+
+Dozens of birds in a scene — `Flock` only. A ragdoll per individual
+gives ~16 bodies.
+Flock: one `FixedUpdate` (`BirdController` calls `sensors.Tick` → pose
+cache → `flight.Tick`).
+Wing and leg look is `LateUpdate`, not a physics step.
+Above `skipProbeAboveHeight` (0.5 m) the flock does not call `OverlapBox`,
+unless `PlantTree.NearPerch` — a tree branch is higher than flat ground,
+and Sit still needs a foot read. `treeSupport` is grounded + NearPerch +
+height > 0.35 m above dirt stance — the AABB alone counts soil under
+the stump as a perch. The brain reads `treeSupport` for BIRD-5, not
+raw `NearPerch`. Plant seats Play birds via
+`PlantTree.SeatBirds`; this profile keeps perch pose and pitch. Headless
+flat wander does not spawn trees.
+Wood is ghost to a bird (`Bird.GhostTreeWood`): the body flies through
+the crown. Sit is a trigger attach to `BirdPerch` pads at
+`GetPerchSlots`, not a solver contact with wood or with the pad.
+Flock solver colliders are torso and head only; wings and legs are
+look; the perch fixture is a trigger. Do not add a second Rigidbody2D
+per pad.
+Flock look has no `HumanSegment` on the feathers: the component is only
+on the body.
+
+Lift is one force on the body in `BirdFlight`. The flap is a switch:
+Fly gives thrust in time with the flap; without a flap the force is
+zero. Crow Glide is a slow sink (lift near weight, `|vy|` capped);
+do not stall from cruise height — that is a dive. Fly cruise also
+holds the wing in seeded pockets (`cruiseGlideChance`, staggered by
+`flapPhaseOffset`) and look-banks (`cruiseBankLook`; Glide is milder).
+Dirt approach dips in the band `flareHeight…flareHeight+swoopLead`
+while already sinking (`vy < 0`) — Fly or Glide, not pad NearPerch,
+not the climb through that band. `swoopLead` 0 restores a shallow
+flare-only land. Chicken `hoverMean < 1` skips the path. Wing
+spread and tail stream already read that dip; the same window
+drops the pupil (`swoopEyeAmp`) — Fly/Glide stare stayed rest-Y,
+so the dive still flashed a cruise horizon. Scale with
+`swoopLook`. Climb and dirt takeoff skip. Takeoff climb
+owns `takeoffEyeAmp`. Flare owns
+`landEyeAmp`. Air turn owns `airTurnEyeAmp`. Lid rides
+the child (`swoopLidAmp`). Takeoff-climb lid owns
+`takeoffLidAmp`. Gape owns `swoopGapeAmp`. Takeoff-climb
+gape owns `takeoffGapeAmp`. Feet hang
+(`swoopTalonAmp`) — the belly-tuck held until flare, so the
+dive still flashed a cruise fold. Flare owns `landGearAmp`.
+Attack stoop owns `stoopTalonAmp`.
+`swoopEyeAmp` 0 restores the stare. Not a look force.
+The same swoop window slits that lid (`swoopLidAmp`) —
+wing, tail, and pupil were live, Fly/Glide lid stayed
+skipped, so the dive still flashed a round cruise stare
+on the drop. Same Walk lid over the pupil. Scale with
+`swoopLook`. Climb and dirt takeoff skip. Takeoff climb
+owns `takeoffLidAmp`. Flare owns
+`landLidAmp`. Air turn owns `airTurnLidAmp`. Gape owns
+`swoopGapeAmp`. Takeoff-climb gape owns `takeoffGapeAmp`.
+`swoopLidAmp` 0 restores the cruise stare.
+Not a lid force.
+The same swoop window parts that bill (`swoopGapeAmp`) —
+wing, tail, pupil, and lid were live, Fly/Glide gape
+stayed skipped, so the dive still flashed a shut cruise
+bill on the drop. Same Walk part (~8°). Scale with
+`swoopLook`. Climb and dirt takeoff skip. Flare owns
+`landGapeAmp`. Air turn owns `airTurnGapeAmp`. Takeoff
+climb owns `takeoffGapeAmp`. Sit ruffle owns
+`landSettleGapeAmp`. Peck Cos
+stays Peck. Cry keeps Alarm. Attack stoop stays Attack.
+`swoopGapeAmp` 0 restores the cruise shut. Not a grab
+force.
+The same swoop window drops the feet (`swoopTalonAmp`) —
+wing, tail, pupil, lid, and bill already read the dive;
+Fly/Glide still held the belly-tuck, so the dirt approach
+still flashed a cruise fold until flare. Hang toward flare
+gear, not Attack toes (`stoopTalonAmp`) and not the plant
+(`landGearAmp`). Scale with `swoopLook`. Climb and dirt
+takeoff skip. Flare owns `landGearAmp`. Attack stoop owns
+`stoopTalonAmp`. Takeoff trail owns `takeoffTrailAmp`. Hen
+skip (`hoverMean < 1`). Tongue is independently gated
+(`swoopTongueAmp`). `swoopTalonAmp` 0 restores the
+cruise tuck. Not a talon force.
+The same swoop window shows that tongue (`swoopTongueAmp`) —
+wing, tail, pupil, lid, bill, and feet already read the
+dive; `ApplyCryTongue` still skipped Fly/Glide, so the dirt
+approach still flashed an empty orange box in a live gape.
+Same `SwoopGape01` clock (tongue in a shut bill is
+invisible). Climb and dirt takeoff skip with the gape.
+Flare owns `landGapeAmp`. Attack stoop owns `stoopTongueAmp`.
+Cry keeps Alarm. Peck grab stays shut. Hen skip
+(`hoverMean < 1`). `swoopTongueAmp` 0 restores the empty
+bill. Not a shout force.
+Attack stays the stoop. Feet drop (`stoopTalonAmp`) instead of a Fly belly-tuck —
+the play dive and prey stoop already write `Attack`; this is the
+read of that pulse. `stoopTalonAmp` 0 restores the tuck. Not a
+talon force. The same pulse pins the wings (`stoopWingAmp`) —
+Attack held flap-mid / elbow −42, so the dive read as a paused
+stroke. Flock fold stays along the back (plus presses the box;
+minus would look like preen). `stoopWingAmp` 0 restores flap-mid.
+Not a fold force. The same pulse opens the bill (`stoopGapeAmp`) —
+Attack could Hurt with a closed mouth, so the dive read as
+talons-only Fly. Peck keeps its Cos gape. Cry keeps Alarm.
+`stoopGapeAmp` 0 restores the shut bill. Not a bite force.
+The same pulse shows that tongue (`stoopTongueAmp`) —
+Attack held an empty orange box, so the dive read as a
+mute gape. Scale with `StoopGape`. Peck grab stays shut.
+Cry keeps Alarm (the 0.55 s shout). Glance 8° stays glance.
+`stoopTongueAmp` 0 restores the empty bill. Not a shout
+force.
+The same pulse swings the hen wattle (`stoopWattleAmp`) —
+gape, nict, and tongue were live; the Chicken throat mark
+stayed glued to Head Visual, so the dive still flashed a
+statue wattle. Scale with `StoopGape`. Cry keeps Alarm
+(the 0.55 s shout). Comb stays glued (contrast — shout
+nod is `cryCombAmp`). Crow / woodpecker have no mark.
+Peck grab already rides the head dip. Glance 8° stays
+glance. `stoopWattleAmp` 0 restores the glued throat.
+Not a shout force.
+The same pulse bulges the gullet (`stoopCropAmp`) —
+gape, nict, tongue, and wattle were live; the crop stayed
+off, so the dive still flashed a mute open-bill. Scale
+with `StoopGape`. Peck swallow keeps `peckCropAmp`. Cry
+keeps Alarm (the 0.55 s shout). Comb stays glued
+(contrast). Woodpecker drum stays the brace.
+`stoopCropAmp` 0 restores the silent neck. Not a shout
+force.
+The same pulse covers the pupil (`stoopNictAmp`) —
+Attack held the Fly stare, so the dive read as an
+open-eyed cruise with talons. Pale nictitating box
+over the pupil. Sit blink stays forage. Fly/Glide
+keep the stare. `stoopNictAmp` 0 restores the stare.
+Not a sight force.
+Fly still on dirt loads the legs (`takeoffCrouchAmp`) —
+Sit/Walk→Fly was a standing flap; the hen hop is the same coil.
+`takeoffCrouchAmp` 0 restores stand. Not a jump force.
+The first air frames used to snap a Fly belly-tuck, so the hop
+read as a crouch that vanished. A short trail (`takeoffTrailAmp`)
+hangs the feet then tucks — the brain already wrote Fly; this is
+the climb. Attack talons and Glide gear keep their own legs.
+`takeoffTrailAmp` 0 restores the snap. Not a jump force.
+Dirt Fly still beat at cruise height, so the coil read as a
+helicopter. A cock then a deep first stroke (`takeoffWingAmp`)
+raises on dirt and pushes through the trail — the brain already
+wrote Fly; this is the climb. Attack pin and Glide cup keep
+their own wings. `takeoffWingAmp` 0 restores the cruise flap.
+Not a flap force.
+Dirt Fly still streamed the tail at cruise, so the coil+stroke
+read as wander. A fan then a fade (`takeoffTailAmp`) drops the
+free end on dirt and through the first air — the brain already
+wrote Fly; this is the climb. Landing flare and Alarm keep their
+own fans. `takeoffTailAmp` 0 restores the cruise stream.
+Not a pitch force.
+The same first-air window drops the pupil (`takeoffEyeAmp`) —
+legs, wings, and tail already read the climb; Fly stare stayed
+rest-Y, so the hop still flashed a cruise horizon. Scale with
+the first-air clock. Dirt coil skip. Sinking skip (flare /
+swoop own that). Flare owns `landEyeAmp`. Swoop owns
+`swoopEyeAmp`. Air turn owns `airTurnEyeAmp`. Sit ruffle
+owns `landSettleEyeAmp`. Lid rides
+the child (`takeoffLidAmp`). Gape rides the same
+window (`takeoffGapeAmp`).
+`takeoffEyeAmp` 0 restores the stare. Not a
+look force.
+The same first-air window slits that lid (`takeoffLidAmp`) —
+legs, wings, tail, and pupil already read the climb; Fly
+lid stayed skipped, so the hop still flashed a round
+cruise stare on the drop. Same Walk lid over the pupil.
+Scale with the first-air clock. Dirt coil skip. Sinking
+skip (flare / swoop own that). Flare owns `landLidAmp`.
+Swoop owns `swoopLidAmp`. Air turn owns `airTurnLidAmp`.
+Gape rides the same window (`takeoffGapeAmp`).
+`takeoffLidAmp` 0 restores the cruise
+stare. Not a lid force.
+The same first-air window parts that bill (`takeoffGapeAmp`) —
+legs, wings, tail, pupil, and lid already read the climb;
+Fly gape stayed skipped, so the hop still flashed a shut
+cruise bill on the drop. Same Walk part (~8°). Scale with
+the first-air clock. Dirt coil skip. Sinking skip (flare /
+swoop own that). Flare owns `landGapeAmp`. Swoop owns
+`swoopGapeAmp`. Air turn owns `airTurnGapeAmp`. Peck Cos
+stays Peck. Cry keeps Alarm. Attack stoop stays Attack.
+Sit ruffle owns `landSettleGapeAmp`.
+`takeoffGapeAmp` 0 restores the cruise shut. Not a grab
+force.
+The same first-air window hangs that wattle (`takeoffWattleAmp`) —
+legs, wings, tail, pupil, lid, and bill already read the climb;
+the Chicken throat mark stayed glued to Head Visual, so the
+hop still flashed a statue wattle on first air. Same first-air
+clock. Dirt coil skip. Sinking skip (flare owns
+`landWattleAmp`; swoop wattle stays glued).
+Cry keeps Alarm. Attack stoop stays Attack. Peck swallow stays
+Peck. Comb nod is independently gated (`takeoffCombAmp`).
+`takeoffWattleAmp` 0 restores the glued first-air throat.
+Not a hang force.
+The same first-air window nods that comb (`takeoffCombAmp`) —
+legs, wings, tail, pupil, lid, bill, and wattle already read
+the climb; the Chicken crown stayed glued to Head Visual, so
+the hop still flashed a statue comb over a live throat.
+Same first-air clock. Cartilage erects; wattle hang stays
+flesh (`takeoffWattleAmp`). Dirt coil skip. Sinking skip
+(flare / swoop own that). Cry keeps Alarm. Attack stoop stays
+glued (contrast). Peck swallow stays Peck. Flare owns
+`landCombAmp`. Swoop comb stays glued. `takeoffCombAmp` 0 restores the glued
+first-air crown. Not a nod force.
+Pad Sit/Peck→Fly used to snap a belly-tuck: `TickFlock` releases
+the pad on the first Fly step, so dirt `OnDirtSupport` never
+holds. The same first-air trail / stroke / tail (`perchTakeoffAmp`)
+starts on that edge — Wander and flock startle already wrote Fly.
+Dirt hop keeps its contact coil. `perchTakeoffAmp` 0 restores
+the snap. Not a jump force.
+Pad Sit/Peck still planted a dirt slab: `footZ` 0 matches soil
+Sit, so BIRD-5 rest on the twig did not read. Toes wrap the pad
+(`sitGraspAmp`) — Wander already wrote Sit on the slot. Hop-turn
+and scratch overwrite the moving foot. Dirt Sit stays 0.
+Alarm startle grasp is independently gated
+(`alarmLookSitGraspAmp`). Alarm startle hunch is
+independently gated (`alarmLookSitHunchAmp`). Alarm
+startle tail is independently gated
+(`alarmLookSitTailAmp`). Alarm startle blink is
+independently gated (`alarmLookSitBlinkAmp`).
+`sitGraspAmp` 0 restores the slab.
+Not a grasp force.
+Pad Sit/Peck still used dirt `sitHip` after the wrap, so the
+twig rest read as standing on a slab. Extra tarsus crouch and
+a dropped tail (`sitCrouchAmp`) — Wander already wrote Sit on
+the slot. Hop-turn and scratch overwrite the moving leg. Dirt
+Sit stays 0. Peck is milder. Alarm startle tail is
+independently gated (`alarmLookSitTailAmp`). Alarm
+startle blink is independently gated
+(`alarmLookSitBlinkAmp`).
+`sitCrouchAmp` 0 restores the
+dirt-leg sit. Not a squat force.
+Pad Sit/Peck still held a dirt neck and dirt fold after the
+crouch, so BIRD-5 rest read as a hen on a slab. Neck retract
+and a tighter wing tuck (`sitHunchAmp`) — Wander already wrote
+Sit on the slot. Land ruffle, preen, and night roost overwrite.
+Dirt Sit stays 0. Peck skips the neck. Alarm startle hunch
+is independently gated (`alarmLookSitHunchAmp`). Alarm
+startle tail is independently gated
+(`alarmLookSitTailAmp`). Alarm startle blink is
+independently gated (`alarmLookSitBlinkAmp`).
+`sitHunchAmp` 0 restores
+the dirt-sit silhouette. Not a hunch force.
+Glide inside `flareHeight` drops the feet (`landGearAmp`) instead
+of a Fly belly-tuck (pad) or a stick hang (dirt). The tail already
+fans; this is the landing read of that flare. `landGearAmp` 0
+restores the old hang / tuck. Not a plant force. The same window
+raises and cups the wings (`landWingAmp`) — pad Glide held a
+cruise span until Sit snapped; dirt still beats, only higher.
+`landWingAmp` 0 restores the old held-glide / flap mid. Not a
+brake force. Sit after that cup used to snap the wings to a fold.
+A short ruffle (`landSettleAmp`) shakes both wings then folds —
+the brain already wrote Sit; this is the plant. Night roost skips
+it. `landSettleAmp` 0 restores the snap. Not a land force.
+The same ruffle window drops the pupil (`landSettleEyeAmp`) —
+wings and neck already shake; Sit look / preen / scratch skip
+the window, so the plant still flashed a Sit-cruise rest-Y.
+Scale with the settle clock. Night roost skips. Hop-turn
+skips. Flare owns `landEyeAmp` (Fly/Glide). Swoop owns
+`swoopEyeAmp`. Takeoff climb owns `takeoffEyeAmp`. Air turn
+owns `airTurnEyeAmp`. Lid rides the child (`landSettleLidAmp`).
+Gape owns `landSettleGapeAmp`.
+`landSettleEyeAmp` 0 restores the Sit-cruise stare. Not a
+look force.
+The same ruffle window slits that lid (`landSettleLidAmp`) —
+wings, neck, and pupil already shake; Sit look / preen /
+scratch skip the window, so the plant still flashed a round
+Sit-cruise stare on the drop. Same Walk lid over the pupil.
+Scale with the settle clock. Night roost skips. Hop-turn
+skips. Flare owns `landLidAmp` (Fly/Glide). Swoop owns
+`swoopLidAmp`. Takeoff climb owns `takeoffLidAmp`. Air turn
+owns `airTurnLidAmp`. Gape owns `landSettleGapeAmp`.
+`landSettleLidAmp` 0 restores the Sit-cruise stare. Not a
+lid force.
+The same ruffle window parts that bill (`landSettleGapeAmp`) —
+wings, neck, pupil, and lid already shake; Sit look / preen /
+scratch skip the window, so the plant still flashed a shut
+Sit-cruise bill on the drop. Same Walk part (~8°). Scale with
+the settle clock. Night roost skips. Hop-turn skips. Flare
+owns `landGapeAmp` (Fly/Glide). Swoop owns `swoopGapeAmp`.
+Takeoff climb owns `takeoffGapeAmp`. Air turn owns
+`airTurnGapeAmp`. Peck Cos stays Peck. Cry keeps Alarm.
+Attack stoop stays Attack. Tail hitch is independently
+gated (`landSettleTailAmp`). Wattle hang is independently
+gated (`landSettleWattleAmp`). `landSettleGapeAmp` 0 restores
+the Sit-cruise shut. Not a grab force.
+The same ruffle window hitches that tail (`landSettleTailAmp`) —
+wings, neck, pupil, lid, and bill already shake; the fan still
+rode `landSettleAmp` (the old slow 18° envelope), so the plant
+still sat on a Sit brake, not a ruffle. Plus drops the free
+end. Hitch with the same 22 Hz rake as the wings, not a hold.
+Look owns `sitLookTailAmp`. Preen owns `sitPreenTailAmp`.
+Scratch owns `sitScratchTailAmp`. Hop-turn owns
+`sitTurnTailAmp`. Walk hop-turn owns `walkTurnTailAmp`. Air
+turn owns `airTurnTailAmp`. Takeoff owns `takeoffTailAmp`.
+Pad crouch / Alarm keep their own fans. Night roost skips.
+Hop-turn skips. `landSettleTailAmp` 0 restores the Sit drop.
+Not a pitch force.
+The same ruffle window hangs that wattle (`landSettleWattleAmp`) —
+wings, neck, pupil, lid, bill, and tail already shake; the
+Chicken throat mark stayed glued to Head Visual, so the
+plant still flashed a statue wattle. Hang with
+`LandSettleGape01` (the plant), not a shout. Cry shout stays
+Cry. Attack stoop stays Attack. Walk hop stays Walk. Sit
+look / preen / scratch / hop-turn keep their hang. Comb
+nod is independently gated (`landSettleCombAmp`). Crow unmarked. Night roost skip.
+Hop-turn skip. Alarm glance skip (shout owns the throat).
+`landSettleWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+The same ruffle window nods that comb (`landSettleCombAmp`) —
+wings, neck, pupil, lid, bill, tail, and wattle already
+shake; the Chicken crown stayed glued to Head Visual, so the
+plant still flashed a statue comb. Nod with
+`LandSettleGape01` (the plant), not a shout. Cartilage
+erects; wattle hang stays flesh (`landSettleWattleAmp`). Cry
+shout stays Cry. Attack stoop stays glued (contrast). Walk
+hop stays Walk. Sit look / preen / scratch / hop-turn keep
+their nod. Peck grab stays the head dip. Crow unmarked.
+Night roost skip. Hop-turn skip. Alarm glance skip (shout
+owns the crown). `landSettleCombAmp` 0 restores the glued
+Sit crown. Not a nod force.
+The same flare window drops the pupil (`landEyeAmp`) —
+gear, cup, and tail fan were live, Fly/Glide stare stayed
+rest-Y, so the plant still flashed a cruise horizon. Scale
+with `flareLook`. Climb and dirt takeoff skip. Takeoff
+climb owns `takeoffEyeAmp`. Swoop above
+flare owns `swoopEyeAmp`. Air turn owns `airTurnEyeAmp`. Sit
+ruffle owns `landSettleEyeAmp`. Lid
+rides the child (`landLidAmp`). Dirt-swoop lid owns
+`swoopLidAmp`. Takeoff-climb lid owns `takeoffLidAmp`.
+Gape owns `landGapeAmp`. Dirt-swoop gape
+owns `swoopGapeAmp`. Takeoff-climb gape owns
+`takeoffGapeAmp`.
+`landEyeAmp` 0 restores the stare.
+Not a look force.
+The same flare window slits that lid (`landLidAmp`) —
+gear, cup, tail, and pupil were live, Fly/Glide lid stayed
+skipped, so the plant still flashed a round cruise stare
+on the drop. Same Walk lid over the pupil. Scale with
+`flareLook`. Climb and dirt takeoff skip. Takeoff climb
+owns `takeoffLidAmp`. Swoop above
+flare owns `swoopLidAmp`. Air turn owns `airTurnLidAmp`. Gape
+owns `landGapeAmp`. Dirt-swoop gape owns `swoopGapeAmp`.
+Takeoff-climb gape owns `takeoffGapeAmp`.
+`landLidAmp` 0 restores the cruise stare.
+Not a lid force.
+The same flare window parts that bill (`landGapeAmp`) —
+gear, cup, tail, pupil, and lid were live, Fly/Glide
+gape stayed skipped, so the plant still flashed a shut
+cruise bill on the drop. Same Walk part (~8°). Scale
+with `flareLook`. Climb and dirt takeoff skip. Takeoff
+climb owns `takeoffGapeAmp`. Swoop
+above flare owns `swoopGapeAmp`. Air turn owns `airTurnGapeAmp`.
+Peck Cos stays Peck. Cry keeps Alarm. Attack stoop
+stays Attack. Sit ruffle owns `landSettleGapeAmp`.
+`landGapeAmp` 0 restores the cruise shut.
+Not a grab force.
+The same flare window hangs that wattle (`landWattleAmp`) —
+gear, cup, tail, pupil, lid, and bill already read the plant;
+the Chicken throat mark stayed glued to Head Visual, so the
+drop still flashed a statue wattle on flare. Scale with
+`flareLook`. Climb and dirt takeoff skip. Takeoff climb
+owns `takeoffWattleAmp`. Swoop wattle stays glued. Cry keeps
+Alarm. Attack stoop stays Attack. Peck swallow stays Peck.
+Sit ruffle owns `landSettleWattleAmp`. Comb nod is independently
+gated (`landCombAmp`). `landWattleAmp` 0 restores the glued flare throat.
+Not a hang force.
+The same flare window nods that comb (`landCombAmp`) —
+gear, cup, tail, pupil, lid, bill, and wattle already read
+the plant; the Chicken crown stayed glued to Head Visual, so
+the drop still flashed a statue comb over a live throat.
+Same `flareLook`. Cartilage erects; wattle hang stays flesh
+(`landWattleAmp`). Climb and dirt takeoff skip. Takeoff
+climb owns `takeoffCombAmp`. Swoop comb stays glued. Cry
+keeps Alarm. Attack stoop stays glued (contrast). Peck
+swallow stays Peck. Sit ruffle owns `landSettleCombAmp`.
+`landCombAmp` 0 restores the glued flare crown. Not a nod
+force.
+Pitch holds with a spring; near the ground a nose-up flare
+bleeds leftover fall, then Sit. Dirt Sit must not snap velocity.
+Fly flap Hz scales with airspeed.
+Enable the perch trigger before the slot, or Glide never sees the pad.
+Sit then kinematic-holds the body on the pad — not a bounce on wood.
+Fly does not Sit on dirt: a hop under `perchApproachHeight` is cruise.
+Glide sits on a pad, or on dirt only outside `NearPerch` (soil under the
+stump AABB is not a slot). Crow `hoverMean` 1.38 reaches a 3 m apple in
+one fly bout; `perchCruiseClimbScale` applies only above
+`perchCruiseHeight` (the AABB includes dirt). Chicken stays a hop
+(`hoverMean` 0.55).
+Body drag is computed by the same `BirdFlight`
+(`BodyAero.Apply`); there is no second `FixedUpdate` per individual.
+The stand writes bird summary fields `wallPerSim`,
+`applied.rigidbodyCount`, `continuousBodyCount`, `muscleBehaviourCount`,
+`frictionBehaviourCount`, `meanProbeHits`, `humanSegmentCount` — a cost
+ruler, not a flight tune.
+
+Flock landing: `-stopFlap` switches to `Glide` (not `Stand`). Like a
+stone — `-stopFlapMode stand`. Liftoff counts only above
+`takeoffClearance`. Fly near the ground is cruise, not an instant Sit.
+After contact the pitch spring stays — otherwise support friction
+spins the body. Flock walk is a look step + `walkThrust` thrust with
+a `walkSpeed` cap. Stance foot plants (world-flat); swing toes down
+(`walkFootAmp`). Picture only — not an ankle paddle. Hen Walk hops
+both legs (`walkHopAmp`) — ChickenWander already writes Walk; the
+crow stride made a hen slide. Crow stays 0. `walkHopAmp` 0 restores
+the alternating gait. Not a hop force. The hop still held the
+Sit-adjacent fold, so the bounce read as a crouch twitch. Both
+wings shrug on the tuck (`walkHopWingAmp`) — the brain already
+wrote Walk. Crow stride stays 0 (`walkHopAmp`). Alarm glance
+owns `alarmLookWingAmp` (hen hop skip while `AlarmLook` is
+live). `walkHopWingAmp`
+0 restores the fold. Not a lift force. The shrug still left
+the tail on the Sit drop, so the bounce read as a crouch.
+Pump the free end on the tuck (`walkHopTailAmp`) — same clock
+as the wing shrug. Crow stride and hop-turn keep their own
+fans. `walkHopTailAmp` 0 restores the drop. Not a pitch force.
+The hop still left a glued hen throat, so Chicken Walk still
+flashed a statue wattle while legs, wings, tail, eye, lid,
+and bill were live. Hang with the tuck (`walkWattleAmp`) —
+same `WalkHopDown01` clock. Cry shout stays Cry. Attack
+stoop stays Attack. Peck grab already rides the head dip.
+Comb nod is independently gated (`walkCombAmp`). Crow
+unmarked (`walkHopAmp` 0). Walk hop-turn hang is
+independently gated (`walkTurnWattleAmp`). Alarm glance skip
+(shout owns the throat).
+`walkWattleAmp` 0 restores the glued Walk throat. Not a
+hang force.
+The hop still left a glued hen crown, so Chicken Walk still
+flashed a statue comb over a live throat. Nod with the tuck
+(`walkCombAmp`) — same `WalkHopDown01` clock. Cartilage
+erects; wattle hang stays flesh (`walkWattleAmp`). Cry shout
+stays Cry. Attack stoop stays glued (contrast). Peck grab
+already rides the head dip. Crow unmarked (`walkHopAmp` 0).
+Walk hop-turn nod is independently gated (`walkTurnCombAmp`).
+Alarm glance skip (shout owns
+the crown). `walkCombAmp` 0 restores the glued Walk crown.
+Not a nod force.
+Crow dirt Walk still held that Sit-adjacent fold, so BIRD-11
+forage read as a sliding sit. Opposite wing hitch on the swing
+thigh (`walkStrideWingAmp`) — the brain already wrote Walk. Hen
+hop keeps `walkHopWingAmp`. Walk hop-turn owns
+`walkTurnWingAmp`. Alarm glance owns `alarmLookWingAmp`
+(stride / hen hop skip while `AlarmLook` is live).
+Alarm glance owns `alarmLookLegAmp` (stride / hen hop
+skip while live). Alarm glance owns `alarmLookSitAmp`
+(Sit look / preen / scratch skip while live). Alarm glance
+owns `alarmLookSitWingAmp` (Sit fold hitch while freeze
+is live; Fly pin / Walk hitch stay theirs). Alarm glance
+owns `alarmLookSitLegAmp` (Sit plant crouch while freeze
+is live; Walk scramble stays Walk). Alarm glance
+owns `alarmLookSitGraspAmp` (Sit plant clench while freeze
+is live; pad wrap / dirt 0 stay plant). Alarm glance
+owns `alarmLookSitHunchAmp` (Sit silhouette hunch while
+freeze is live; pad retract / dirt 0 stay silhouette).
+Alarm glance owns `alarmLookSitTailAmp` (Sit tail drop
+while freeze is live; pad crouch drop / dirt 6° stay Sit
+under the Fly/Walk fan). Alarm glance owns
+`alarmLookSitBlinkAmp` (Sit freeze/hop-turn stare while
+glance is live; Peck keeps the forage 2–5 s blink). Alarm
+glance owns `alarmLookWalkBlinkAmp` (Walk scramble/hop-turn
+stare while glance is live; Peck keeps the forage 2–5 s
+blink). Alarm shout owns `cryCropAmp` (gullet with
+`CryGape`; Peck swallow stays `peckCropAmp`). Alarm shout
+owns `cryTongueAmp` (tongue with `CryGape`; Peck grab stays
+shut-tongue). Attack stoop owns `stoopTongueAmp` (tongue with
+`StoopGape`; Peck grab stays shut; Cry keeps Alarm). Alarm shout
+owns `cryWattleAmp` (hen wattle
+with `CryGape`; comb nod is `cryCombAmp`; crow unmarked).
+Attack stoop owns `stoopWattleAmp` (hen wattle
+with `StoopGape`; comb stays glued; crow unmarked).
+Alarm glance owns `alarmLookWattleAmp` (hen wattle
+with `AlarmLook` look-back; Cry shout stays Cry; Attack
+stoop stays Attack; comb stays glued; swoop wattle stays
+glued; crow unmarked).
+Hen Walk hop owns `walkWattleAmp` (hen wattle
+with `WalkHopDown01` tuck; Cry shout / Attack stoop /
+Alarm glance keep their hang; Peck grab stays the head dip; comb nod is
+`walkCombAmp`; Walk hop-turn hang is `walkTurnWattleAmp`;
+crow unmarked).
+Walk hop-turn owns `walkTurnWattleAmp` (hen wattle
+with `WalkTurnGape01` plant; Cry shout / Attack stoop /
+Walk hop keep their hang; Peck grab stays the head dip;
+comb nod is `walkTurnCombAmp`; Sit look / preen / scratch /
+hop-turn keep their hang; crow unmarked).
+Sit idleLook owns `sitLookWattleAmp` (hen wattle
+with `SitLookGape01` look-down; Cry shout / Attack stoop /
+Walk hop keep their hang; Peck grab stays the head dip;
+comb nod is `sitLookCombAmp`; preen nibble is `sitPreenWattleAmp`;
+scratch hang is `sitScratchWattleAmp`; hop-turn hang is
+`sitTurnWattleAmp`; crow unmarked).
+Sit idlePreen owns `sitPreenWattleAmp` (hen wattle
+with `SitPreenGape01` nibble; Cry shout / Attack stoop /
+Walk hop / Sit look keep their hang; Peck grab stays the
+head dip; comb stays glued; scratch hang is
+`sitScratchWattleAmp`; hop-turn hang is `sitTurnWattleAmp`;
+crow unmarked).
+Sit idleHop owns `sitScratchWattleAmp` (hen wattle
+with `SitScratchGape01` kick; Cry shout / Attack stoop /
+Walk hop / Sit look / Sit preen keep their hang; Peck grab
+stays the head dip; comb stays glued; hop-turn hang is
+`sitTurnWattleAmp`; crow unmarked).
+Sit hop-turn owns `sitTurnWattleAmp` (hen wattle
+with `SitTurnGape01` plant; Cry shout / Attack stoop /
+Walk hop / Sit look / Sit preen / Sit scratch keep their
+hang; Peck grab stays the head dip; comb nod is
+`sitTurnCombAmp`; Walk hop-turn hang is `walkTurnWattleAmp`;
+Sit land-ruffle hang is `landSettleWattleAmp`;
+crow unmarked).
+Sit land-ruffle owns `landSettleWattleAmp` (hen wattle
+with `LandSettleGape01` plant; Cry shout / Attack stoop /
+Walk hop / Sit look / Sit preen / Sit scratch / Sit hop-turn
+keep their hang; Peck grab stays the head dip; comb nod is
+`landSettleCombAmp`; crow unmarked).
+Dirt Peck swallow owns `peckWattleAmp` (hen wattle
+with `PeckSwallow01` toss; Cry shout / Attack stoop /
+Walk hop / Sit look / Sit preen / Sit scratch / Sit hop-turn /
+Sit land-ruffle keep their hang; Peck grab still rides the
+head dip; comb nod is `peckCombAmp`; crow unmarked).
+Fly first-air owns `takeoffWattleAmp` (hen wattle
+with the first-air clock; Cry shout / Attack stoop /
+Walk hop / Sit look / Sit preen / Sit scratch / Sit hop-turn /
+Sit land-ruffle / Peck swallow keep their hang; dirt coil skip;
+sinking skip; comb nod is `takeoffCombAmp`; flare owns
+`landWattleAmp`; swoop wattle stays glued; crow unmarked).
+Fly/Glide flare owns `landWattleAmp` (hen wattle
+with `flareLook` plant; Cry shout / Attack stoop /
+Walk hop / Sit look / Sit preen / Sit scratch / Sit hop-turn /
+Sit land-ruffle / Peck swallow / takeoff climb keep their hang;
+climb and dirt takeoff skip; comb nod is `landCombAmp`; swoop wattle
+stays glued; crow unmarked).
+Attack stoop owns `stoopCropAmp` (gullet with
+`StoopGape`; Peck swallow stays `peckCropAmp`; Cry
+keeps Alarm).
+Alarm shout owns `cryCombAmp` (hen comb
+with `CryGape`; wattle hang stays `cryWattleAmp`; crow unmarked).
+Hen Walk hop owns `walkCombAmp` (hen comb
+with `WalkHopDown01` tuck; Cry shout keeps Alarm; Attack
+stoop stays glued; Peck grab stays the head dip; wattle
+hang stays `walkWattleAmp`; Walk hop-turn nod is
+`walkTurnCombAmp`; crow unmarked).
+Walk hop-turn owns `walkTurnCombAmp` (hen comb
+with `WalkTurnGape01` plant; Cry shout / Walk hop keep
+their nod; Attack stoop stays glued; Peck grab stays the
+head dip; wattle hang stays `walkTurnWattleAmp`; Sit hop-turn
+nod is `sitTurnCombAmp`; Sit look nod is `sitLookCombAmp`;
+Sit preen nod is `sitPreenCombAmp`; Sit scratch nod is `sitScratchCombAmp`;
+crow unmarked).
+Sit hop-turn owns `sitTurnCombAmp` (hen comb
+with `SitTurnGape01` plant; Cry shout / Walk hop / Walk
+hop-turn keep their nod; Attack stoop stays glued; Peck
+grab stays the head dip; wattle hang stays `sitTurnWattleAmp`;
+Sit look nod is `sitLookCombAmp`; Sit preen nod is
+`sitPreenCombAmp`; Sit scratch nod is `sitScratchCombAmp`; crow unmarked).
+Sit idleLook owns `sitLookCombAmp` (hen comb
+with `SitLookGape01` look-down; Cry shout / Walk hop / Walk
+hop-turn / Sit hop-turn keep their nod; Attack stoop stays
+glued; Peck grab stays the head dip; wattle hang stays
+`sitLookWattleAmp`; Sit preen nod is `sitPreenCombAmp`;
+Sit scratch nod is `sitScratchCombAmp`; crow unmarked).
+Sit idlePreen owns `sitPreenCombAmp` (hen comb
+with `SitPreenGape01` nibble; Cry shout / Walk hop / Walk
+hop-turn / Sit hop-turn / Sit look keep their nod; Attack
+stoop stays glued; Peck grab stays the head dip; wattle
+hang stays `sitPreenWattleAmp`; Sit scratch nod is `sitScratchCombAmp`;
+crow unmarked).
+Sit idleHop owns `sitScratchCombAmp` (hen comb
+with `SitScratchGape01` kick; Cry shout / Walk hop / Walk
+hop-turn / Sit hop-turn / Sit look / Sit preen keep their
+nod; Attack stoop stays glued; Peck grab stays the head
+dip; wattle hang stays `sitScratchWattleAmp`; crow unmarked).
+Sit land-ruffle owns `landSettleCombAmp` (hen comb
+with `LandSettleGape01` plant; Cry shout / Walk hop / Walk
+hop-turn / Sit hop-turn / Sit look / Sit preen / Sit scratch
+keep their nod; Attack stoop stays glued; Peck grab stays
+the head dip; wattle hang stays `landSettleWattleAmp`; crow
+unmarked).
+Dirt Peck swallow owns `peckCombAmp` (hen comb
+with `PeckSwallow01` toss; Cry shout / Walk hop / Walk
+hop-turn / Sit hop-turn / Sit look / Sit preen / Sit scratch /
+Sit land-ruffle keep their nod; Attack stoop stays glued;
+Peck grab still rides the head dip; wattle hang stays
+`peckWattleAmp`; crow unmarked).
+Fly first-air owns `takeoffCombAmp` (hen comb
+with the first-air clock; Cry shout / Walk hop / Walk
+hop-turn / Sit hop-turn / Sit look / Sit preen / Sit scratch /
+Sit land-ruffle / Peck swallow keep their nod; Attack stoop
+stays glued; Peck grab still rides the head dip; wattle hang
+stays `takeoffWattleAmp`; dirt coil skip; sinking skip; flare
+owns `landCombAmp`; swoop comb stays glued; crow unmarked).
+Fly/Glide flare owns `landCombAmp` (hen comb
+with `flareLook` plant; Cry shout / Walk hop / Walk hop-turn /
+Sit hop-turn / Sit look / Sit preen / Sit scratch / Sit
+land-ruffle / Peck swallow / takeoff climb keep their nod;
+Attack stoop stays glued; Peck grab still rides the head dip;
+wattle hang stays `landWattleAmp`; climb and dirt takeoff skip;
+swoop comb stays glued; crow unmarked).
+`walkStrideWingAmp` 0 restores the fold.
+Not a lift force. The
+hitch still left the tail on the Sit drop, so forage read as a
+sliding perch. Pump the free end twice per stride
+(`walkStrideTailAmp`) — same `walkFrequency` as the legs. Hen
+hop owns `walkHopTailAmp`. Walk hop-turn owns
+`walkTurnTailAmp`. `walkStrideTailAmp` 0 restores the drop.
+Not a pitch force. The
+stride still nodded around 0, so BIRD-11 forage read as a
+commute between pecks. Dip the neck toward the dirt
+(`walkScanAmp`) — the brain already wrote Walk. Peck keeps
+the jab. Hop-turn and Alarm glance keep their own neck.
+Hen hop holds the same dip through the plant.
+`walkScanAmp` 0 restores the ahead bob. Not a scan force. The
+dip still left the pupil on rest-Y, so the stride bob flashed
+an ahead stare between pecks. Drop the pupil toward the dirt
+(`walkEyeAmp`) — the brain already wrote Walk. Peck forage
+drops (`peckEyeAmp`). Sit idlePreen drops (`sitPreenEyeAmp`).
+Sit idleHop scratch drops (`sitScratchEyeAmp`). Sit idleLook
+glances (`sitLookEyeAmp`). Walk hop-turn drops
+(`walkTurnEyeAmp`), slits (`walkTurnLidAmp`), and parts
+(`walkTurnGapeAmp`). Sit hop-turn drops (`sitTurnEyeAmp`),
+slits (`sitTurnLidAmp`), and parts (`sitTurnGapeAmp`).
+Air turn drops (`airTurnEyeAmp`), slits
+(`airTurnLidAmp`), and parts
+(`airTurnGapeAmp`).
+Landing flare drops (`landEyeAmp`), slits
+(`landLidAmp`), parts
+(`landGapeAmp`), hangs
+(`landWattleAmp`), and nods
+(`landCombAmp`).
+Dirt swoop drops (`swoopEyeAmp`), slits
+(`swoopLidAmp`), parts
+(`swoopGapeAmp`), hangs
+(`swoopTalonAmp`), and shows
+(`swoopTongueAmp`).
+Takeoff climb drops (`takeoffEyeAmp`), slits
+(`takeoffLidAmp`), and parts
+(`takeoffGapeAmp`).
+Sit land-ruffle drops (`landSettleEyeAmp`), slits
+(`landSettleLidAmp`), and parts
+(`landSettleGapeAmp`).
+Alarm glance drops (`alarmLookEyeAmp`), slits
+(`alarmLookLidAmp`), parts
+(`alarmLookGapeAmp`), hangs
+(`alarmLookWattleAmp`), hitches
+(`alarmLookWingAmp`), scrambles Walk
+(`alarmLookLegAmp`), freezes Sit
+(`alarmLookSitAmp`), startles Sit fold
+(`alarmLookSitWingAmp`), crouches Sit plant
+(`alarmLookSitLegAmp`), clenches Sit plant
+(`alarmLookSitGraspAmp`), hunches Sit
+(`alarmLookSitHunchAmp`), drops Sit tail
+(`alarmLookSitTailAmp`), holds Sit stare
+(`alarmLookSitBlinkAmp`, freeze or hop-turn), and holds
+Walk stare (`alarmLookWalkBlinkAmp`).
+Peck jab slits the lid (`peckLidAmp`).
+Attack nict stays the pale cover.
+`walkEyeAmp` 0 restores the rest pupil.
+Not a look force.
+The drop still left a round
+stare on the dirt, so forage still read as a commute with a
+lowered eye. Slit a lid over the pupil (`walkLidAmp`) — the
+brain already wrote Walk. Peck jab reuses that lid on the
+down-stroke. Sit idlePreen reuses it on the reach
+(`sitPreenLidAmp`). Sit idleHop scratch reuses it on the
+kick (`sitScratchLidAmp`). Walk hop-turn reuses it on the
+plant (`walkTurnLidAmp`). Sit hop-turn reuses it on the
+perch (`sitTurnLidAmp`). Air turn reuses it on the bank
+(`airTurnLidAmp`). Landing flare reuses it on the plant
+(`landLidAmp`). Dirt swoop reuses it on the dive
+(`swoopLidAmp`). Takeoff climb reuses it on the hop
+(`takeoffLidAmp`). Sit land-ruffle reuses it on the plant
+(`landSettleLidAmp`). Alarm glance reuses it on Flee
+(`alarmLookLidAmp`). Attack nict stays the pale cover.
+Sit blink still owns the shut.
+`walkLidAmp` 0 restores the round pupil. Not a lid
+force. The slit still left a shut bill on the dirt, so
+forage still read as a commute with a squint. Part the
+bill (`walkGapeAmp`) — the brain already wrote Walk. Peck
+Cos and Attack stoop keep their own gape. Cry keeps Alarm.
+Sit idlePreen has its own nibble (`sitPreenGapeAmp`).
+Sit idleLook has its own look-down part (`sitLookGapeAmp`).
+Sit idleHop scratch has its own kick part (`sitScratchGapeAmp`).
+Walk hop-turn reuses that part (`walkTurnGapeAmp`). Sit
+hop-turn reuses it on the perch (`sitTurnGapeAmp`). Air
+turn reuses it on the bank (`airTurnGapeAmp`). Landing
+flare reuses it on the plant (`landGapeAmp`). Dirt swoop
+reuses it on the dive (`swoopGapeAmp`). Takeoff climb
+reuses it on the hop (`takeoffGapeAmp`). Sit land-ruffle
+reuses it on the plant (`landSettleGapeAmp`).
+Alarm glance reuses it on Flee (`alarmLookGapeAmp`).
+Cry keeps Alarm (the 0.55 s shout). Hen hop holds it on plant.
+`walkGapeAmp` 0 restores the shut bill. Not a grab force.
+`BirdMode.Walk` is the walk status: translation is a horizontal
+force on the body, not friction from swinging feet.
+
+Bird-to-bird solver contact is **torso and head only** (`BirdCore`).
+Wings, legs, neck, tail, and beak sit on `BirdLimb` and ignore
+other birds (layer matrix, once at build). Flock perch is a trigger:
+it does not rest on Ground. Tree sit is the pad attach. Card
+`BIRD-12-core-contact`. Do not add N² `IgnoreCollision` pairs
+and do not put a second `Rigidbody2D` on the perch.
+
+Paired limbs: anchors with no X spread, look is `SetVisualOffset`.
+Play spawn: scene `Assets/Scenes/Bird.unity` (`humanCount = 0`,
+`birdCount = 1`, `cameraFollowsBird`). Do not open `World` /
+`SampleScene` for flight.
+Flock Play is scene `BirdFlock50`, not `Bird` and not `World`.
+Hens: same `Bird` class, `BirdKind.Chicken`. Play scene `Chicken`.
+Crow is the flying canon. Chicken is heavier, short-winged,
+`hoverMean` 0.55 — a hop, not a cruise. Dirt Walk hops both legs
+(`walkHopAmp`); the hop shrugs both wings on the tuck
+(`walkHopWingAmp`) and pumps the tail (`walkHopTailAmp`);
+the hop hangs the hen wattle (`walkWattleAmp`) and nods
+the comb (`walkCombAmp`); Walk hop-turn hangs that wattle
+(`walkTurnWattleAmp`) and nods the comb (`walkTurnCombAmp`);
+Sit hop-turn hangs that wattle (`sitTurnWattleAmp`) and nods
+the comb (`sitTurnCombAmp`); Sit look-down hangs that wattle
+(`sitLookWattleAmp`) and nods the comb (`sitLookCombAmp`);
+Sit preen nibble hangs that wattle (`sitPreenWattleAmp`) and
+nods the comb (`sitPreenCombAmp`); Sit scratch kick hangs
+that wattle (`sitScratchWattleAmp`) and nods the comb
+(`sitScratchCombAmp`); Sit land-ruffle hangs that wattle
+(`landSettleWattleAmp`) and nods the comb
+(`landSettleCombAmp`); dirt Peck swallow hangs that wattle
+(`peckWattleAmp`) and nods the comb
+(`peckCombAmp`); Fly first-air hangs that wattle
+(`takeoffWattleAmp`) and nods the comb
+(`takeoffCombAmp`); Fly/Glide flare hangs that wattle
+(`landWattleAmp`) and nods the comb
+(`landCombAmp`);
+crow
+stride hitches the opposite wing (`walkStrideWingAmp`) and pumps
+the tail (`walkStrideTailAmp`); dirt Walk dips the neck to scan
+(`walkScanAmp`), drops the pupil (`walkEyeAmp`), slits
+the lid (`walkLidAmp`), and parts the bill (`walkGapeAmp`); the flight
+hop coils on dirt (`takeoffCrouchAmp`) before the flap leaves. Stance Y after
+`ApplyKind`.
+Hen comb and wattle are picture on Head Visual (`BirdKind.Chicken`
+only, `LevelArt.White`, no collider). Comb rides the existing Peck
+dip and Walk hop, nods on Alarm shout (`cryCombAmp`), nods
+on hen Walk hop (`walkCombAmp`), nods on Walk hop-turn
+(`walkTurnCombAmp`), nods on Sit hop-turn
+(`sitTurnCombAmp`), nods on Sit look-down
+(`sitLookCombAmp`), nods on Sit preen nibble
+(`sitPreenCombAmp`), and nods on Sit scratch kick
+(`sitScratchCombAmp`), and nods on Sit land-ruffle
+(`landSettleCombAmp`), and nods on Peck swallow
+(`peckCombAmp`), and nods on Fly first-air
+(`takeoffCombAmp`), and nods on Fly/Glide flare
+(`landCombAmp`) in LateUpdate, cached, no Find.
+Wattle also hangs on Alarm shout
+(`cryWattleAmp`), on Attack stoop (`stoopWattleAmp`), on
+hen Walk hop (`walkWattleAmp`), on Sit look-down
+(`sitLookWattleAmp`), on Sit preen nibble
+(`sitPreenWattleAmp`), on Sit scratch kick
+(`sitScratchWattleAmp`), on Sit hop-turn
+(`sitTurnWattleAmp`), on Walk hop-turn
+(`walkTurnWattleAmp`), and on Sit land-ruffle
+(`landSettleWattleAmp`), and on Peck swallow
+(`peckWattleAmp`), and on Fly first-air
+(`takeoffWattleAmp`), and on Fly/Glide flare
+(`landWattleAmp`), and on Alarm glance
+(`alarmLookWattleAmp`) in LateUpdate, cached, no Find.
+Crow
+and woodpecker stay unmarked. Every kind gets a pupil on the same
+Visual (`sitBlinkAmp`); Sit blink / night close / Sit preen lid
+(`sitPreenLidAmp`) / Sit scratch lid (`sitScratchLidAmp`) / Sit
+preen pupil (`sitPreenEyeAmp`) / Sit scratch pupil
+(`sitScratchEyeAmp`) / Sit look pupil (`sitLookEyeAmp`) / Walk
+hop-turn pupil (`walkTurnEyeAmp`) / Sit hop-turn pupil
+(`sitTurnEyeAmp`) / air-turn pupil (`airTurnEyeAmp`) /
+landing-flare pupil (`landEyeAmp`) / dirt-swoop pupil
+(`swoopEyeAmp`) / takeoff-climb pupil
+(`takeoffEyeAmp`) / Sit land-ruffle pupil
+(`landSettleEyeAmp`) / Alarm-glance pupil
+(`alarmLookEyeAmp`) / Alarm-glance Sit blink
+(`alarmLookSitBlinkAmp`) / Alarm-glance Walk blink
+(`alarmLookWalkBlinkAmp`) / Walk
+hop-turn lid (`walkTurnLidAmp`) / Sit hop-turn lid
+(`sitTurnLidAmp`) / air-turn lid (`airTurnLidAmp`) /
+landing-flare lid (`landLidAmp`) / dirt-swoop lid
+(`swoopLidAmp`) / takeoff-climb lid
+(`takeoffLidAmp`) / Sit land-ruffle lid
+(`landSettleLidAmp`) / Alarm-glance lid
+(`alarmLookLidAmp`) live in
+`BirdController.LateUpdate`, cached, no Find. Walk
+hop-turn gape (`walkTurnGapeAmp`), Sit hop-turn gape
+(`sitTurnGapeAmp`), air-turn gape
+(`airTurnGapeAmp`), landing-flare gape
+(`landGapeAmp`), dirt-swoop gape
+(`swoopGapeAmp`), takeoff-climb gape
+(`takeoffGapeAmp`), Sit land-ruffle gape
+(`landSettleGapeAmp`), Sit look-down gape
+(`sitLookGapeAmp`), Sit scratch gape
+(`sitScratchGapeAmp`), and Alarm-glance gape
+(`alarmLookGapeAmp`) live with Walk forage gape in
+`DriveNeckAndHead` / `ApplyCryPicture` — same cached
+`beakVisual`, no Find. Alarm-glance wings
+(`alarmLookWingAmp`) live in `ApplyCryPicture` /
+`DriveWings` — same cached fold, no Find. Alarm-glance
+legs (`alarmLookLegAmp`) live in `CacheFlockPose` /
+`DriveLegs` — same cached thighs, no Find. Alarm-glance Sit
+(`alarmLookSitAmp`) lives in `CacheFlockPose` /
+`DriveLegs` / `DriveNeckAndHead` / `DriveWings` — freeze
+look/preen/scratch, same cached pose, no Find. Alarm-glance
+Sit wings (`alarmLookSitWingAmp`) live in `ApplyCryPicture` /
+`DriveWings` — startle hitch off the Sit fold, same cached
+fold, no Find. Alarm-glance Sit legs (`alarmLookSitLegAmp`)
+live in `CacheFlockPose` / `DriveLegs` — startle crouch off
+the Sit plant, same cached thighs, no Find. Alarm-glance
+Sit feet (`alarmLookSitGraspAmp`) live in `CacheFlockPose`
+— startle clench off the Sit plant (pad wrap / dirt 0), same
+cached feet, no Find. Alarm-glance Sit hunch
+(`alarmLookSitHunchAmp`) lives in `ApplyCryPicture` /
+`DriveNeckAndHead` / `DriveWings` — startle retract off the
+Sit silhouette (pad retract / dirt 0 extra) after hitch,
+same cached neck and fold, no Find. Alarm-glance Sit tail
+(`alarmLookSitTailAmp`) lives in `ApplyTailFanPicture` —
+startle drop off the Sit rest (pad crouch drop / dirt 6°
+under the Fly/Walk fan) after hunch, same cached
+`tailVisual`, no Find. Alarm-glance Sit blink
+(`alarmLookSitBlinkAmp`) lives in `ApplySitBlink` —
+startle stare (skip forage 2–5 s shut) off the Sit blink,
+including hop-turn about-face (`AlarmLookSit` zeroes),
+same cached `eyeRenderer`, no Find. Alarm-glance Walk blink
+(`alarmLookWalkBlinkAmp`) lives in `ApplySitBlink` —
+startle stare (skip forage 2–5 s shut) off the Walk blink,
+including hop-turn about-face (`AlarmLookLeg` zeroes),
+same cached `eyeRenderer`, no Find. Alarm/Call shout crop
+(`cryCropAmp`) lives in `ApplyPeckCrop` — bulge off the
+0.55 s gape (silent grey neck), Peck swallow keeps
+`peckCropAmp`, same cached `cropRenderer`, no Find. Attack stoop crop
+(`stoopCropAmp`) lives in `ApplyPeckCrop` — bulge off
+`StoopGape` (silent grey neck), Peck swallow keeps
+`peckCropAmp`, Cry keeps Alarm, same cached `cropRenderer`,
+no Find. Alarm/Call
+shout tongue (`cryTongueAmp`) lives in `ApplyCryTongue` —
+pink sliver off the 0.55 s gape (empty orange bill), Peck
+grab stays shut, same cached `tongueRenderer`, no Find. Attack
+stoop tongue (`stoopTongueAmp`) lives in `ApplyCryTongue` —
+pink sliver off `StoopGape` (empty orange bill), Peck grab
+stays shut, Cry keeps Alarm, same cached `tongueRenderer`,
+no Find. Dirt-swoop tongue (`swoopTongueAmp`) lives in
+`ApplyCryTongue` — pink sliver off `SwoopGape01` (empty
+orange bill on a live gape), Peck grab stays shut, Cry
+keeps Alarm, Attack stoop stays Attack, hen skip
+(`hoverMean < 1`), same cached `tongueRenderer`, no Find. Alarm/Call shout hen
+wattle (`cryWattleAmp`) lives in `ApplyCryWattle` — hang off
+the 0.55 s gape (glued statue throat), comb nod is independently
+gated (`cryCombAmp`), crow unmarked, same cached `wattleRenderer`,
+no Find. Alarm-glance hen wattle (`alarmLookWattleAmp`) lives in
+`ApplyCryWattle` — hang off `AlarmLook` look-back (glued statue
+throat after the 0.55 s shout), Cry shout stays Cry, Attack
+stoop stays Attack, comb stays glued (contrast), swoop wattle
+stays glued (hens skip swoop; crow unmarked), same cached
+`wattleRenderer`, no Find. Attack stoop hen wattle (`stoopWattleAmp`) lives in
+`ApplyCryWattle` — hang off `StoopGape` (glued statue throat),
+comb stays glued, Cry keeps Alarm, same cached `wattleRenderer`,
+no Find. Hen Walk hop wattle (`walkWattleAmp`) lives in
+`ApplyCryWattle` — hang off `WalkHopDown01` tuck (glued statue
+throat), Cry shout / Attack stoop keep their hang, Peck grab
+stays the head dip, comb nod is `walkCombAmp`, Walk hop-turn hang is
+`walkTurnWattleAmp`, crow unmarked, same cached
+`wattleRenderer`, no Find. Walk hop-turn wattle
+(`walkTurnWattleAmp`) lives in `ApplyCryWattle` — hang off
+`WalkTurnGape01` plant (glued statue throat), Cry shout /
+Attack stoop / Walk hop keep their hang, Peck grab stays the
+head dip, comb nod is `walkTurnCombAmp`, Sit look / preen / scratch /
+hop-turn keep their hang, crow unmarked, same cached
+`wattleRenderer`, no Find. Sit idleLook wattle
+(`sitLookWattleAmp`) lives in `ApplyCryWattle` — hang off
+`SitLookGape01` look-down (glued statue throat), Cry shout /
+Attack stoop / Walk hop keep their hang, Peck grab stays the
+head dip, comb nod is `sitLookCombAmp`, preen nibble is
+`sitPreenWattleAmp`, scratch hang is `sitScratchWattleAmp`,
+hop-turn hang is `sitTurnWattleAmp`, crow unmarked, same cached
+`wattleRenderer`, no Find. Sit
+idlePreen wattle (`sitPreenWattleAmp`) lives in
+`ApplyCryWattle` — hang off `SitPreenGape01` nibble (glued
+statue throat), Cry shout / Attack stoop / Walk hop / Sit
+look keep their hang, Peck grab stays the head dip, comb
+nod is `sitPreenCombAmp`, scratch hang is `sitScratchWattleAmp`, hop-turn
+hang is `sitTurnWattleAmp`, crow unmarked, same cached
+`wattleRenderer`, no Find. Sit idleHop wattle (`sitScratchWattleAmp`) lives in
+`ApplyCryWattle` — hang off `SitScratchGape01` kick (glued
+statue throat), Cry shout / Attack stoop / Walk hop / Sit
+look / Sit preen keep their hang, Peck grab stays the head
+dip, comb stays glued, hop-turn hang is `sitTurnWattleAmp`,
+crow unmarked, same cached `wattleRenderer`, no Find. Sit
+hop-turn wattle (`sitTurnWattleAmp`) lives in `ApplyCryWattle`
+— hang off `SitTurnGape01` plant (glued statue throat), Cry
+shout / Attack stoop / Walk hop / Sit look / Sit preen /
+Sit scratch keep their hang, Peck grab stays the head dip,
+comb nod is `sitTurnCombAmp`, Walk hop-turn hang is
+`walkTurnWattleAmp`, Sit land-ruffle hang is
+`landSettleWattleAmp`, crow unmarked, same cached
+`wattleRenderer`, no Find. Sit land-ruffle wattle
+(`landSettleWattleAmp`) lives in `ApplyCryWattle`
+— hang off `LandSettleGape01` plant (glued statue throat), Cry
+shout / Attack stoop / Walk hop / Sit look / Sit preen /
+Sit scratch / Sit hop-turn keep their hang, Peck grab stays
+the head dip, comb nod is `landSettleCombAmp`, crow unmarked, same cached
+`wattleRenderer`, no Find. Dirt Peck swallow wattle
+(`peckWattleAmp`) lives in `ApplyCryWattle`
+— hang off `PeckSwallow01` toss (glued statue throat), Cry
+shout / Attack stoop / Walk hop / Sit look / Sit preen /
+Sit scratch / Sit hop-turn / Sit land-ruffle keep their hang,
+Peck grab still rides the head dip, comb nod is `peckCombAmp`,
+crow unmarked, same cached `wattleRenderer`, no Find.
+Fly first-air wattle (`takeoffWattleAmp`) lives in `ApplyCryWattle`
+— hang off the first-air clock (glued statue throat), Cry
+shout / Attack stoop / Walk hop / Sit look / Sit preen /
+Sit scratch / Sit hop-turn / Sit land-ruffle / Peck swallow
+keep their hang, dirt coil skip, sinking skip (flare owns
+`landWattleAmp`; swoop wattle stays glued), comb nod is
+`takeoffCombAmp`, crow unmarked, same cached
+`wattleRenderer`, no Find.
+Fly/Glide flare wattle (`landWattleAmp`) lives in `ApplyCryWattle`
+— hang off `flareLook` plant (glued statue throat), Cry
+shout / Attack stoop / Walk hop / Sit look / Sit preen /
+Sit scratch / Sit hop-turn / Sit land-ruffle / Peck swallow /
+takeoff climb keep their hang, climb and dirt takeoff skip,
+comb nod is `landCombAmp`, swoop wattle stays glued, crow unmarked,
+same cached `wattleRenderer`, no Find.
+Alarm/Call shout hen comb (`cryCombAmp`) lives in
+`ApplyCryComb` — erect off the 0.55 s gape (glued statue crown),
+wattle hang stays `cryWattleAmp`, crow unmarked, same cached
+`combFrontRenderer` / `combBackRenderer`, no Find. Hen Walk hop
+comb (`walkCombAmp`) lives in `ApplyCryComb` — erect off
+`WalkHopDown01` tuck (glued statue crown), Cry shout keeps
+Alarm, Attack stoop stays glued (contrast), Peck grab stays
+the head dip, wattle hang stays `walkWattleAmp`, Walk hop-turn
+nod is `walkTurnCombAmp`, crow unmarked, same cached comb, no
+Find. Walk hop-turn comb (`walkTurnCombAmp`) lives in
+`ApplyCryComb` — erect off `WalkTurnGape01` plant (glued
+statue crown), Cry shout / Walk hop keep their nod, Attack
+stoop stays glued (contrast), Peck grab stays the head dip,
+wattle hang stays `walkTurnWattleAmp`, Sit hop-turn nod is
+`sitTurnCombAmp`, Sit look nod is `sitLookCombAmp`, Sit
+preen nod is `sitPreenCombAmp`, Sit scratch nod is `sitScratchCombAmp`,
+crow unmarked, same cached comb,
+no Find. Sit hop-turn comb
+(`sitTurnCombAmp`) lives in `ApplyCryComb` — erect off
+`SitTurnGape01` plant (glued statue crown), Cry shout / Walk
+hop / Walk hop-turn keep their nod, Attack stoop stays glued
+(contrast), Peck grab stays the head dip, wattle hang stays
+`sitTurnWattleAmp`, Sit look nod is `sitLookCombAmp`, Sit
+preen nod is `sitPreenCombAmp`, Sit scratch nod is `sitScratchCombAmp`,
+crow unmarked, same cached comb,
+no Find. Sit idleLook comb (`sitLookCombAmp`) lives in
+`ApplyCryComb` — erect off `SitLookGape01` look-down (glued
+statue crown), Cry shout / Walk hop / Walk hop-turn / Sit
+hop-turn keep their nod, Attack stoop stays glued (contrast),
+Peck grab stays the head dip, wattle hang stays
+`sitLookWattleAmp`, Sit preen nod is `sitPreenCombAmp`, Sit
+scratch nod is `sitScratchCombAmp`, crow unmarked, same cached comb,
+no Find. Sit idlePreen comb (`sitPreenCombAmp`) lives in
+`ApplyCryComb` — erect off `SitPreenGape01` nibble (glued
+statue crown), Cry shout / Walk hop / Walk hop-turn / Sit
+hop-turn / Sit look keep their nod, Attack stoop stays glued
+(contrast), Peck grab stays the head dip, wattle hang stays
+`sitPreenWattleAmp`, Sit scratch nod is `sitScratchCombAmp`, crow unmarked,
+same cached comb, no Find. Sit idleHop comb (`sitScratchCombAmp`) lives in
+`ApplyCryComb` — erect off `SitScratchGape01` kick (glued
+statue crown), Cry shout / Walk hop / Walk hop-turn / Sit
+hop-turn / Sit look / Sit preen keep their nod, Attack stoop
+stays glued (contrast), Peck grab stays the head dip, wattle
+hang stays `sitScratchWattleAmp`, crow unmarked, same cached
+comb, no Find. Sit land-ruffle comb (`landSettleCombAmp`) lives in
+`ApplyCryComb` — erect off `LandSettleGape01` plant (glued
+statue crown), Cry shout / Walk hop / Walk hop-turn / Sit
+hop-turn / Sit look / Sit preen / Sit scratch keep their nod,
+Attack stoop stays glued (contrast), Peck grab stays the
+head dip, wattle hang stays `landSettleWattleAmp`, crow
+unmarked, same cached comb, no Find. Dirt Peck swallow comb
+(`peckCombAmp`) lives in `ApplyCryComb` — erect off
+`PeckSwallow01` toss (glued statue crown), Cry shout / Walk
+hop / Walk hop-turn / Sit hop-turn / Sit look / Sit preen /
+Sit scratch / Sit land-ruffle keep their nod, Attack stoop
+stays glued (contrast), Peck grab still rides the head dip,
+wattle hang stays `peckWattleAmp`, crow unmarked, same
+cached comb, no Find. Fly first-air comb
+(`takeoffCombAmp`) lives in `ApplyCryComb` — erect off
+the first-air clock (glued statue crown), Cry shout / Walk
+hop / Walk hop-turn / Sit hop-turn / Sit look / Sit preen /
+Sit scratch / Sit land-ruffle / Peck swallow keep their nod,
+Attack stoop stays glued (contrast), Peck grab still rides
+the head dip, wattle hang stays `takeoffWattleAmp`, dirt
+coil skip, sinking skip (flare owns `landWattleAmp` /
+`landCombAmp`; swoop comb stays glued), crow unmarked, same
+cached comb, no Find. Fly/Glide flare comb
+(`landCombAmp`) lives in `ApplyCryComb` — erect off
+`flareLook` plant (glued statue crown), Cry shout / Walk
+hop / Walk hop-turn / Sit hop-turn / Sit look / Sit preen /
+Sit scratch / Sit land-ruffle / Peck swallow / takeoff climb
+keep their nod, Attack stoop stays glued (contrast), Peck
+grab still rides the head dip, wattle hang stays
+`landWattleAmp`, climb and dirt takeoff skip, swoop comb
+stays glued, crow unmarked, same cached comb, no Find. Sit look / preen / scratch / hop-turn
+tails (`sitLookTailAmp` / `sitPreenTailAmp` /
+`sitScratchTailAmp` / `sitTurnTailAmp`) and Walk
+hop-turn (`walkTurnTailAmp`) and air turn
+(`airTurnTailAmp`) and Sit land-ruffle
+(`landSettleTailAmp`) live in
+`ApplyTailFanPicture` — same cached `tailVisual`, no Find.
+Hen/crow Peck tosses the head on the up-stroke (`peckSwallowAmp`) —
+gape is already the grab; without this the neck stays at
+`−peckDipDegrees` and forage eat reads as a stuck nod. Closed bill
+on the toss (same Cos as gape). `peckSwallowAmp` 0 restores the dip.
+Not a swallow force. Woodpecker stays the brace.
+Dirt Peck still stood at `sitHip*0.35`, so the jab read as a
+Walk nod. A tarsus crouch on the down-stroke (`peckLungeAmp`) —
+ChickenWander / crow dirt Walk already wrote Peck. Pad Sit
+crouch and woodpecker drum keep their own legs. `peckLungeAmp`
+0 restores the nod. Not a lunge force. The lunge still held
+the Sit-adjacent fold, so forage eat read as a nodding sit.
+Both wings brace on the jab (`peckWingAmp`) — same Cos as
+gape. Swallow keeps the tuck. Woodpecker drum stays the
+brace. `peckWingAmp` 0 restores the fold. Not a lift force.
+The brace still left the tail on the Sit drop, so forage
+eat read as a nodding sit. Pump the free end on the jab
+(`peckTailAmp`) — same Cos as gape. Swallow keeps the
+drop. Woodpecker drum stays the fan. `peckTailAmp`
+0 restores the drop. Not a pitch force. The jab still
+left a forage stare, so eat read as an open-eyed nod.
+Slit the Walk lid on the down-stroke (`peckLidAmp`) —
+same Cos as gape. Swallow opens. Walk lid stays Walk.
+Attack nict stays the pale cover. Sit blink owns the
+shut. Woodpecker drum stays the trunk stare.
+`peckLidAmp` 0 restores the open pupil. Not a lid force.
+Swallow still opened onto rest-Y, so the toss
+read as an ahead stare. Drop the pupil toward
+the dirt (`peckEyeAmp`) — Walk eye stays Walk.
+Same slot as `walkEyeAmp`. Lid rides the child.
+Attack nict stays the pale cover. Woodpecker
+drum stays the trunk stare. `peckEyeAmp` 0
+restores the rest pupil. Not a look force.
+The toss still left a silent grey neck, so eat
+read as a nod with nowhere for the bite. Bulge
+the gullet (`peckCropAmp`) — same Cos as swallow.
+Jab stays 0. Woodpecker drum stays the brace.
+`peckCropAmp` 0 restores the silent neck.
+Not a swallow force.
+The toss still left a glued hen throat, so
+Chicken forage eat read as a statue wattle over a live
+crop. Hang the wattle (`peckWattleAmp`) — same
+PeckSwallow01 clock. Cry keeps Alarm. Attack stoop stays
+Attack. Walk hop stays Walk. Sit look / preen / scratch /
+hop-turn / land-ruffle keep their hang. Peck grab still
+rides the head dip. Comb nod is independently gated
+(`peckCombAmp`). Crow unmarked. Alarm glance skip.
+Woodpecker drum skip.
+`peckWattleAmp` 0 restores the glued Peck throat. Not a
+hang force.
+The hop still left a glued hen throat, so
+Chicken Fly climb read as a statue wattle over a live
+gape. Hang the wattle (`takeoffWattleAmp`) — same
+first-air clock. Cry keeps Alarm. Attack stoop stays
+Attack. Walk hop stays Walk. Sit look / preen / scratch /
+hop-turn / land-ruffle keep their hang. Peck swallow stays
+Peck. Comb nod is independently gated (`takeoffCombAmp`).
+Flare owns `landWattleAmp`. Swoop wattle stays glued. Dirt
+coil skip. Sinking skip. Alarm glance skip.
+`takeoffWattleAmp` 0 restores the glued first-air throat. Not a
+hang force.
+The plant still left a glued hen throat, so
+Chicken Fly/Glide flare read as a statue wattle over a live
+gape. Hang the wattle (`landWattleAmp`) — same
+`flareLook` clock. Cry keeps Alarm. Attack stoop stays
+Attack. Walk hop stays Walk. Sit look / preen / scratch /
+hop-turn / land-ruffle keep their hang. Peck swallow stays
+Peck. Takeoff climb owns `takeoffWattleAmp`. Comb nod is
+independently gated (`landCombAmp`). Swoop wattle stays
+glued. Climb and dirt takeoff skip. Alarm glance skip.
+`landWattleAmp` 0 restores the glued flare throat. Not a
+hang force.
+The plant still left a glued hen crown, so
+Chicken Fly/Glide flare read as a statue comb over a live
+throat. Nod the comb (`landCombAmp`) — same
+`flareLook` clock. Cartilage erects; wattle hang stays
+flesh (`landWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn / land-ruffle keep their nod.
+Peck swallow stays Peck. Peck grab still rides the head
+dip. Crow unmarked. Alarm glance skip. Takeoff climb owns
+`takeoffCombAmp`. Swoop comb stays glued. Climb and dirt
+takeoff skip.
+`landCombAmp` 0 restores the glued flare crown. Not a
+nod force.
+The toss still left a glued hen crown, so
+Chicken forage eat read as a statue comb over a live
+throat. Nod the comb (`peckCombAmp`) — same
+PeckSwallow01 clock. Cartilage erects; wattle hang stays
+flesh (`peckWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn / land-ruffle keep their nod.
+Peck grab still rides the head dip. Crow unmarked. Alarm
+glance skip. Woodpecker drum skip.
+`peckCombAmp` 0 restores the glued Peck crown. Not a
+nod force.
+The hop still left a glued hen crown, so
+Chicken Fly climb read as a statue comb over a live
+throat. Nod the comb (`takeoffCombAmp`) — same
+first-air clock. Cartilage erects; wattle hang stays
+flesh (`takeoffWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn / land-ruffle keep their nod.
+Peck swallow stays Peck. Peck grab still rides the head
+dip. Crow unmarked. Alarm glance skip. Flare owns
+`landCombAmp`. Swoop comb stays glued. Dirt coil skip.
+Sinking skip.
+`takeoffCombAmp` 0 restores the glued first-air crown. Not a
+nod force.
+The 0.55 s Alarm/Call shout still left that silent
+neck, so Flee read as a mute open-bill. Bulge
+the gullet (`cryCropAmp`) — same sprite as swallow.
+Scale with `CryGape`. Peck swallow keeps `peckCropAmp`.
+Attack stoop owns `stoopCropAmp`. Woodpecker drum stays the
+brace. `cryCropAmp` 0
+restores the silent neck. Not a shout force.
+The same shout still left an empty orange bill, so
+Flee read as a mute swallow. Show the tongue
+(`cryTongueAmp`) — same CryGape clock. Peck grab
+stays shut-tongue. Attack stoop owns `stoopTongueAmp`.
+Glance 8° stays glance. `cryTongueAmp` 0 restores
+the empty bill. Not a shout force.
+The same shout still left a glued hen throat, so
+Chicken Flee read as a statue wattle. Swing
+the wattle (`cryWattleAmp`) — same CryGape clock.
+Comb nod is independently gated (`cryCombAmp`).
+Crow / woodpecker unmarked.
+Peck grab already rides the head dip. Attack
+stoop owns `stoopWattleAmp`. Glance hang is independently
+gated (`alarmLookWattleAmp`). Glance 8° stays glance.
+`cryWattleAmp` 0 restores the statue. Not a
+shout force.
+The 1.15 s look-back still left a glued hen throat, so
+Chicken Flee read as a statue wattle over a live gape after
+the shout faded. Hang the wattle (`alarmLookWattleAmp`) —
+same `AlarmLook` clock as the glance gape. Cry keeps Alarm
+(the 0.55 s shout, listed first). Attack stoop stays Attack.
+Comb stays glued (contrast — shout nod is `cryCombAmp`).
+Swoop wattle stays glued (hens skip swoop; crow unmarked).
+Night roost skip. `alarmLookWattleAmp` 0 restores the glued
+glance throat. Not a hang force.
+The same shout still left a glued hen crown, so
+Chicken Flee read as a statue comb over a live
+wattle. Nod the comb (`cryCombAmp`) — same
+CryGape clock. Cartilage erects; wattle hang
+stays flesh. Crow / woodpecker unmarked.
+Peck grab already rides the head dip. Attack
+stoop stays Attack. Walk hop nod is independently
+gated (`walkCombAmp`). Walk hop-turn nod is independently
+gated (`walkTurnCombAmp`). Glance 8° stays glance.
+`cryCombAmp` 0 restores the glued crown. Not a
+shout force.
+The same Attack open-bill still left an empty orange
+box, so the dive read as a mute gape. Show the tongue
+(`stoopTongueAmp`) — same `StoopGape` clock. Peck grab
+stays shut. Cry keeps Alarm. Glance 8° stays glance.
+`stoopTongueAmp` 0 restores the empty bill. Not a
+shout force.
+The same dirt-swoop open-bill still left an empty orange
+box, so the approach read as a mute gape. Show the tongue
+(`swoopTongueAmp`) — same `SwoopGape01` clock. Peck grab
+stays shut. Cry keeps Alarm. Attack stoop owns
+`stoopTongueAmp`. Hen skip (`hoverMean < 1`).
+`swoopTongueAmp` 0 restores the empty bill. Not a
+shout force.
+The same Attack open-bill still left a glued hen
+throat, so the dive read as a statue wattle. Swing
+the wattle (`stoopWattleAmp`) — same `StoopGape`
+clock. Peck grab already rides the head dip. Cry
+keeps Alarm. Comb stays glued (contrast). Glance
+8° stays glance. `stoopWattleAmp` 0 restores the
+glued throat. Not a shout force.
+The same Attack open-bill still left a silent grey
+neck, so the dive read as a mute gape. Bulge
+the gullet (`stoopCropAmp`) — same `StoopGape`
+clock. Peck swallow keeps `peckCropAmp`. Cry
+keeps Alarm. Comb stays glued (contrast). Glance
+8° stays glance. `stoopCropAmp` 0 restores the
+silent neck. Not a shout force.
+The same hen Walk hop still left a glued throat, so
+Chicken forage read as a statue wattle. Hang
+the wattle (`walkWattleAmp`) — same `WalkHopDown01`
+clock. Cry keeps Alarm. Attack stoop stays Attack.
+Peck grab already rides the head dip. Comb nod is
+independently gated (`walkCombAmp`). Walk hop-turn hang
+is independently gated (`walkTurnWattleAmp`). Crow unmarked.
+Alarm glance skip.
+`walkWattleAmp` 0 restores the glued Walk throat. Not a
+hang force.
+The same hen Walk hop still left a glued crown, so
+Chicken forage read as a statue comb over a live throat.
+Nod the comb (`walkCombAmp`) — same `WalkHopDown01`
+clock. Cartilage erects; wattle hang stays flesh
+(`walkWattleAmp`). Cry keeps Alarm. Attack stoop stays
+glued (contrast). Peck grab already rides the head dip.
+Walk hop-turn nod is independently gated (`walkTurnCombAmp`).
+Crow unmarked. Alarm glance skip.
+`walkCombAmp` 0 restores the glued Walk crown. Not a
+nod force.
+The same Sit look-down still left a glued throat, so
+Chicken perch forage read as a statue wattle. Hang
+the wattle (`sitLookWattleAmp`) — same `SitLookGape01`
+clock. Cry keeps Alarm. Attack stoop stays Attack. Walk
+hop stays Walk. Peck grab already rides the head dip.
+Comb nod is independently gated (`sitLookCombAmp`). Preen
+nibble is independently gated (`sitPreenWattleAmp`). Scratch
+hang is independently gated (`sitScratchWattleAmp`).
+Hop-turn hang is independently gated (`sitTurnWattleAmp`).
+Walk hop-turn hang is independently gated (`walkTurnWattleAmp`).
+Crow unmarked. Alarm glance skip.
+`sitLookWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+The same Sit look-down still left a glued crown, so
+Chicken perch forage read as a statue comb over a live
+throat. Nod the comb (`sitLookCombAmp`) — same
+`SitLookGape01` clock. Cartilage erects; wattle hang stays
+flesh (`sitLookWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Walk hop-turn
+nod is independently gated (`walkTurnCombAmp`). Sit hop-turn
+nod is independently gated (`sitTurnCombAmp`). Sit preen
+nod is independently gated (`sitPreenCombAmp`). Sit scratch
+nod is independently gated (`sitScratchCombAmp`). Peck grab already rides the head dip.
+Crow unmarked. Alarm glance skip.
+`sitLookCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+The same Sit preen nibble still left a glued crown, so
+Chicken perch grooming read as a statue comb over a live
+throat. Nod the comb (`sitPreenCombAmp`) — same
+`SitPreenGape01` clock. Cartilage erects; wattle hang stays
+flesh (`sitPreenWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Walk hop-turn
+nod is independently gated (`walkTurnCombAmp`). Sit hop-turn
+nod is independently gated (`sitTurnCombAmp`). Sit look
+nod is independently gated (`sitLookCombAmp`). Sit scratch
+nod is independently gated (`sitScratchCombAmp`). Peck grab already rides the head dip.
+Crow unmarked. Alarm glance skip.
+`sitPreenCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+The same Sit scratch kick still left a glued crown, so
+Chicken perch forage read as a statue comb over a live
+throat. Nod the comb (`sitScratchCombAmp`) — same
+`SitScratchGape01` clock. Cartilage erects; wattle hang stays
+flesh (`sitScratchWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Walk hop-turn
+nod is independently gated (`walkTurnCombAmp`). Sit hop-turn
+nod is independently gated (`sitTurnCombAmp`). Sit look
+nod is independently gated (`sitLookCombAmp`). Sit preen
+nod is independently gated (`sitPreenCombAmp`). Peck grab
+already rides the head dip.
+Crow unmarked. Alarm glance skip.
+`sitScratchCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+The same Sit preen nibble still left a glued throat, so
+Chicken perch grooming read as a statue wattle. Hang
+the wattle (`sitPreenWattleAmp`) — same `SitPreenGape01`
+clock. Cry keeps Alarm. Attack stoop stays Attack. Walk
+hop stays Walk. Look-down owns `sitLookWattleAmp`. Peck
+grab already rides the head dip. Comb nod is independently
+gated (`sitPreenCombAmp`). Scratch hang is independently
+gated
+(`sitScratchWattleAmp`). Hop-turn hang is independently
+gated (`sitTurnWattleAmp`). Crow unmarked.
+Alarm glance skip.
+`sitPreenWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+The same Sit scratch kick still left a glued throat, so
+Chicken perch forage read as a statue wattle. Hang
+the wattle (`sitScratchWattleAmp`) — same `SitScratchGape01`
+clock. Cry keeps Alarm. Attack stoop stays Attack. Walk
+hop stays Walk. Look-down owns `sitLookWattleAmp`. Preen
+nibble owns `sitPreenWattleAmp`. Peck grab already rides the
+head dip. Comb nod is independently gated (`sitScratchCombAmp`).
+Hop-turn hang is
+independently gated (`sitTurnWattleAmp`).
+Crow unmarked. Alarm glance skip.
+`sitScratchWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+The same Sit hop-turn still left a glued throat, so
+Chicken perch about-face read as a statue wattle. Hang
+the wattle (`sitTurnWattleAmp`) — same `SitTurnGape01`
+clock. Cry keeps Alarm. Attack stoop stays Attack. Walk
+hop stays Walk. Look-down owns `sitLookWattleAmp`. Preen
+nibble owns `sitPreenWattleAmp`. Scratch hang owns
+`sitScratchWattleAmp`. Peck grab already rides the head dip.
+Comb nod is independently gated (`sitTurnCombAmp`). Walk hop-turn hang is
+independently gated (`walkTurnWattleAmp`).
+Crow unmarked. Alarm glance skip.
+`sitTurnWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+The same Sit land-ruffle still left a glued throat, so
+Chicken perch plant read as a statue wattle. Hang
+the wattle (`landSettleWattleAmp`) — same `LandSettleGape01`
+clock. Cry keeps Alarm. Attack stoop stays Attack. Walk
+hop stays Walk. Sit look / preen / scratch / hop-turn keep
+their hang. Peck grab already rides the head dip. Comb
+nod is independently gated (`landSettleCombAmp`). Crow unmarked. Alarm glance skip.
+`landSettleWattleAmp` 0 restores the glued Sit throat. Not a
+hang force.
+The same Sit land-ruffle still left a glued crown, so
+Chicken perch plant read as a statue comb over a live
+throat. Nod the comb (`landSettleCombAmp`) — same
+`LandSettleGape01` clock. Cartilage erects; wattle hang stays
+flesh (`landSettleWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn keep their nod. Peck grab already
+rides the head dip. Crow unmarked. Alarm glance skip.
+`landSettleCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+The same dirt Peck swallow still left a glued throat, so
+Chicken forage eat read as a statue wattle over a live
+crop. Hang the wattle (`peckWattleAmp`) — same
+`PeckSwallow01` clock. Cry keeps Alarm. Attack stoop stays
+Attack. Walk hop stays Walk. Sit look / preen / scratch /
+hop-turn / land-ruffle keep their hang. Peck grab still
+rides the head dip. Comb nod is independently gated
+(`peckCombAmp`). Crow unmarked. Alarm glance skip.
+Woodpecker drum skip.
+`peckWattleAmp` 0 restores the glued Peck throat. Not a
+hang force.
+The hop still left a glued hen throat, so
+Chicken Fly climb read as a statue wattle over a live
+gape. Hang the wattle (`takeoffWattleAmp`) — same
+first-air clock. Cry keeps Alarm. Attack stoop stays
+Attack. Walk hop stays Walk. Sit look / preen / scratch /
+hop-turn / land-ruffle keep their hang. Peck swallow stays
+Peck. Comb nod is independently gated (`takeoffCombAmp`).
+Flare owns `landWattleAmp`. Swoop wattle stays glued. Dirt
+coil skip. Sinking skip. Alarm glance skip.
+`takeoffWattleAmp` 0 restores the glued first-air throat. Not a
+hang force.
+The plant still left a glued hen throat, so
+Chicken Fly/Glide flare read as a statue wattle over a live
+gape. Hang the wattle (`landWattleAmp`) — same
+`flareLook` clock. Cry keeps Alarm. Attack stoop stays
+Attack. Walk hop stays Walk. Sit look / preen / scratch /
+hop-turn / land-ruffle keep their hang. Peck swallow stays
+Peck. Takeoff climb owns `takeoffWattleAmp`. Comb nod is
+independently gated (`landCombAmp`). Swoop wattle stays
+glued. Climb and dirt takeoff skip. Alarm glance skip.
+`landWattleAmp` 0 restores the glued flare throat. Not a
+hang force.
+The plant still left a glued hen crown, so
+Chicken Fly/Glide flare read as a statue comb over a live
+throat. Nod the comb (`landCombAmp`) — same
+`flareLook` clock. Cartilage erects; wattle hang stays
+flesh (`landWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn / land-ruffle keep their nod.
+Peck swallow stays Peck. Peck grab still rides the head
+dip. Crow unmarked. Alarm glance skip. Takeoff climb owns
+`takeoffCombAmp`. Swoop comb stays glued. Climb and dirt
+takeoff skip.
+`landCombAmp` 0 restores the glued flare crown. Not a
+nod force.
+The same dirt Peck swallow still left a glued crown, so
+Chicken forage eat read as a statue comb over a live
+throat. Nod the comb (`peckCombAmp`) — same
+`PeckSwallow01` clock. Cartilage erects; wattle hang stays
+flesh (`peckWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn / land-ruffle keep their nod.
+Peck grab still rides the head dip. Crow unmarked. Alarm
+glance skip. Woodpecker drum skip.
+`peckCombAmp` 0 restores the glued Peck crown. Not a
+nod force.
+The hop still left a glued hen crown, so
+Chicken Fly climb read as a statue comb over a live
+throat. Nod the comb (`takeoffCombAmp`) — same
+first-air clock. Cartilage erects; wattle hang stays
+flesh (`takeoffWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit look /
+preen / scratch / hop-turn / land-ruffle keep their nod.
+Peck swallow stays Peck. Peck grab still rides the head
+dip. Crow unmarked. Alarm glance skip. Flare owns
+`landCombAmp`. Swoop comb stays glued. Dirt coil skip.
+Sinking skip.
+`takeoffCombAmp` 0 restores the glued first-air crown. Not a
+nod force.
+The same Sit hop-turn still left a glued crown, so
+Chicken perch about-face read as a statue comb over a live
+throat. Nod the comb (`sitTurnCombAmp`) — same
+`SitTurnGape01` clock. Cartilage erects; wattle hang stays
+flesh (`sitTurnWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Walk hop-turn
+nod is independently gated (`walkTurnCombAmp`). Sit look
+nod is independently gated (`sitLookCombAmp`). Sit preen
+nod is independently gated (`sitPreenCombAmp`). Sit scratch
+nod is independently gated (`sitScratchCombAmp`). Peck grab already rides the head dip.
+Crow unmarked. Alarm glance skip.
+`sitTurnCombAmp` 0 restores the glued Sit crown. Not a
+nod force.
+The same Walk hop-turn still left a glued throat, so
+Chicken dirt about-face read as a statue wattle. Hang
+the wattle (`walkTurnWattleAmp`) — same `WalkTurnGape01`
+clock. Cry keeps Alarm. Attack stoop stays Attack. Walk
+hop stays Walk. Sit look / preen / scratch / hop-turn keep
+their hang. Peck grab already rides the head dip. Comb
+nod is independently gated (`walkTurnCombAmp`). Crow
+unmarked. Alarm glance skip.
+`walkTurnWattleAmp` 0 restores the glued Walk throat. Not a
+hang force.
+The same Walk hop-turn still left a glued crown, so
+Chicken dirt about-face read as a statue comb over a live
+throat. Nod the comb (`walkTurnCombAmp`) — same
+`WalkTurnGape01` clock. Cartilage erects; wattle hang stays
+flesh (`walkTurnWattleAmp`). Cry keeps Alarm. Attack stoop
+stays glued (contrast). Walk hop stays Walk. Sit hop-turn
+nod is independently gated (`sitTurnCombAmp`). Sit look
+nod is independently gated (`sitLookCombAmp`). Sit preen
+nod is independently gated (`sitPreenCombAmp`). Sit scratch
+nod is independently gated (`sitScratchCombAmp`). Peck grab already rides the
+head dip. Crow unmarked. Alarm glance skip.
+`walkTurnCombAmp` 0 restores the glued Walk crown. Not a
+nod force.
+Woodpecker Peck is a closed-bill hammer (`drumHammerHz`, brace
+`drumRestDip`), not hen gape. Brain already writes `Peck` while
+`Drumming`; this is the read of that pulse. Tail fans against the
+trunk. `drumHammerHz` 0 restores the hen dip. Ragdoll holds the
+brace — do not chase 12 Hz with SPD. Not a wood force.
+CLI `-birdKind chicken`.
+Every kind has a `Beak` segment (card `BIRD-8-beak`). Ragdoll: hinge
+on the head. Flock: look child + trigger, no extra `Rigidbody2D`.
+Hits go through `BeakStrike` only — not a wing, not the chest.
+Stand: `run-trial.ps1 -Rebuild -Duration 10 -Label bird_stand -Extra @('-bird','1')`.
+Without `-bird` the human path does not change. `-takeoffDelay 0` —
+stance without takeoff. `-birdMode fly` — flap and thrust.
+`-birdRig flock` — flock build. `-stopFlap 4` — drop the flap at the
+4th second (glide by default). `-stopFlapMode glide|stand`.
+`-walkThrust` — flock step. `-birdFacing 1|-1`. `-birdTurnAfter`.
+`-birdMode sit|attack`. Play drive: `birdDrive` on `Bird` / `BirdFlock50`.
+
+## Budget (optimization 02.09)
+
+Read `Trials/Runs/opt_bird_code_02.md` and `opt_agent_proposals.md`
+(section bird). Not a GO card. PERF-5 is closed.
+
+Flock N=50 at 200 Hz is the **solver edge** (`wallPerSim ≈ 1`), not
+empty `FixedUpdate` and not `NearPerch`. One ragdoll is 17 RB / 32
+muscles / 16 frictions — hero budget, stance stand only.
+
+Do not:
+
+- Cut `flapFrequency`, `aiStride`, or 200 Hz for FPS.
+- Move `BirdFlight.Tick` to `Update`.
+- Disable driven `BirdSensors` / `BirdFlight` again (0% on two repeats).
+- Spawn ragdoll birds in `BirdFlock50` or World (`birdCount = 0`).
+- Replace the foot probe with `GetContacts` while `probeSat` is 0.
+
+Perch lab already answered the optional probe card:
+`perf_flock_metric_tree1` — `probeSaturatedFraction` **0**,
+`meanProbeHits` 0.54, 3774 probes / 20 s. Keep `OverlapBoxNonAlloc`
+and the cruise skip. `NearPerch` stays one AABB; sensors cache
+`nearPerch` once per tick.

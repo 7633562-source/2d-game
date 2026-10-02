@@ -1,0 +1,762 @@
+---
+description: Recursive tree physics — segments, spring, no muscles
+globs: Assets/PlantTree.cs, Assets/PlantBase.cs, Assets/TreeBase.cs, Assets/AppleTree.cs, Assets/TreeSpring.cs, Assets/TreeDriver.cs, Assets/PlantFlower.cs, Assets/FlowerKinds.cs, Assets/AppleTrialRecorder.cs, Assets/TreeJointTrace.cs
+alwaysApply: false
+---
+
+# Plants
+
+Separate layer. Do not retune human PD or 200 Hz. Play is scene `Tree`.
+Keep `treeCount = 0` and `flowerCount = 0` in `SampleScene` and `World`
+(`LevelGrove` is the yard picture, not `treeCount`).
+
+The builder class is `PlantTree`, not `Tree`: Unity already has
+`UnityEngine.Tree`. A segment is `HumanSegment` (box + Visual), same as
+the bird. Size is `collider.size`, not `localScale`. Leaves are
+`InitializeVisualOnly`, no rigidbody.
+
+## Two rigs
+
+| `TreeRig` | Where | Bodies |
+|---|---|---|
+| `Sway` | scene `Tree`, headless `-tree 1` | static stump + up to 15 dynamic hinges |
+| `Static` | yard grove, Tree-scene extras | **picture only**: no `Rigidbody2D`, no wood collider |
+
+Static **Apple** (Level1 `YardApple`) look-sways the picture in
+`LateUpdate`: wind plus the same fly-by unit as `ApplyBirdWake`.
+Wood transforms and `BirdPerch` pads stay at the grow pose, so Ground
+colliders are not dragged. Do not promote that apple to `Sway` — one
+Human of hinges next to the Level1 flock is too dear. World grove
+kinds (oak…poplar) stay frozen.
+
+One `Sway` tree costs about one `Human` in body count. Do not plant a
+`Sway` grove in `World`.
+
+Static is for hundreds of plants. A segment is still a box sprite
+(`HumanSegment.size`, not `localScale`). It does not enter Box2D.
+Sit contact is only `BirdPerch` pads (Ground, no extra RB, cap 20,
+twigs first). Wood vs world / human / bird is off because there is
+no wood fixture. `GetPerchSlots` / `SeatBirds` / `NearPerch` stay.
+Sway keep the old 31-body clamp; Static may grow to 255 segments.
+
+## Recursion
+
+`Grow` from the parent's tip: a leader near the axis, a side branch at
+`forkAngle`. Side alternates so CoM stays over the stump.
+`maxDepth = 3` → up to 15 segments. `maxSegments` cuts growth.
+
+`TreeKind` picks the recipe. **Oak** is the hold/perch canon (same
+numbers as 30.08). Pine is tall and sparse, willow wide (Sway weeps
+a little), bush short with a three-way root, poplar thin.
+**Apple** is opt-in (`ParseKind "apple"`, not in the yard 0…4 cycle):
+3 m leader, wide fork, fruit sprites only. Sway uses the same hold
+path and the Human-sized 15-body cap. Level1 plants it `Static` via
+`LevelGrove`, not `treeCount`, and `PlantTree` look-sways that picture.
+Static Apple grows a denser crown (depth 5, three-way forks on the
+first two levels, cap 96 picture segments), fruit on outer twigs
+(2–3 per twig), perch on wood tips and mid-span (pads cap 48). World
+grove is not Apple.
+Four Play-gallery kinds (not in the yard cycle): **Lilac** (green
+Y-stem, purple ellipse blooms), **Hazel** (three trunks, catkin
+ellipses), **Cedar** (layered near-horizontal fans), **Plum** (square
+fruit clusters). Sway stays inside the 31-body cap; Static may grow
+deeper (depth 4–6). Look-sway is Apple + those four. Oak…Poplar
+Static stay frozen (World grove).
+`KindFromPlantIndex` cycles 0…4 (yard grove). `KindFromGalleryIndex`
+is Oak…Poplar then Lilac Hazel Cedar Plum. Scene `Tree` plants nine
+(first `Sway`, rest `Static`). Headless default is oak; `-treeKind
+pine` / `-treeKind apple` / `-treeKind lilac`.
+Do not plant a `Sway` row in `World`.
+
+## Hold pose, still bend
+
+Wood gravity is cancelled at the grow pose (`TreeSpring.holdTorque`).
+Without that, a side branch sags to the hinge limit — it looks like the
+branch fell off. Extra mass (a bird on `Ground`) is not in the hold
+sum, so `stiffness` still bends the joint. Apple Sway also applies
+`worldStiffness` on the trunk (stump is Static); forks stay on the
+joint spring so a world error cannot yank the crown.
+
+Human hinges: `+AddTorque` (CCW) **decreases** `jointAngle`. Wood spring
+is `+k·(θ−θ_rest)`, not textbook `−k·θ`. Cap by `maxTorque` only —
+a one-step `springStop` is < 1 N·m on wood inertia and kills the pose.
+
+Sway wood colliders use the `Ground` layer; a bird does not collide
+with them (`Bird.GhostTreeWood`). Static wood has no collider.
+Sit points are `BirdPerch` pads from `EnsureBirdPerches` (oak: top of
+twigs, cap 20; Apple: wood tip and mid-span, cap 48). `GetPerchSlots` /
+`SeatBirds` / `NearPerch` stay the handshake with agent `ai`. Play flock:
+`BirdFlock50` has `treeCount = 1` (Sway).
+Headless: `-tree 1`, Static grove `-treeRig static`. With birds
+`-bird 1 -tree 1`. Do not plant pads in World unless a bird is there.
+
+Accepted 02.09 (`plant_static_cheap_02.md`): Static oak is 0 RB / 0
+wood collider. Sway hold still ≈ 0.002°. One flock bird on Static
+pads: `perchLandCount` 7, `fell` false.
+
+Pass 03.09: Static build skips mass normalize, `SyncTransforms`, and
+hold bind. Perch slots are collected once. Leaves are a sprite on the
+twig, not a `HumanSegment`. Sway path is unchanged.
+
+## Do not
+
+- No muscles and no `HingeJoint2D.useMotor`. Wood is `TreeSpring` +
+  `JointFriction`.
+- Do not put a wood `Rigidbody2D` or wood collider back on Static.
+- Forces only in `FixedUpdate` through `TreeDriver` (spring → damping →
+  wind → bird wake). Look-sway of Static Apple is picture only
+  (`LateUpdate`), not a force.
+- Wind is `½ ρ v² S` on the segment, not an "up" force.
+- A flying bird near a Sway branch adds a local horizontal gust
+  (`ApplyBirdWake`). Wood is ghost to the bird, so there is no solver
+  contact; the wake is the fly-by reaction. Sit / Walk / Static stay
+  quiet on the solver. Static Apple still look-bends from the same
+  fly-by unit (`lookBirdSwayDegrees`). No force on the bird. No Linecast.
+  Not an "up" force.
+- The stump is Static. The tree does not fall like a human ragdoll.
+- Do not bake bark/leaf textures here: card `ART-TREE`, do not change
+  collider size.
+
+## Measured 18.09 — where the ordered stop has to live (build 7ed1ff4d)
+
+Attempt 1 at the stiff stem for the oak was ROLLED BACK, and these four numbers
+are why. Run `tree_oak_bind` / `tree_oak_rollback_*`, oak, 8 s, fixedDelta 0.005:
+
+- The HingeJoint2D stop is measured in the **parent's frame**, not from the grow
+  pose. At bind a limb grown at 26° reports `jointAngle` **25.99°** (order 2
+  18.62°, order 3 19.53°, the bole 0.00°). A symmetric ±5° stop therefore sits
+  21° outside the pose and the solver folds the limb on the first step; centring
+  it (`rel = DeltaAngle(parentHeading, heading)`, assigned inside `ConnectTo`
+  where the joint is created) still left the crown folding 16-45° in STILL air.
+- The stops are **soft**: a joint was measured 45° past its own stop.
+- The trunk spring (180 N·m/rad) is **below** the trunk's gravity gradient
+  (259.7 N·m/rad = the whole tree's weight about the bole hinge, measured and
+  reported as `treeOrder0GravityGradient`). The oak's stem is therefore held up
+  by the ±16° stop, not by the spring — that is the rubber trunk, and it is why
+  the oak sits at `maxTrunkLeanDeg` 16.05 and `hingePinnedFraction` 0.20 under
+  wind 0.12. Order 1 is barely better: k 67.5 vs gradient 45.0, with the limb
+  bound 25.99° sitting 0.76° under its 26.75° stop.
+- So a stiff stem means k above the gravity gradient with a margin, and the
+  per-order stops have to be added on top of that — not instead of it. The
+  ordered values tried (k 90/30/14 over the same gravity load) are not enough.
+
+`PlantTrialRecorder` now writes the four numbers (`maxTrunkLeanDeg`,
+`hingePinnedFraction`, `baseSlideM`, `swayAmpM`) plus `treeOrder{0..3}`
+`MaxAngleDeg` / `BindDeg` / `LimitDeg` / `Stiffness` / `GravityGradient`, and
+`tree-probe-metrics.py` prints them, so the next attempt starts from a
+measurement instead of a guess.
+
+## T1 instrumentation — the trace and the split (18.09, build f9d594f0)
+
+TREES plan T1 is DONE, instrumentation only: no physics changed, and the oak
+reproduces its pre-T1 numbers bit for bit (hold and wind 0.12, 17 of 17
+measured keys identical to build 7ed1ff4d).
+
+- `TreeJointTrace` writes `<label>_joints.csv`: one row per FixedUpdate, ten
+  columns per joint (jointAngle, limitMin, limitMax, springTorque, holdTorque,
+  frictionTorque, rotation, inertia, mass, gravityMoment). It reads Unity
+  primitives only — rb.rotation/position/mass/inertia, joint.jointAngle/limits,
+  the hinge graph read once — never a PlantTree metric helper. PlantTree exposes
+  the raw handles through `GetWoodSensors`.
+- The JSON is split: the run block holds MEASUREMENTS, `build` holds every
+  constant (94 keys: counts, recipe, per-joint stiffness/limits/bind/hold and
+  the rig hash). `RigHash` = FNV-1a 64 over the sorted grow-pose segment
+  positions and sizes, computed at the END OF `BuildTree` — hashed later it
+  gave two different hashes for one rig (hold `aa7807e3` vs wind `0607ea1b`),
+  and the wind one had already moved.
+- `tree-const-assert.py <runA> <runB>` flags any run-block key bit-identical
+  across two winds. On the pre-T1 block it fired on 84 keys (incl.
+  `maxAbsHoldTorque` and `treeMaxAbsBranchHeading` — now in `build:`); on the T1
+  block it fires on one key only: `springSatFraction` = 0.
+- Measured: the oak is 16 bodies = static stump + 15 dynamic segments, so the
+  trace has FIFTEEN joint column groups, not the 14 the plan assumed (0.2
+  pinned = 3 of 15 hinges).
+- Oak wind 0.12 on the T1 block: `maxAbsAppliedTorqueNm` 50.41,
+  `springSatFraction` 0.00 (NO joint reaches its `maxTorque` — the plan's T2
+  stop rule is already triggered; re-brief the saturation mechanism before
+  sizing anything), `holdResidualNm` 49.12 (the net torsion left after the
+  feedforward hold cancels the pose's own gravity moment), `trunkJointAngleDeg`
+  16.03 against `trunkLimitDeg` 16.00 (the trunk sits ON its own stop),
+  `maxAbsSegmentWorldDevDeg` 67.56, `crownComDxM` 0.362.
+
+## Garden flowers (not a tree)
+
+Small plants are `PlantFlower`, not `PlantTree`. Twelve subclasses
+lock `FlowerKind`: Rose, Tulip, Daisy, Poppy, Sunflower, Lily,
+Daffodil, Violet, Crocus, Lavender, Iris, Bluebell.
+
+Picture only: `HumanSegment.InitializeVisualOnly`. No `Rigidbody2D`,
+no collider, no `TreeSpring`, no wind, no `BirdPerch`. A bird does
+not sit on a bloom. Cost is sprites, not 15 bodies.
+
+Stem is 9–42 cm (crocus … sunflower). Play gallery is scene `Tree`
+(`flowerCount = 12`). World and `SampleScene` stay `flowerCount = 0`.
+Headless: `-flower 1` (row of 12) or `-flower 1 -flowerKind rose`.
+Do not plant a Sway grove of flowers. A yard bed is a later level
+card, not this layer.
+
+## Perch load — the plant owns it (Yury 18.09, option a)
+
+A sitter's weight reaches the tree as a load the plant applies itself, like
+`ApplyBirdWake`: `TreeDriver.FixedUpdate` calls `PlantTree.ApplyPerchLoad(dt)`.
+The bird's brain stays clean and never calls `AddForce`.
+
+Acceptance for the perch is measured with an INJECTED test load, not with the
+bird layer, so a broken bird can never again make a tree look like it passes:
+
+- `-treePerchLoad <kg>` — the load, at `-treePerchSlot <i>` (twigs first, same
+  order as `GetPerchSlots`);
+- `-treePerchLoadUntil <s>` — release the load, so ONE run shows the bend AND
+  the return (`finalAbsJointAngle` / `finalCrownY` back at the hold pose);
+- the run must not sag to a joint limit and must not creep: `settleAbsJointAngle`
+  (t=2 s) stays level with `finalAbsJointAngle` (t=8 s) while the load is held.
+
+MEASURED 18.09 on build 4612d145, with the bird layer itself: 8 and 50 crows
+seated on the oak (`tree_flock8`, `tree_flock50`) leave `maxAbsJointAngle`
+0.00103° and `crownDrop` 0 — the load does not reach the wood at all. That is
+why the acceptance runs on the injected load.
+
+The old numbers — 23.6° / 11 cm (`tree_perch8.json`) and 24.6° / 7 cm
+(`tree_perch50.json`, 30.08) — predate BIRD-9 (01.09) and are VOID until
+re-measured with the injected load. The real bird perch stays a later
+integration, measured against the same load.
+
+## Sway, never topple (Yury 18.09)
+
+A tree sways lightly and returns; it never falls over. Acceptance is measured, not judged:
+trunk lean under 4 deg from vertical (a strong stem), no hinge ever pinned at its limit, base slide under
+5 mm, and the sway decays to rest with wind off (settle under 0.5 deg). With wind on the
+sway stays bounded and the same limits hold. A tree that sags, keeps swinging or falls
+over fails, however pretty it looks.
+
+## The stem is strong, the crown sways (Yury 18.09)
+
+The trunk is a strong stem: it must be HARD to bend. The sway lives in the crown, never in
+the trunk. Stiffness falls by branch order and the wind acts on the crown's sail:
+- trunk hinge: near rigid, limit +-1.5 deg, a very stiff spring; the trunk must not bend
+  visibly - maxTrunkLeanDeg under 4 deg at wind 0.12;
+- order 1 limbs +-5 deg, order 2 +-12 deg, order 3 twigs +-28 deg - the movement belongs
+  there, not in the stem;
+
+## Visual design, all plants (Yury 18.09)
+
+A plant must read as grown, not as a symmetric geometric figure, and it stays segmented:
+- asymmetric silhouette from the seed (per-node jitter on angle, length, thickness);
+- branch orders with their own thickness and bark tone; order-3 twigs picture-only;
+- 3-4 foliage variants per species chosen by seed, so no two crowns repeat;
+- fruit / bloom sizes and positions varied, never a uniform grid;
+- bark, roots and minor twigs at the base;
+- never flatten a plant into one static sprite;
+- budget: Rigidbody2D and HingeJoint2D only on the structural skeleton (about 15-24
+  dynamic segments per tree); twigs, foliage, fruit, bark and root flair are
+  picture-only children.
+
+## T1 for the apple re-verified, and a pending edit in the tree (18.09 20:05)
+
+T1 on the apple is committed (`d4a2f6dc`) and re-verified from the artifacts on disk:
+23 of 23 shared run-block keys bit-identical to the pre-T1 block on BOTH runs
+(fp `8000f531` vs `f9d594f0`), the run block kept 19 keys and moved 18 into `build:`
+with none lost, and `<label>_joints.csv` is `t` + 15 joints x 10 columns (1600 rows).
+
+The rerun on today's player (fp `022dae75`) is the honest test of "bit-identical":
+- oak `tree_t1rerun_hold` / `tree_t1rerun_wind012` — BIT-IDENTICAL to the accepted T1
+  runs (23/23; hold 0.00103 deg, wind 34.17341 / crownDrop 0.2553246 / pinned 0.20), so
+  the oak canon is untouched by what follows;
+- apple `apple_t1rerun_hold` / `apple_t1rerun_wind012` — 22 of 23 keys MOVED. It is NOT
+  the instrument: `Assets/AppleTrialRecorder.cs` and `Assets/TreeJointTrace.cs` are
+  clean against T1, and the rig hash is unchanged (`b242a8ddd29b0b28`).
+
+What moved the apple is an UNCOMMITTED physics edit in `Assets/TreeBase.cs` —
+`CentreJointStopsOnBind()` (41 lines, 19:18), already inside that player. The build block
+proves it is in: the stops are now centred on the bind angle (J08 `[20.989, 30.989]`
+instead of +-5, J01 `[-12.337, -2.337]`, J12 `[6.620, 30.620]`). Measured effect, hold /
+wind 0.12: maxAbsJointAngle 26.2326 -> 5.674024 and 25.59885 -> 7.066446;
+hingePinnedFraction 0.40 -> 0.0667 (1 of 15) and 0.2667 -> 0.0667; springSatFraction
+0.06620833 -> 0; maxAbsAppliedTorqueNm 40 (the twig cap) -> 20.3669 / 20.5555;
+holdResidualNm 35.31 -> 18.88; swayAmpM 0.6708 -> 0.1030 and 0.6716 -> 0.1465;
+crownComDxM 0.0955 -> 0.0236.
+
+## T2 frame fix — the brief arrived and the change is now the authorized one (19.09)
+
+The T2 brief (STATUS 18.09 19:16, option 1 "fix the FRAME") is what that pending edit
+is: the hinge stop and the angle it is compared against must share one origin. The
+frames already agree — `TreeJointTrace.cs:234`/`:235` read `limits` and `jointAngle`
+off the SAME hinge, and `TreeBase.cs:416` binds the spring to that same `jointAngle`
+(bind angle) — so what was wrong is the interval's ZERO: `TreeBase.cs:224-225` wrote
+`±BendLimitForOrder(...)` about 0, the oak's own recipe (`PlantTree.cs:2658-2672`)
+centres on the limb's angle to its parent. `CentreJointStopsOnBind()`
+(`TreeBase.cs:437-453`, call `:159`) does exactly that, same width, same stiffness, same
+`maxTorque`, no new switch. Read-only check of the artifacts on disk: born-behind
+4/15 -> 0/15 in hold AND wind, `springSatFraction` 0.0662 -> 0, `maxAbsJointAngle`
+26.2326 -> 5.674024, trunk 1.50936 -> 1.166936 (inside its 1.5 deg stop), pinned
+0.40 -> 0.0667 (J08 only, 0.03-0.04 deg past its own SOFT stop); oak 29/29 run-block
+keys unmoved (it runs on `PlantTree`, the edit is in `TreeBase`); Roslyn 0 `error CS`.
+`Trials/Runs/apple-t2frame-report.md`. **STANDED AND COMMITTED 19.09 (`c9129bc1`)** — see the T1 close-out section; the change is no longer a working-tree edit.
+
+T1 gap found on the apple: `build.joints[].gravityGradient` is 0 on all 15 joints (the
+oak reports 259.65 / 44.97 / 6.22 / 0.50). The apple binds through `TreeBase.BindGravityHold`,
+which never writes the field, while `PlantTree.BindGravityHold` does. The only reader is
+PlantTree's own ordered-stem stiffness law (`orderedStem && orderStiffnessFactor > 0`),
+which the apple path does not run — so filling it on the apple is instrumentation, not
+physics, and it is one cycle's work. Until then T2's crown-gravity share cannot be read
+for the apple.
+
+## T1 gap closed on the apple (19.09, build cae2483a)
+
+The paragraph above is done: `TreeBase.BindGravityHold` now accumulates the joint's gravity
+gradient (`gradient += (com.y - jointWorld.y) * seg.rb.mass * g.y`) and writes
+`spring.gravityGradient = Mathf.Abs(gradient)` — the same expression PlantTree uses. No
+reader on the TreeBase path, so it is instrumentation, not a force.
+
+Measured on `apple_t1gap_hold` / `apple_t1gap_wind012` (fp `cae2483a…`, rig
+`b242a8ddd29b0b28`) against the pre-edit player `apple_t1g0_*` (fp `c0b27669…`): the run
+block is 28 of 30 keys bit-identical (only `wallPerSim` and `sourceFingerprint` move) and
+in `joints[]` `gravityGradient` is the ONLY field that moves — 0 → 305.7497 / 52.95278 /
+7.346342 / 0.6321625 by order. The oak still reproduces the accepted T1 canon on the new
+build (`tree_t1gap_*` vs `tree_t1_*`: build block 93/93 identical, `maxTrunkLeanDeg`
+16.04749, `maxAbsJointAngle` 34.17341, `crownDrop` 0.2553246). Report:
+`Trials/Runs/apple-t1gap-report.md`.
+
+Apple readings the field now gives (N·m/rad, hold): gradient 305.75 / 52.95 / 7.35 / 0.63
+for orders 0-3 against k 500 / 166.67 / 86.81 / 58.94 — T2's crown-gravity share is
+readable. The `hingePinnedFraction` 0.0667 is one joint, J08, at 31.0263 deg against its
+own limit maximum 30.9894 — 0.037 deg OUTSIDE its stop in still air (read from the trace
+CSV, not from a TreeBase helper).
+
+COMMITTED 19.09 as `c9129bc1` — see the T1 close-out section above (`CentreJointStopsOnBind()`
+in `Assets/TreeBase.cs`, ONE file, 41 insertions): the accept stand was run on the player
+`cb7e4ef6` (gitCommit `9a43a74e`) with the labels `tree_t1c2_*` / `apple_t1c2_*`, the oak canon
+`tree_t1oak_*` and the apple's post-edit pair `apple_t1sw_hold/_wind012` are bit-identical to
+them (run block, build block, and 0 of 1600 `joints.csv` rows), born-behind 4/15 -> 0/15 and
+`springSatFraction` 0.06620833 -> 0 on every joint. With it in the player the apple is
+deliberately NOT bit-identical to the pre-edit `apple_t1_*` pair (23 of 30 run-block keys
+moved): that pair is the "before" of the T2 comparison, not a target.
+
+## T1-sway — the two numbers that did not mean what they looked like (19.09, build 3f93bfc4)
+
+Instrumentation only, zero physics change, and the last open item of T1 is closed: the
+apple's sway and pinning numbers are now measured over windows that mean something, and
+there is a run in which the WIND IS SWITCHED OFF.
+
+- `PlantBase.windOffSeconds` (0 = old behaviour) + a gate in `TreeBase.FixedUpdate`;
+  `-appleWindUntil <s>` in `HeadlessTrial.BuildAppleScene` sets it. With the switch at 0 the
+  wind force is issued on exactly the steps it was before — proven, not asserted.
+- `AppleTrialRecorder` keeps every old key and adds: `swayFixedTipAmpM`, `swaySettledAmpM`,
+  `swaySettledPkPkM` (one tip segment, chosen once at the first sample and followed; the
+  settled window is t >= 4 s), `worstJointPinnedTimeFraction`, `hingePinnedJointCount`,
+  `maxHingeOverrunDeg`, `windOnMaxAbsJointAngle`, `windOffMaxAbsJointAngle`,
+  `residualAbsJointAngleDeg`, `residualTrunkLeanDeg`, `residualTipDxM` (last second of the
+  run). The window definitions and the chosen tip index live in `build:`, never in the run
+  block. `tree-const-assert.py` declares `windOffMaxAbsJointAngle` 0 on a run with no
+  `-appleWindUntil`.
+
+Measured (`apple_t1sw_*` fp `3f93bfc4…` vs `apple_t1sw_base_*` fp `94f41860…`, same
+sources, one player each side): 28 of 28 physics run-block keys bit-identical on hold AND
+on wind 0.12; the oak (`tree_t1sw_*`) reproduces its accepted canon (0.00103 / 34.17341 /
+crownDrop 0.2553246 / pinned 0.20). Only `wallPerSim` and `sourceFingerprint` move.
+
+What the honest windows say:
+
+- `swayAmpM` 0.1465 m at wind 0.12 was a STARTUP TRANSIENT: the settled window (4-8 s)
+  gives `swaySettledAmpM` 0.0222 m, peak-to-peak 0.0396 m. The stable tip id reproduces
+  `swayAmpM` exactly here (0.1465347), so the contamination the audit feared is the window,
+  not a swapped segment. The apple's steady sway is 2.2 cm — below the 0.10-0.30 m the
+  acceptance wants, and that is a T4/T5 input, not a T1 one.
+- Pinning is JOINT J08 (one order-1 limb): `worstJointPinnedTimeFraction` 0.683 in the hold,
+  0.296 at wind 0.12, 0.559 with the wind off at 4 s — it sits 0.674 deg OUTSIDE its own stop
+  in still air. `maxHingeOverrunDeg` reaches 2.066 deg under wind: the stops are soft. So
+  `hingePinnedFraction` 0.0667 really is 1 joint of 15, and "pinned = 0" is not met.
+- Wind off at 4 s (`apple_t1sw_windoff`): the deviation peaks at 6.4481 deg in the release
+  window (0.1 deg past the wind-on peak 6.3525), then decays to 5.6541-5.6933 deg over the
+  last second, against 5.6605-5.6713 for the no-wind hold run — residual **0.0220 deg**,
+  crown tip back within **0.0007 m**. Mean |dAngle|/step falls 10x (0.00077 → 0.00004) while
+  the wind-on run keeps 0.0002-0.0009. The crown decays back to rest when the driver stops.
+
+Report `Trials/Runs/apple-t1sw-report.md`; frames `Trials/Runs/shot_apple_t1sw_windoff_*.png`
++ `apple_t1sw_windoff_photo.png`; helpers `_t1sw-report.py`, `_t1sw-csv.py`, `_t1sw-detail.py`.
+
+## T1-oak — the same honest windows on the oak (19.09, build 8e9ed340)
+
+The oak half of T1-sway, instrumentation only, zero physics change and the
+bit-identity rerun proves it: `PlantTrialRecorder` now writes the same 11 added
+run keys as the apple (one tip segment chosen once at the first sample and
+followed — `tipSegmentIndex` 4 — a settled window t >= 4 s, a per-joint PINNED TIME
+fraction with `maxHingeOverrunDeg`, wind phases and the last-second residual), and
+`PlantTree` grew `windOffSeconds` with one gate in `ApplyWind()`
+(`windOffSeconds > 0f && Time.fixedTime >= windOffSeconds`), wired by
+`-treeWindUntil <s>` in `HeadlessTrial.BuildTreeScene`. `PlantTree` is a
+`MonoBehaviour`, not a `PlantBase`, so this is its own field — the apple's
+`PlantBase.windOffSeconds` is untouched. At 0 the gate is false on every step: the
+wind-off run and the wind-on run are step-identical (0.000000 deg over all 15
+joints) until the switch opens at the recorder's t = 3.990 s.
+
+Acceptance: `_t1oak-accept.py` PASS on all four pairs — oak `tree_t1oak_base_*`
+(pre-edit player, fp `ca4ed1b6`) vs `tree_t1oak_*` (fp `8e9ed340`) keeps every run
+key and moves no build key except the wind config, with 11 keys added; the apple
+controls (`apple_t1oak_*`) reproduce the accepted `apple_t1sw_*` values to the
+digit; the oak canon is bit-identical (hold 0.00102997 / drop 0; wind 34.17341 /
+0.2553246 / pinned 0.20 / trunk 16.0265 against limit 16.0).
+
+What the oak's honest numbers say (T3/T4 input): `swayAmpM` 1.287312 m is a
+transient — the stable-tip whole-run excursion is 1.473969 m (the re-picked tip
+UNDER-measured) and the settled window gives 0.179467 m, pk-pk the same, which is
+inside T3's [0.05H, 0.15H] band for H = 2.332039 m; pinning is 3 of 15 joints
+(J00 66.1 % of the samples, J08 85.2 %, J01 7.5 %) with the worst overrun only
+0.151758 deg, so the oak's stops are hard, not soft like the apple's; and with the
+sail OFF at 4 s the motion decays (mean |dAngle|/step 0.00311 -> 0.00070, peak
+bucket 0.06684 -> 0.00047) while the POSE does not come back — residual 32.72058
+deg, trunk 16.0264 deg, crown tip 1.368073 m from rest. The tree ends folded on the
+trunk stop because the 180 N·m/rad spring cannot lift the 259.7 N·m/rad weight
+gradient: T3's RETURN TEST fails on the oak today, by the rig and not by the
+measurement. Report `Trials/Runs/tree-t1oak-report.md`; pictures
+`Trials/Runs/tree_t1oak_windoff.mp4` + `tree_t1oak_windoff_photo.png` (whole
+isolated oak, nothing else in frame); helpers `_t1oak-accept.py`,
+`_t1oak-detail.py`, `_t1oak-csv.py`, `_t1oak-window.py`, `_t1oak-gate.py`.
+
+## T1 re-verified on a FOURTH player, and the pinned metric read against the trace (19.09, cycle `T1f`)
+
+Zero source edits, eight labels, player fp `fc6471dd…` (gitCommit `35c7fbbd`, gate "OK at 19:01").
+Eleven bit-identical pairs — apple `apple_t1f_hold`/`_wind012`/`_windoff` against the accepted
+`apple_t1sw_*` / `apple_t1c2_windoff`, the wind-off repeat against its own sibling, all three
+against the previous cycle's `apple_t1e_*`, and oak `tree_t1f_*` against `tree_t1oak_*` — run
+block AND build block AND **0 of 1600 `joints.csv` rows** on every pair. The apple canon now
+reproduces across four players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53` -> `fc6471dd`); the
+negative controls (PRE-T2 pair, STALE `apple_t1sw_windoff`) move as they must.
+`apple_t1f_photo_windoff` (41 frames, mp4 865 646 B, still 725 666 B, one whole tree, nothing
+else in frame) is byte-identical (`md5`) to the two previous cycles' pictures.
+
+**The apple's pinned number does not answer the question the acceptance asks.**
+`TreeBase.GetHingePinnedFraction()` (`Assets/TreeBase.cs:640-655`) counts a joint when
+`|jointAngle - limit| <= 0.2` deg and the recorder keeps the MAX instant, so a joint sitting
+0.7 deg OUTSIDE its stop is NOT counted. The trace's per-joint TIME fraction in a 0.2 deg band
+(within the band or past the stop): hold J01 0.7781 with an overshoot of 0.6740 deg, J08 0.6831
+at 0.0418 deg; wind 0.12 J01 0.8244 / 2.0664 and J08 0.7625 / 1.1959; no other joint ever enters
+the band. So `hingePinnedFraction` 0.06666667 is true and "pinned = 0.00" can still be met while
+the crown rests on a soft stop — read `maxHingeOverrunDeg` beside it (T4's item). No new signal
+was added: the plan allows new knobs only in T4/T5.
+
+Wind off at 4 s: the wind-off trace is row-identical to its own wind-on sibling through row 799,
+first differing at row 800 (t = 4.004949 s) — the `-appleWindUntil 4` gate. Mean |dAngle|/step in
+the last second falls 0.004357 -> 0.000923 over all 15 joints (ratio 0.212); residual 0.022004 deg
+from the hold pose, crown tip back within 0.000672 m. Report `Trials/Runs/apple-t1f-report.md`.
+
+## `-visual` is not a neutral flag (measured 19.09, cycle `T1`)
+
+The plant harness has TWO deterministic runs per switch set, and `-visual` chooses which: the
+recorded trajectory diverges at row 2 (t = 0.01 s) of 1600 — the apple in 1599 rows (1.725 N·m in
+`J00_springTorque` at that row, still 7.7e-04 deg apart at the last row because J08 never leaves
+its soft stop) and the oak in 1231 rows (5.95e-03 deg, but it CONVERGES back to a 0.000e+00
+last-row delta because it ends pinned on its trunk stop). It is the harness and not a regression:
+on the OLD player the `-visual` apple label `apple_t1c2_photo_hold` is bit-identical to today's
+`-visual` label `apple_t1d_hold`, and the `-visual`-free runs are bit-identical to the accepted
+`apple_t1sw_*`/`apple_t1c2_*` pair, so both variants reproduce across a full rebuild.
+
+- **Compare labels only within the same switch shape.** A physics label must NOT carry `-visual`
+  (the apple canon is `apple_t1sw_*`/`apple_t1c2_*`/`apple_t1d_nv_*`); a picture label
+  (`apple_t1c2_photo_*`, `apple_t1d_*`) must never be quoted as the canon, and a number taken
+  from one shape is not evidence about the other.
+- The oak's labels all carry `-visual` because `tree-probe.sh` always passes it. That is
+  consistent, and today's oak pair is bit-identical to the accepted `tree_t1oak_*`, so the oak
+  canon is sound — but a future oak run made WITHOUT `-visual` is a different trajectory.
+
+T1 stands on the rebuilt player: fp `4681f70b` (gitCommit `ac2299ea`, gate "OK at 15:12"), 11
+runs, zero source edits, both rigs bit-identical in the accepted shape, both negative controls
+moving as they must, born-behind 0/15 and no joint at its cap. Report
+`Trials/Runs/apple-t1d-report.md`; helpers `_t1d-accept.py`, `_t1d-visual.py`,
+`_t1d-firstdiff.py`.
+
+## T1 re-verified after two more rebuilds — cycle `T1` (apple worker), 19.09
+
+T1 had no open work left, so the cycle ran T1's own acceptance on the player the other lanes
+have since rebuilt: fp `3c4dfc53…`, gitCommit `8ce38675`, built `2026-09-19T14:54:08Z`, gate
+"OK at 17:54", no editor, plant sources clean against HEAD, **zero source edits**.
+
+- Bit-identical again on run block AND build block AND all 1600 `joints.csv` rows:
+  `apple_t1e_hold`/`_wind012`/`_windoff` == `apple_t1sw_hold`/`_wind012`/`apple_t1c2_windoff`,
+  the wind-off repeat == its own sibling, and `tree_t1e_*` == `tree_t1oak_*`. The accepted
+  apple canon now reproduces across THREE players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53`).
+- Negative controls move as they must: the PRE-T2 `apple_t1_hold` pair (23 run keys, 11
+  added, build `joints` + the four gradients) and the STALE `apple_t1sw_windoff` (12 keys,
+  CSV from row 2). `tree-const-assert.py` FIRES on the same discrete sets as the close-out
+  (apple 3, oak 1), so the signal is live.
+- The three unmet apple acceptance numbers are unchanged and belong to T4/T5, not to T1:
+  `hingePinnedFraction` 0.06666667 (J08 + J01; J08 sits 0.674 deg outside its own SOFT stop in
+  still air, worst overrun 2.066446 deg under wind), settled sway 0.022223 m against the
+  0.10-0.30 band, `crownDrop` 0.00667548 m against 2 mm. Wind off at 4 s still decays: release
+  peak 6.448067, last-second residual 0.022004 deg from the hold pose, crown tip 0.000672 m.
+- The `-visual` picture label `apple_t1e_photo_windoff` is byte-identical (`md5`) to
+  `apple_t1d_windoff` — frames, mp4 and still — so the picture variant reproduces on a rebuild
+  too and the apple picture has not moved.
+- Job 2 of the apple brief (the `TreeApple` scene and the game wiring) was already landed by
+  the level worker (`Assets/Scenes/TreeApple.unity`, `GameProcess.cs:500-519` -> `AppleTree`
+  from `treeSpecies`); do not re-brief it. Report `Trials/Runs/apple-t1e-report.md`.
+
+## T1 re-verified on a FIFTH player, picture byte-identical — cycle `T1g` (apple worker), 19.09
+
+T1 still had no open work, so the cycle is its own acceptance test: a rerun in the accepted
+switch shape, **zero source edits**, seven physics labels + one picture. The gate REBUILT
+first (the player on disk `d8937fac` at 20:04:52 was older than `Assets/ArmDrive.cs` at
+20:06:58 — another lane's edit) and reported **"OK at 20:07"**, fp `0fd4f288…`, gitCommit
+`73e5f3bd`, 632 files, buildGuid `4b2e49edc20440369eff014048c0452a`, no editor, no lock,
+plant sources clean against HEAD.
+
+- **11 of 11 positive pairs bit-identical** — run block AND build block AND **0 of 1600
+  `joints.csv` rows**: `apple_t1g_hold`/`_wind012`/`_windoff` == the accepted
+  `apple_t1sw_hold`/`_wind012`/`apple_t1c2_windoff`, the wind-off repeat == its own sibling,
+  the same three == the previous cycle's `apple_t1f_*`, `tree_t1g_*` == `tree_t1oak_*`. The
+  apple canon now reproduces across **FIVE** players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53`
+  -> `fc6471dd` -> `0fd4f288`). Rigs unchanged (`b242a8ddd29b0b28` / `dcc15b908146504e`),
+  `jointColumnCount` 15, no joint at its cap in any today's-shape run, born-behind 0/15
+  (4/15 on the PRE-T2 pair). Negative controls move as they must: PRE-T2 `apple_t1_hold` 23
+  run keys / 11 added and CSV from row 1; STALE `apple_t1sw_windoff` 12 keys and CSV from
+  row 2. `tree-const-assert.py` FIRES on the same discrete sets (apple 3: `hingePinnedFraction`
+  0.06666667, `hingePinnedJointCount` 2, `springSatFraction` 0), so the signal is live.
+- **The picture reproduces byte for byte**: `apple_t1g_photo_windoff` (41 frames, 5 fps, 1080p)
+  has the SAME `md5` as `apple_t1f/t1e/t1d_*` — mp4 `d10ec27dd1a265eba217397e748d24a6`
+  (865 646 B), still `347e44cefeb516f93d60adf2504ab3c3` (725 666 B), and the sampled frames
+  (`00`,`01`,`02`,`40`) hash-identical too. One whole apple tree, nothing else in frame.
+- The three unmet acceptance numbers stay with T4/T5: pinned 0.06666667, settled sway
+  0.022223 m against 0.10-0.30, `crownDrop` 0.00667548 m against 2 mm. Lean 1.166476, base
+  slide 0, wind off at 4 s -> residual 0.022004 deg and the crown tip back within 0.000672 m.
+  Report `Trials/Runs/apple-t1g-report.md`.
+- **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
+
+## T1 re-verified on a SIXTH player, picture byte-identical — cycle `T1h` (apple worker), 19.09
+
+T1 still had no open work, so the cycle is its own acceptance test: a rerun in the accepted switch
+shape, **zero source edits**, seven physics labels + one picture. The gate REBUILT first (the player
+on disk `01d56460` at 20:49:52 was older than `Assets/ArmDrive.cs` at 21:00:25 — another lane's
+edit) and reported **"OK at 21:12"**, fp `a4b8dbbf…`, gitCommit `2779a3bb`, 632 files, buildGuid
+`d75635ef6b224ed7b03190612f123abf`, 0 `error CS`, no editor, no lock, plant sources clean against
+HEAD.
+
+- **11 of 11 positive pairs bit-identical** — run block AND build block AND **0 of 1600
+  `joints.csv` rows**: `apple_t1h_hold`/`_wind012`/`_windoff` == the accepted `apple_t1sw_hold`/
+  `_wind012` and `apple_t1c2_windoff`, the wind-off repeat == its own sibling, the same three ==
+  the previous cycle's `apple_t1g_*`, `tree_t1h_*` == `tree_t1oak_*` and `tree_t1g_wind012`. The
+  apple canon now reproduces across **SIX** players (`cb7e4ef6` -> `4681f70b` -> `3c4dfc53` ->
+  `fc6471dd` -> `0fd4f288` -> `a4b8dbbf`). Rigs unchanged (`b242a8ddd29b0b28` / `dcc15b908146504e`),
+  `jointColumnCount` 15, born-behind 0/15 (4/15 on the PRE-T2 pair), no joint at its cap in any row.
+  Negative controls move as they must: PRE-T2 `apple_t1_hold` 23 run keys / 11 added and CSV from
+  row 1; the STALE `apple_t1sw_windoff` 12 keys and CSV from row 2 (fourth confirmation).
+  `tree-const-assert.py` FIRES on the same discrete sets (apple 3: `hingePinnedFraction`
+  0.06666667, `hingePinnedJointCount` 2, `springSatFraction` 0), so the signal is live.
+- **The picture reproduces byte for byte again**: `apple_t1h_photo_windoff` (41 frames, 5 fps,
+  1080p) has the SAME `md5` as `apple_t1g/t1f/t1e/t1d_*` — mp4 `d10ec27dd1a265eba217397e748d24a6`
+  (865 646 B), still `347e44cefeb516f93d60adf2504ab3c3` (725 666 B), sampled frames (`00`,`01`,`02`,
+  `40`) hash-identical too. One whole apple tree, centred and fully inside the frame, nothing else
+  in scene.
+- Wind off at 4 s: the trace is row-identical to its own wind-on sibling through row 800 and first
+  differs at row 801, t = 4.004949 (the gate). Release peak 6.448067 past the wind-on 6.335289,
+  residual 0.022004 deg, crown tip back within 0.000672 m, mean |dAngle|/step 0.076571 startup ->
+  0.000811 (first second after the gate) -> 0.000061 (last second, against 0.000289 for the wind-on
+  sibling and 0.000021 for the no-wind hold). Report `Trials/Runs/apple-t1h-report.md`.
+- **Next: T2 (diagnosis) / T4 (the soft stop), not started here.**
+
+## T3 — order 0 folded into the static stump (oak), 21.09
+
+Brief STATUS 21.09 (Hermes dispatcher), stage TREES T3 on the oak rig: ONE change, ONE build
+(fp `40826f662ee1bdc2537b1028aae3a29e8f4afb9ed1a18a803315635a32fb9cbd`), labels
+`tree_t3oak_hold` / `_wind012` / `_wind036` / `_windoff` (`-treeWind 0.12 -treeWindUntil 4`) plus
+the apple canon controls `apple_t3_hold` / `_wind012` / `_windoff`. Report
+`Trials/Runs/tree-t3oak-report.md`.
+
+- **The change** (`Assets/PlantTree.cs`, 68 insertions / 11 deletions, ONE file): in `Grow()` the
+  Sway rig's order 0 is created picture-only — no `HingeJoint2D`, no `TreeSpring`, no
+  `JointFriction`, no `Rigidbody2D` — its box becomes a `BoxCollider2D` on the segment and the
+  segment is re-parented under the stump (`SetParent(staticBase.transform, true)`), so the bole is a
+  SECOND COLLIDER ON THE STATIC BODY. Children of a folded bole hinge on the static base with the
+  pivot at the crown base (a joint needs a body on the other side); the stop keeps the frame of the
+  wood it hangs from (`frameDeg` — the bole's heading, 0 on the oak, so the crown's stops did not
+  move). `NormalizeDynamicMass()` keeps the folded trunk in the denominator: `totalMass` is the
+  whole live tree, so the crown keeps the masses it had before the fold (without this the crown is
+  restamped to the entire 28 kg, ×1.83 per segment, and every joint's gradient passes its own
+  stiffness — order 1: 44.97 → 82.3 against k 67.47). `TallyBodies()` counts one body fewer and
+  keeps one box per wood piece. Counts: joints 15 → 14, `jointColumnCount` 15 → 14, bodies
+  (`Rigidbody2D`) 16 → 15, dynamic 15 → 14, `bodyCount` 15 → 14, wood boxes 16 → 16, CSV columns
+  151 → 141 (1600 rows).
+- **Accepted rows** (wind 0.12 unless said): `maxTrunkLeanDeg` **0.000** at 0.12 AND 0.36 (was
+  16.04749) — the bole is provably static; `springSatFraction` 0; `baseSlideM` 0; **RETURN TEST
+  PASSES** — wind off at 4 s leaves **0.1234 deg and 0.003132 m** (was 32.72058 deg / 1.368073 m),
+  against limits 3 deg / 0.046641 m, so T3's stop rule ("do not raise stiffness") did not apply.
+  Supporting: `maxAbsJointAngle` 1.25655 (was 34.17341) / 3.66038 at 0.36; `crownDrop` 0.00180435
+  (was 0.2553246); `maxAbsSegmentWorldDevDeg` 1.575226 (was 67.55936); `maxAbsAppliedTorqueNm`
+  1.479578 (was 50.41466); `holdResidualNm` 0.4286164 (was 49.12149).
+- **Two acceptance rows open, named**: (1) `hingePinnedFraction` **0.07142857** = 1 of 14 joints —
+  J07, the order-1 limb grown 0.7626 deg under its ±26.752 deg stop, clips its own bend under wind
+  (21.3 % of the 0.12 samples, 38.4 % at 0.36, worst overrun 0.0029 deg). This is the stop-ORIGIN
+  class the apple's T2 frame fix (`TreeBase.CentreJointStopsOnBind`) closed for the apple; the oak's
+  stops are still placed by the grow pose. (2) `swayAmpM` (settled window) **0.024689 m = 0.0106H**
+  at 0.12 / **0.078261 m = 0.0336H** at 0.36 — BELOW the [0.05H, 0.15H] band: the pre-fold
+  0.179467 m was the bole's own fold to its ±16 deg stop, and the bole carried 27 % of the sail
+  area — T4/T5 sizing.
+- **The apple did not move**: all three canon pairs bit-identical (run block AND build block, 0 of
+  1600 `joints.csv` rows, header identical); `PlantTree` is not on `TreeBase`'s path and nothing
+  else was edited. `tree-const-assert.py` FIRED on five zero keys, all zero BY the fold:
+  `maxTrunkLeanDeg`, `residualTrunkLeanDeg`, `treeOrder0MaxAngleDeg`, `trunkJointAngleDeg` (no
+  order-0 joint exists any more) and `springSatFraction` (the oak's known 0). 27 of 35 run keys
+  still move with the wind.
+- **Next: T4.** Not started here. No commit — a commit needs Yury's word (Hermes commits accepted
+  work).
+
+## T3 on the APPLE — the same fold, ported to `TreeBase`, 21.09 (cycle `T3apple`)
+
+The T3 record above is the OAK's: that fold lives in `PlantTree.Grow`, and `PlantTree` is NOT on the
+apple's path (`AppleTree : TreeBase`, `TreeBase : PlantBase` — two separate builders), so the apple
+saw no `fold|stump` symbol at all (`git diff HEAD -- Assets/TreeBase.cs` clean, `MergeBase` =
+the T2 frame fix `c9129bc1`). The cycle is therefore the port, and it is **ONE change in ONE file**:
+`Assets/TreeBase.cs`, 96 insertions / 17 deletions, uncommitted.
+
+- **The fold** — `Grow()` `:227` `foldedTrunk = depth == 0`, `:228` `livePhysics = !foldedTrunk`:
+  the bole is created picture-only (`CreateWood(..., livePhysics: false)` `:194` -> `:198`
+  `InitializeVisualOnly`; no `Rigidbody2D`, no hinge, no spring), its box becomes a **second collider
+  on the static body** (`:261` re-parent under `staticBase` with `worldPositionStays: true`, `:262`
+  box, `:266` the wood material explicitly, `:267` `mass` kept for the books only), its children hinge
+  on the static base with the **pivot at the crown base** (`:277`, the child's own base expressed in
+  the stump's frame) while the stop stays in the frame of the wood it hangs from (`:281` `frameDeg` =
+  the bole's heading, 0 on the apple). A child of a folded parent takes its tip through the transforms
+  (`:245`), which is frame-free; every other parent is a tree-root child and `TipLocal` stays exact.
+- **The one judgement call** — `NormalizeDynamicMass()` `:418` keeps the folded trunk in the
+  denominator: `if (n.dynamic || n.depth == 0) sum += n.segment.mass;`. Fold the bole into the static
+  base without that and the crown is restamped to the whole live tree (`totalMass` 28 kg), every
+  gradient passes its stiffness and T4 is measured against a lie. With it, the crown's `joints[]`
+  rows keep **every** number — matched by identity (order + bind angle), the only field that moves in
+  the whole array is `kOverStabilityBound` on the two order-1 joints (0.00750651 -> 0.00649), because
+  the pair's other side is now static and the effective inertia is the limb's own. The oak's pattern.
+- **Counters** (apple, hold): segments 15 -> 15 (the geometry did not move, so the rig hash stays
+  **`b242a8ddd29b0b28`** — quoted on purpose), dynamic 15 -> 14, `TreeRigidbodyCount` 16 -> 15,
+  **wood boxes 16 -> 16** (the bole's box is the second collider on the stump), fruits 20 -> 20,
+  leaf plates 54 -> 54, `jointColumnCount` 15 -> 14, `joints.csv` 151 -> 141 columns (1600 rows).
+- **Labels**: pre `apple_t3pre_hold/_wind012/_wind036/_windoff/_windoff_b` (NO `-visual`); post
+  `apple_t3post_*` (same five) + the oak control `tree_t3post_hold/_wind012` + the picture
+  `apple_t3post_photo_windoff` (`-visual`, the picture label only). Another lane rebuilt the player
+  in the middle of the pre-set (the `windoff` run died on the swap and was re-run on the new player,
+  `_windoff_b`), but every pre label is bit-identical to the canon (next bullet), so the set is one
+  set. POST player fp `6ec67c83…` (buildGuid `aad87f54…`, built `21:53:26Z`), and **every quoted run
+  carries `sourceFingerprint == Build/Headless/build-manifest.json`**.
+- **The pre set is the real "before"**: `apple_t3pre_hold` == `apple_t1sw_hold`,
+  `_wind012` == `apple_t1sw_wind012`, `_windoff` == `apple_t1c2_windoff` — run block AND build block,
+  0 moved / 0 lost / 0 added, and 0 of 1600 `joints.csv` rows on the wind-off pair.
+- **Accepted rows (apple)**: `maxTrunkLeanDeg` **0** at wind 0.12 AND 0.36 (was 1.166936 / 1.166476 —
+  the bole is provably static); `hingePinnedFraction` **0** with `hingePinnedJointCount` 0 and
+  `maxHingeOverrunDeg` **0** (was 0.06666667 / 2 / 2.066446 — J08 left its soft stop, so the T4
+  reading the brief listed is now moot); hold `crownDrop` **0** (was 0.00667548 — the 2 mm target is
+  MET); `holdResidualNm` 0.00015342 (was 18.8835); `maxAbsAppliedTorqueNm` 0.00015604 (was 20.36688);
+  `maxAbsSegmentWorldDevDeg` 0.00010777 (was 4.906799); `maxAbsJointAngle` 0.00013638 (was 5.674024).
+  Wind 0.12: `maxAbsJointAngle` 0.6035438 (was 7.066446), `maxAbsSegmentWorldDevDeg` 0.8340149 (was
+  6.424713), `maxAbsAppliedTorqueNm` 1.755638 (was 20.55546), `crownDrop` 0.00217915 (was 0.0035212),
+  `crownComDxM` 0.00721205 (was 0.03471757), `springSatFraction` 0, `baseSlideM` 0. 0.36:
+  `maxAbsJointAngle` 1.812001 (was 8.651575), `residualTipDxM` 0.02728969 (was 0.1321938).
+- **The plan's T3 rows**: **RETURN TEST PASSES** — wind off at T/2 = 4 s leaves `residualTipDxM`
+  **0.00932419 m** (limit 0.02H = 0.05492) and `residualAbsJointAngleDeg` **0.2963557** (limit 3),
+  was 0.1035979 m / 5.693279 deg; `windOnMaxAbsJointAngle` 6.335289 -> 0.6035438, so the release is a
+  decay toward rest, not an overshoot past a stop. `maxTrunkLeanDeg` and `hingePinnedFraction` both
+  hit their targets (above). **Still open**: the settled `swayAmpM` 0.02079147 m at 0.12 (0.0075H) and
+  0.06270987 m at 0.36 (0.0228H) — BELOW the [0.05H, 0.15H] band (H = 2.762232 m, band
+  [0.13739, 0.41217]); the fold removed the bole's own whip, so the crown's own sway is what is left —
+  T4/T5 sizing, the same reading the oak produced. The pre-fold whole-run `swayAmpM` 0.1465 m was the
+  bole's fold to its stop, not the crown.
+- **The oak did not move**: `tree_t3post_hold/_wind012` vs the accepted `tree_t3oak_hold/_wind012`
+  — run block AND build block BIT-IDENTICAL, 0 of 1600 `joints.csv` rows, rig `dcc15b908146504e`
+  intact. (`tree_t1oak_*` is the PRE-fold oak and is expected to move; the control is "no accepted oak
+  row moved", and it holds to the digit.) The oak's own T3 edit in `PlantTree.cs` (68+/11-) is
+  untouched.
+- **Not touched**: `PlantTree.cs`, `PlantTrialRecorder.cs`, `TreeJointTrace.cs`, `HeadlessTrial.cs`,
+  `AppleTree.cs`, every recipe value, the human / birds / dog / yard, `BalanceController*`, `Dog*.cs`.
+  No commit.
+- Report `Trials/Runs/apple-t3-report.md`; verifier output `Trials/Runs/apple-t3-accept-output.txt`;
+  helpers `_t3pre-runs.sh`, `_t3pre-build.sh`, `_t3post-runs.sh`, `_t3post-photo.sh`,
+  `_t3-apple-accept.py`, `_t3-counters.py`. Picture `Trials/Runs/apple_t3post_photo_windoff.mp4`
+  (41 frames, 5 fps, 1080p) + `apple_t3post_photo_windoff_photo.png` — one whole apple tree, nothing
+  else in frame.
+- **Next: T4.** Not started here.
+
+## The owner's landing sheet — the trigger ring and the bending branch (25.09, cycle LND1)
+
+Brief: STATUS 25.09 (Hermes dispatcher). Owner's sheet "Упрощенный образец дерева"
+(`F:/hermes-data/tree-triggers-tz-20260925.jpg`, manager transcription
+`F:/hermes-data/manager/inbox/tree-trigger-landing.md`, accepted 25.09 ~01:1x with "прими в
+работу"): the trigger points sit at the branch FORKS, on the branch SEGMENTS and ONE on the
+trunk's TOP; "Она не имеет boxcollider"; "Масса птиц передается веткам, и ветки прогибаются".
+**TREE SIDE ONLY** — the bird side (the approach → the perch → the takeoff) is the bird lane's,
+and the bird files stayed read-only here.
+
+- **The ring** (`PlantTree.BuildLandingRing` `:12953`, opt-in `-treeTriggers`, cap 16): 16 marks
+  — 1 at the trunk's TOP (the order-0 tip), 6 at the branch FORKS (the base of every dynamic
+  segment; the two order-1 forks share the trunk's tip, so they ARE the top mark, dedupe 5 mm),
+  9 on the branch SEGMENT spans (deep twig first). Each mark is a `CircleCollider2D` with
+  `isTrigger` radius 0.05 — **no box collider** (the sheet's rule read literally) — on no body,
+  Ground layer like the sit pads, and a child of the wood it presses on, so a perched bird rides
+  the bend for free. Invisible in game. Handshake: `GetLandingSlots()` / `GetLandingMarkers()` /
+  `GetLandingKind(i)` + `<label>_landing.csv` (16 rows: index, kind, x, y, r).
+- **The ring adds no energy** (measured, one player): `tree_lnd1_control` → `tree_lnd1_ring` —
+  run block 53 shared keys **0 moved**, build block moves exactly the four ring counts
+  (0 → 16/1/6/9), and `joints.csv` is **byte-identical** (1601 rows, no first-diff row). Today's
+  player also reproduces the ACCEPTED oak canon `tree_t3oak_hold` (38 run / 98 build shared keys,
+  0 moved, CSV identical), so the sheet's rows are the only additions: 15 run keys + 10 build keys.
+- **The bend** reuses the injected perch load, aimed at a ring slot:
+  `-treeLoadOnTrigger -treeTriggerSlot N -treePerchLoad kg [-treePerchLoadUntil s]`;
+  `ApplyPerchLoad` `:2444` takes its source list from the flag, so the pad path stays the default
+  and every older run keeps its trajectory. `landingLoadDropM` = the loaded MARK's own drop below
+  the pose read at the first sample (recorder `SampleLandingLoad` `:245`, Transform primitive).
+  Measured with **one bird's mass (0.5 kg)**: slot 7 (span of an order-3 twig) **53.19 mm** drop,
+  `maxAbsJointAngle` 7.34 deg, `crownDrop` 50.58 mm, and the branch returns to **3.43 mm** after
+  the load leaves at 4 s (held: 132.61 mm); slot 1 (a fork of an order-1 limb) 2.44 mm / return
+  0.82 mm; 2 kg at slot 1 (declared) 24.29 mm; **slot 0 (the trunk's top) 0** — the trunk is
+  solid, measured, `crownDrop` 0. Trace, slot 7: 1.73 → 7.06 (t 1.0) → 7.34 peak → 4.88 settled
+  → release at 4 s → 0.59 (7.5) → **0.136 deg at 8.0**. On a load run read `swayFixedTipAmpM`
+  (0.197 m) beside `swayAmpM` (0.691 m — the known re-picked-tip artifact, the highest segment
+  switches side as the crown bends).
+- **The probe** (`Assets/TreeLandingProbe.cs`, `-treeProbe`): the bird's own body box
+  (0.14 × 0.06 m, `Bird.bodySize`) on the bird's contact layer, a 14.38077 m weave through the
+  crown visiting every ring point, 1604 steps. It takes the preparation a bird takes — every
+  non-trigger tree collider `IgnoreCollision`d — and READS IT BACK with
+  `Physics2D.GetIgnoreCollision`: `tree_lnd1_probe` **solid contacts 0** (frames 0, no collider
+  named), **trigger hits 16/16** (1504 overlap frames), guarded solid 16, **unguarded 0**. It is
+  not a bird and does not call `Bird.GhostTreeWood` (that entry point needs `Bird[]`), so the
+  unguarded count is the guardian that catches a solid collider the bird layer misses. It spawns
+  ON the path's first waypoint — born at the tree's base it touched the ground for 4 frames and
+  reported a contact that said nothing about the tree.
+- Labels `tree_lnd1_*` (control / ring / bird / birdoff / twig / twighold / load2 / top / probe),
+  player `83869f6a…` built 02:59, rig `dcc15b908146504e`, 14 joints, 14 bodies. Pictures
+  `tree_lnd1_twighold.mp4` (load ON, held) + `tree_lnd1_twig.mp4` (SAME trigger, released at
+  4 s: bend + rebound) + stills + `tree_lnd1_bend-beforeafter.png` (moved pixels: 0 between two
+  rest frames, 11988 rest → load, 282 after the release — the bend reads on the left branch).
+  Report `Trials/Runs/tree-landing-ring-report.md`; helpers `_lnd1-runs-a/b/c.sh`,
+  `_lnd1-films.sh`, `_lnd1-accept.py`.
+- **Not touched**: the birds (`Bird*.cs`, `Crow.cs`, `Art/Bird/Rect.cs` — read only; the probe
+  carries `Bird.bodySize`'s VALUE as a constant), `BirdPerch.cs`, the human, the dog, the yard /
+  level, `BalanceController*`, `Dog*.cs`, `TrialRecorder.cs`, `TreeBase.cs` / `AppleTree.cs` /
+  `AppleTrialRecorder.cs`, `TreeJointTrace.cs`, every recipe value, the art. No commit.
+- **Lessons**: `plant-csc-check.sh` pipes through `head -40` and HIDES `error CS` lines — grep
+  the full output (`dotnet csc @plant-csc.rsp`) before spending a build; `Object.GetInstanceID()`
+  is obsolete-AS-ERROR in 6000.5 (`GetEntityId` replaces it) — use a `List<Collider2D>` instead.
+
+## The open top edge — the span rule and the fork rule (26.09, LND2 + LND3)
+
+LND2 (report `Trials/Runs/tree-open-top-edge-report.md`, uncommitted): the span marks slide to
+the limb's own open top edge — `PlantTree.BestLandingSpanPoint` walks outward from the mid
+(t 0.5 -> 0.95 in 0.05 steps) and takes the first point whose claw band reads `LandingSkyMinM`
+0.12 of open air; a limb with no open point keeps the most open point found. The read: a
+mark's seat plane is the top face of the piece it presses on (`OwnWoodFaceY`), the window is
+read at the bird's own three claw columns (`LandingSkyBand` 0.03) via `LandingSkyAt`, and a
+mark's sky is the smallest of the three. Six of the nine spans read 0.12 (slots 7/9/11/12/13/14);
+the read rides in the run rows (`landingSkyOpenCount` / `landingSkyBestM` / `landingSkyBestSlot`)
+and `<label>_sky.csv` / `_wood.csv`.
+
+LND3 (report `Trials/Runs/tree-fork-rule-report.md`, uncommitted): THE FORK RULE —
+`PlantTree.BestLandingForkPoint` (:13327) walks INWARD from the parent's tip (t 1.00 -> 0.55 in
+the same 0.05 steps) and takes the first open point; a parent with no open point keeps the tip
+(a fork is not traded for a merely less closed point). The walk runs on a DYNAMIC parent only
+(`PlantTree.cs:13028`): the static folded trunk's order-1 forks stay on its tip and dedupe with
+the trunk-top mark — none on the trunk's body. MEASURED price: the fork's own crotch cannot be
+opened (a child or a neighbour closes the band at 0.0077-0.0177 above the seat plane at the six
+tips — the fork's dose and its closed window are ONE fact, the crotch's rise); five of the six
+parents offer no open point at all; the one move is slot 5 (fork, Wood_2_9) to t 0.80 —
+(+0.3628675, -0.1055751), sky 0.12/0.12/0.12, `landingSkyOpenCount` 6 -> 7, `landingSkyBestSlot`
+7 -> 5. The control rows are byte-identical (0 moved, `_joints.csv` md5 identical); the loaded
+mark (0.5 kg) bends 7.97 mm, peak 21.59 mm, rebound 0.52 mm; the probe 16/16 triggers, 0 solid
+contacts. The LEAF DOOR is a crown-recipe question, not a ring one: the leaf plates sit on the
+twigs' distal halves (clusters at along 0.42-0.88), the same region every open top edge needs,
+and five of the six open span marks stay leaf-refused by the bird's own gate.
+

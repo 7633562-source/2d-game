@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "f23jzSqiv4Y=",
+  "success": true,
+  "projectFilePath": "e:\\Games\\2D Game\\My project\\Tools\\SplitSheet\\SplitSheet.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Admin\\AppData\\Local\\Temp\\cursor-sandbox-cache\\e747500affc7b19a3b8747e9f57bda4a\\nuget\\microsoft.netcore.app.ref\\8.0.30\\microsoft.netcore.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\Admin\\AppData\\Local\\Temp\\cursor-sandbox-cache\\e747500affc7b19a3b8747e9f57bda4a\\nuget\\microsoft.windowsdesktop.app.ref\\8.0.30\\microsoft.windowsdesktop.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\Admin\\AppData\\Local\\Temp\\cursor-sandbox-cache\\e747500affc7b19a3b8747e9f57bda4a\\nuget\\microsoft.aspnetcore.app.ref\\8.0.30\\microsoft.aspnetcore.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\Admin\\AppData\\Local\\Temp\\cursor-sandbox-cache\\e747500affc7b19a3b8747e9f57bda4a\\nuget\\microsoft.netcore.app.host.win-x64\\8.0.30\\microsoft.netcore.app.host.win-x64.8.0.30.nupkg.sha512"
+  ],
+  "logs": []
+}

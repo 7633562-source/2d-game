@@ -1,0 +1,183 @@
+---
+description: Required protocol for checking balance changes on the headless stand
+alwaysApply: true
+---
+
+# Do not ship a balance change without a run
+
+Reasoning about signs and coefficients regularly looks coherent and
+is wrong. The only proof is numbers from the stand.
+
+```powershell
+# from the project root; close the Unity editor only for -Rebuild
+powershell -Command ".\Tools\run-trial.ps1 -Rebuild -Duration 30 -Label check"
+powershell -Command ".\Tools\run-trial.ps1 -Duration 20 -Label push_f -Extra @('-pushImpulse','18','-pushTime','5')"
+powershell -Command ".\Tools\run-trial.ps1 -Duration 20 -Label oneg_l -Extra @('-standLeg','left','-standLegTime','5','-standLegHold','20')"
+```
+
+`-standLeg` — string `left`/`right`/`0`, not a number with a comma. `left` = support on the left (swing on the right). `-swingHip` / `-swingKnee` — swing flexion (hip negative, knee positive).
+
+The project root is derived from the location of `Tools/run-trial.ps1`. Unity,
+the build folder, and the summaries folder are set by `-UnityPath` / `-BuildFolder` /
+`-TrialFolder` or `UNITY_EDITOR`, `TRIAL_BUILD_FOLDER`, `TRIAL_FOLDER`.
+By default the build is `Build/Headless`, summaries are `Trials/Runs/<label>.json`
+and the matching `.csv`. The script always passes `-fixedDelta 0.005`, unless
+`Extra` sets its own step.
+
+When changing only coefficients, do not rebuild the player: they
+are overridden by arguments. If sources or the project's physics settings
+do not match `build-manifest.json` next to the player, a run
+without `-Rebuild` is refused. The summary writes the fingerprint from the build
+manifest, not a fresh hash of the sources.
+
+Script `Duration` defaults to **10 s**. Run a quiet stance for 30 s.
+
+# Two baselines — do not mix them up
+
+Acceptance of current changes is **`Trials/Baselines/stable-pd/`** (runs `s_on`,
+`son_squat`, `son_pf*`, `son_pb*`) and the table in `current-front.mdc`.
+The folder `Trials/Baselines/current/` is named that way historically and contains
+**outdated** `curr_*` with the ostrich knee; do not read the name as “current”.
+Old `damp_*` without provenance — `Trials/Baselines/legacy-no-provenance/`.
+
+`buildManifestPath` and `commandArgs` may contain absolute paths:
+they are not part of the fingerprint and will differ after the project is moved.
+
+The table below is the **historical whole-torso baseline** (before the lumbar split).
+Push thresholds from there must be restored, but do not compare stance numbers to it.
+
+| Check | Historical whole torso |
+|---|---|
+| Quiet stance 30 s | does not fall, `bothFeetGroundedFraction` = 1 |
+| Maximum torso tilt | about 6.36° (startup transient) |
+| CoM offset RMS | about 0.0061 |
+| Muscle saturation | 0 |
+| Forward push | holds 22 N·s |
+| Backward push | holds 26 N·s, falls at 28 |
+
+# What to put in the report
+
+`fell`, `survivedSeconds`, `maxAbsTorsoTilt`, `maxAbsPelvisTilt`,
+`maxAbsLumbarAngle`, `pelvisDrop`, `rmsComOffset`,
+`muscleSaturationFraction`. For stability changes — also push thresholds in
+both directions.
+
+`fell` by itself guarantees nothing: it only counts CoM offset from
+the midpoint of the feet and does not see sinking. In run `pelv_p3` it has `fell: false` and
+a full 30 seconds, while `pelvisDrop` there is 0.8385 — the human folded to the ground, but
+CoM stayed over the feet. In quiet stance `pelvisDrop` holds 0.0017, in
+a squat `crouch 1` — 0.0685. Anything noticeably larger without a requested
+squat is a fall, however the flag looks.
+
+# Metric definitions
+
+- `fell` — `true` if the balance automaton became
+  `Falling` on at least one step (`|CoM offset| > fallCoMOffset`, default 0.30 m).
+- `survivedSeconds` — time of the first entry into `Falling`, otherwise the actual
+  simulated time (slightly more than the requested `Duration` because of the step).
+- `muscleSaturationFraction` — fraction of steps where the maximum activation
+  of **hips and knees only** ≥ 0.999. Ankle, lumbar, neck, and arms
+  are **not included** in saturation.
+- `bothFeetGroundedFraction` — fraction of steps where both feet are on the ground.
+- `swingFootGroundedFraction` / `stanceFootGroundedFraction` — in the
+  `-standLeg` window (from `standLegTime` to release): fraction of steps where swing
+  or stance touches the ground. Without a one-leg probe both are zeros.
+- `recoverySeconds` — after a push: `lastUnsettledTime − pushTime`, where
+  “not settled” means `|CoM offset| > 0.01` m. If there was no push or
+  the offset never left 1 cm — 0. This is the duration of the last
+  excursion, not “time to first settling”.
+- Push: impulse on `Torso` along +X. Plus — forward, minus — backward.
+  Default time is 5 s (`-pushTime`).
+
+# Play Mode and trial are different modes
+
+With `humanCount = 1` `GameProcess` sets `frictionMultiplier = 0.75`
+(middle of the 0.5…1.0 range). The stand by default gives `-friction 1`.
+Do not compare Play Mode numbers to the baseline. `GameProcess` was not
+touched in this task.
+
+# Experiment layer
+
+`HeadlessTrial`, `TrialRecorder`, `HeadlessBuild` plus `GlobalHumanLogger`.
+Sensors still only read; torques are created by `Muscle` and `JointFriction`.
+
+# A comma in an argument silently cancels the change
+
+`GetFloatArg` parses numbers in invariant culture. On a Russian locale
+PowerShell formats `0.0154` as `0,0154`, parsing fails, and the stand
+**silently takes the default**. The run finishes successfully and looks
+valid, only the human in it is not the one you specified. That is how
+three runs in the `visc_*` series were already lost.
+
+Pass a number in `-Extra` as a string with a dot and do not build it through
+interpolation from a `double`. Check not the intent, but the fact: the value must
+match the `applied` block of the summary. That is exactly why it is written.
+
+The stand does not yet fail on an unparsed argument, it only writes a warning to the log,
+which nobody reads in batchmode. This is a defect of the experiment layer: parsing
+must refuse as strictly as the provenance check.
+
+# A repeat with the same label checks nothing
+
+**Two feet, symmetric stance** — bitwise: `det_reg_a` / `det_reg_b` CSV
+matched by hash on a build with `ConfigureDeterministicPhysics`.
+
+**One foot** — the outcome is stable (`fell`, `pelvisDrop`, `stanceFoot`), but the CSV and
+part of the summary diverge: first mismatch at ~5.06 s (`standLeg` turns on),
+then the trajectory drifts. `swingFoot` in the `det_r*` series gives a band of ~0.09…0.18,
+not a single number. A repeat for the one-leg probe is a check of **acceptance criteria**,
+not bitwise CSV.
+
+Before the 28.08 fix, one exe on right stance gave a **binary** flip: fell at 8 s
+or 20 s on the same args (`oneg_r_a/b/c`). Root cause — PhysX 2D contact order
+without `useConsistencySorting` and without a fixed FixedUpdate order.
+Fix: `HeadlessTrial.ConfigureDeterministicPhysics()` (before and after scene
+assembly), `Physics2DSettings.useConsistencySorting`, `[DefaultExecutionOrder]`
+sensor −100 / control 0 / muscles +50.
+
+For **two feet**, two runs with the same arguments give bitwise-equal
+summaries. The push threshold is an exact number, not a statistic.
+
+Margin of safety is checked by shifting a parameter, not by repeating. The cheapest
+and meanest is `-activationSpeed`: at 40 and 80 instead of 20 the lumbar controller
+broke quiet stance, which a repeat would never have shown.
+
+The former note “24 N·s on the edge: one run held, the repeat fell” was
+a consequence of different builds or different arguments, not physics scatter.
+
+# Noise threshold: while the torso jitters, tenths of a degree mean nothing
+
+Determinism holds only for the same code. An algebraically
+neutral rewrite of a formula changes the order of floating-point operations,
+and on a limit cycle that difference grows into a measurable one: replacing
+`DeltaAngle(tilt, target)` with `tilt - target` shifted torso tilt
+from 3.07° to 3.48° at the same RMS 0.0060.
+
+Hence two conclusions. A difference of a few tenths of a degree cannot be taken as
+the result of a change — that is noise. And one must look at a quantity that changes
+by a factor: `rmsTorsoAngVel` in the same sweep went 55 → 74 → 124 → 164, that is
+the signal.
+
+Do not replace `DeltaAngle` with subtraction: on a fall the tilt goes past ±90°,
+and the angle wrap is needed in substance.
+
+# A push threshold is comparable only inside one body
+
+The impulse is applied to `Torso`, so the threshold depends on the mass of that
+segment. When the torso went from a rigid 30.4 kg to a compliant 22.6 kg on the lumbar
+joint, the same 22 N·s started giving the chest more velocity and going into its
+rotation — the test hardened by itself, without the controller getting worse.
+
+When changing masses or torso connectivity, do not compare thresholds directly to the previous
+baseline: first say what changed at the point of application.
+
+# Body geometry pulls spawn height with it
+
+Feet must touch the ground at y = −2.0, otherwise the human starts in the air
+or in the ground. When changing segment sizes, recompute the spawn point in
+`GameProcess` and `HeadlessTrial`:
+
+`y0 = -2.0 + ((pelvisSize.y + torsoSize.y) / 2 + thighSize.y + shinSize.y + footSize.y)`
+
+Currently `(0.16 + 0.34) / 2 + 0.43 + 0.43 + 0.07 = 1.18`, that is
+`-2.0 + 1.18 = -0.82`.

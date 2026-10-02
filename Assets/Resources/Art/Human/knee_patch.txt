@@ -1,0 +1,18 @@
+# knee_patch - baked by Tools/art-h5-patch-bake.py (ART-H5 R2).
+# The joint frame J: origin = the knee hinge, x right, y up (root-rest axes).
+# The runtime: world = (1-w)*Mparent*(v+Qp) + w*Mchild*(v+Qc);
+# w = smoothstep across [z0_m..z1_m] of du = dot(v, up); v in J metres;
+# uv: u = (x - x0)/w, v = (y - y0)/h.
+scale=3000.0000
+x0=-0.074000
+y0=-0.107333
+w=0.149667
+h=0.138333
+upx=0.064202
+upy=0.997937
+z0_m=0.001364
+z1_m=-0.089328
+qpx=0.000000
+qpy=-0.215000
+qcx=0.000000
+qcy=0.215000

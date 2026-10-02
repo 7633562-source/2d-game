@@ -1,0 +1,1881 @@
+---
+description: Segmental dog — quadruped stance; sibling of Human, not a child
+alwaysApply: false
+---
+
+# Dog physics
+
+Fourth species. Sibling of `Human`, `Bird`, `PlantTree`. Do not derive
+`Dog` from `Human`. Reuse `HumanSegment`, `Muscle`, `JointFriction`.
+
+Play: scene `Dog`, `dogCount = 1`. All other scenes: `dogCount = 0`.
+Headless: `-dog 1` on flat ground. The human stand does not spawn dogs
+unless `-dog` is set.
+
+Signs review (no `Dog.cs` yet): `Trials/Runs/dog_physics_signs.md`.
+
+## Body
+
+Sagittal, faces +X. Chest cranial (+X), pelvis caudal (−X). Digitigrade
+paws (small foot, high ankle). No second toe segment.
+
+| Part | Segments |
+|---|---|
+| Trunk | `Chest` (vestibular), `Pelvis`, lumbar hinge |
+| Head | `Neck`, `Head` — cranial face of Chest, not stacked on the withers |
+| Jaw | `Jaw` on the head (TMJ). Closed `0`, open plus. Trigger + `JawStrike` |
+| Tail | five vertebrae (`Tail`…`Tail5`), friction + rest spring; muscles only on the first |
+| Front L/R | upper, forearm, paw |
+| Rear L/R | thigh, shin, paw |
+
+Left/right pair: visual offset on `Visual` only. Do not put
+`hipHalfSpacing` / shoulder spacing into X anchors (that is a lunge).
+Front vs rear **are** separated in X — that is body length, not a lunge.
+Play gizmos: Unity's green `BoxCollider2D` box is on the body, so a
+pair looks like one column. The far sprite is not missing a collider —
+`HumanSegment.OnDrawGizmos` draws a cyan wire on `Visual` only. Do not
+move the body to match that wire.
+
+Mass about **25 kg**. Torque ceilings from geometry, not copied 70 kg
+human numbers. `Muscle.direction`: flexor `+1`, extensor `−1`. Same
+`ApplySignal` as the human: positive signal = increase `jointAngle` =
+extensor.
+
+## Sign convention (human, do not fork)
+
+`jointAngle` = connected-body rotation minus own. The joint lives on
+the child. Positive `jointAngle` rotates the child clockwise vs the
+parent (distal end toward −X when facing +X).
+
+| Joint | Flexion / role | Limit | Extensor does |
+|---|---|---|---|
+| Lumbar (on `Chest`) | free coupler | `−20…+20` | increases `jointAngle` |
+| Neck, head | world pitch | `−30…+30` each | same |
+| Jaw | open is plus (teeth down) | `0…+40` | increases `jointAngle` (opens) |
+| Tail (each vertebra) | rest spring | `−40…+40` | n/a on distal; first may hold pose 0 |
+| Rear hip | stance **minus** (thigh cranial; shin fold puts paw under) | `−90…+90` | increases `jointAngle` (stifle more caudal) |
+| Rear knee | caudal fold, **plus** | `0…+120` | increases `jointAngle` (opens the fold) |
+| Rear paw | load-bearing | `−45…+45` | CoM only, not a pose |
+| Front shoulder | stance **minus** (upper cranial) | `−90…+90` | increases `jointAngle` (elbow caudal) |
+| Front elbow | caudal fold, **plus** (knee analog) | `0…+120` | increases `jointAngle` |
+| Front paw (carpus) | load-bearing, not a human wrist | `−45…+45` | CoM only, not a pose |
+
+Do **not** copy `CreateArm` (`elbow −140…0`). Knee and front elbow
+share the **plus** range. Hip and shoulder share `±90` limits. Quiet
+stance is an inverted-V: both proximal joints **minus**, both distal
+**plus** (hip −12 / shoulder −20 / knee 24 / elbow 24). Straight-leg
+hip minus was the X (c39 leftover −25 / +25 / 0 / 0). Straight-leg
+hip plus was the A-rake sploot (+25 / −25 / 0 / 0). Distal fold is
+the new mechanism — not a return to 0/0.
+
+## Spawn (paws on y = −2.0)
+
+Do not use the human stacked-trunk formula
+`(pelvis+torso)/2 + thigh + shin + foot`. The dog trunk is horizontal.
+Front and rear soles must match:
+
+```
+H_front = (chestLocalY + shoulderInChest.y) + upper.y + forearm.y + paw.y
+H_rear  = (pelvisLocalY + hipInPelvis.y) + thigh.y + shin.y + paw.y
+require H_front == H_rear
+y0 = -2.0 + H_front
+```
+
+If centers sit at the same Y and limbs hang straight down,
+`shoulderInChest.y = −chest.y/2` and `hipInPelvis.y = −pelvis.y/2`.
+A 1 cm front/rear mismatch puts two paws in the air or in the ground.
+Default build pose is the standing inverted-V: `spawnHipAngle` **−12**,
+`spawnShoulderAngle` **−20**, `spawnKneeAngle` **24**,
+`spawnElbowAngle` **24**, matched by `hipBaseAngle` /
+`shoulderBaseAngle` / `kneeBaseAngle` / `elbowBaseAngle`.
+`LimbWorldAngles` is the joint→world identity
+(`thighW = −hip`, `shinW = thighW − knee`,
+`upperW = chestPitch − shoulder`, `lowerW = upperW − elbow`).
+Hip −12 / knee 24 → thigh +12° / shin −12° (paw under the hip).
+Shoulder −20 / chest −8 / elbow 24 → upper +12° / forearm −12°.
+`StandingRootY` uses the same constants. Columns 0/0 lost the plant
+twice (c41, c52): rear unloads ~0.15 s, lumbar slams +20. The
+leftover −25 / +25 / 0 / 0 planted as a sit (`trunkDrop` 0.193)
+with paws under the belly. The A-rake +25 / −25 / 0 / 0 splayed
+straight legs (sploot). Do not return to 0/0 without a new mechanism.
+
+## Control
+
+`DogStanceController` only. Not `BalanceController`.
+
+- Four paws: CoM vs support of **grounded** paws. Same command on all
+  four: CoM ahead (+X) → positive signal → extensor. No angular PD.
+  No muscle damper on paw angle. Viscosity is `JointFriction` only.
+  Do not invert the front pair. Quiet stance deadzones: `pawComDeadzone`
+  **0.02 m** / `pawComVelDeadzone` **0.08 m/s** (soft; 0 = old bang-bang
+  that saturated at 0.83 cm), `heightDeadzone` **0.01 m**,
+  `poseHoldDeadzoneDeg` **1** on hip/shoulder/knee/elbow only.
+  `GetContacts` plus `IsTouching`; `pawGroundHoldSeconds` **0.03** only
+  while not Walk/Leap so a missed manifold does not unload a sole.
+- Rear hips / front shoulders: **joint pose** −12 / −20, not world
+  pitch (c3 dropped the world loops; c8/c16 world hip lost plant).
+  Distal joints hold **24 / 24** (inverted-V, paws under the trunk).
+  `startupHipP` **8** for `startupHipSeconds` **0.25** holds the pose
+  through the slam (DOG-2 c59). Full-time hipP 4 lost plant (c20).
+  `heightP` 60: both knee and elbow **minus** lift — opening the 24°
+  V lengthens the drop. Plus knee on this pose is a crouch / sploot.
+  A-rake plus-knee from a −25° thigh was the previous height sign
+  and sank after the hip flip. Chest / neck / head spawn: chest at
+  `spawnChestPitch` **−8** (lumbar world target), neck/head/jaw at
+  world **0** (SPD target). Building the neck at chest pitch was a
+  second slam into the chest. Trot does not start until all four
+  paws plant.
+- Lumbar / chest: chest **world** pitch. Formula like human lumbar:
+  `(-P)*error − (-D)*speed`. P and D stay positive. Do not PD the
+  lumbar to the pelvis joint angle. Do not mix world error with
+  `joint.jointSpeed`. Small plus target raises the cranial end; a
+  minus target is a nose-down hold — change the target, not P.
+- Front shoulders may share the chest world target **only** with the
+  hip sign (`+P*error − D*speed`). Joint on the upper, chest is
+  `connectedBody`. Same target + opposite formulas cooperate. The
+  same formula on both loops fights.
+- Rear knees / front elbows: joint pose, plus flexion.
+- Neck / head: Stable PD to world (same formula as
+  `ControlSegmentToWorldUpright`). Ordinary PD will chatter.
+- Jaw: joint pose, closed 0. `Bark()` opens briefly and `OrganismVoice.Cry(Call)`.
+  `Bite()` opens then slams shut and arms `JawStrike`. No `DogIntent`.
+  Hits only from the jaw trigger, same contract as the bird beak.
+- Leap attack: `LeapCrouch` → `LeapPush` → `LeapAir` → `LeapBite`.
+  Coil (knee/elbow plus, hip more minus, shoulder more plus), then
+  explode the fold while paws are planted, hold a stretch in the air,
+  bite once. `DogDrive` or CLI calls `LeapAttack`. Headless `-dogLeap 1`
+  `-dogLeapTime 2` `-dogPreyX 1.4`. Mark is `DogPrey` + `Damageable`.
+  No `AddForce` / `AddTorque` for the jump: launch is knee/elbow
+  extension plus `leapPawPlant` extensor on grounded paws. No paw
+  angle PD. `Sense` does not classify Falling from CoM while `IsLeap()`.
+- Walk: state `Walk`, clocked gait. `runSpeed` **0** is the old
+  diagonal trot (FR+RL vs FL+RR, dog_w10 leftover 0.286 km/h).
+  `runSpeed` **> 0** (default **1.4** m/s) is a sagittal **bound**
+  (both rears, then both fronts): L/R share X, so a diagonal is a
+  pitch couple (w11 dumped at extend 14). Cadence is `runStride /
+  runSpeed`. Flex / extend / plant lerp from the sit-trot values
+  toward `runHipFlex` / `runShoulderFlex` / `runHipExtend` /
+  `runShoulderExtend` / `runKneeFlex` / `runElbowFlex` / `runPawPlant`
+  at `runSpeedRef`. Chest world target is `walkChestTilt` minus
+  `runChestLean` × facing (nose into the run). Four independent
+  hip/shoulder/knee/elbow targets. Stance extends and
+  plants (`walkPawPlant` / `runPawPlant`, rear stronger than front). Swing flexes
+  then reaches, but a **grounded** swing keeps stance knee/elbow
+  (folding a loaded plus-fold dumps that corner). `walkChestTilt`
+  matches stance `chestTargetTilt` (−8) when `runSpeed` is 0; a jump to −4 pitched the
+  pelvis. Light CoM mix on stance paws only. `Sense` does not
+  `RelaxAll` from CoM during walk; fold only on real trunk drop /
+  pitch. No paw angle PD. No `AddForce`. Public API is `Walk()` /
+  `EndWalk()`. Quiet stand is `walkWanted` false and does not read
+  `runSpeed`.
+  `DogDrive` writes `Walk()` in `Update` (Forage / Pursue). Headless
+  `-dogWalk 1 -dogWalkTime 1` fires `Walk()`; `DogDrive` stays silent
+  unless `allowHeadless`. No keyboard.
+  Walk `SetFacing` hops the same near pair as sit then resumes
+  (`walkTurnAmp`) — Drive already writes wander / follow / hunt
+  about-face; Look scale plus `ResetWalkClock` still read as a
+  texture swap. Sit hop stays on sit glance. `Walk()` after a sit
+  flip takes the hop (wander `FaceToward` then `Walk` in the same
+  Update). Leap / Sleep skip. `walkTurnAmp` 0 = the old instant
+  flip; not a yaw force. Same SPD neck nod as sit, not a new
+  `neckP`. Trot bob mutes for the hop window.
+  Walk swing lifts the limb pictures on the same clock as DriveWalk
+  (bound when `runSpeed` > 0: both fronts then both rears; diagonal
+  FR+RL vs FL+RR when `runSpeed` is 0, `walkStrideAmp`) — leftover sit
+  keeps colliders planted, so the joint twitch still reads as a standing rake. Paw-only
+  floated a stamp on planted thighs; proximal tuck + mid fold ride the
+  same `WalkStrideHop`. Sit sniff shuffle stays sit-only. Walk hop
+  owns the about-face window. Leap / Sleep skip. `walkStrideAmp` 0 =
+  the old planted pictures; not a lift force. Same `walkPhase` clock,
+  not a new period.
+  Walk withers heaves Chest Visual on that same two-dip clock
+  (`walkBobAmp`, `WalkTrunkBob`) — leftover sit holds the trunk
+  collider, so swing columns still rode a statue chest. Forage
+  `idleWag` only (same gate as `walkHeadBob`); hunt stalk / CLI
+  `-dogWalk` stay still. Hop mutes. Leap / Sleep skip. `walkBobAmp`
+  0 = the old still withers; not a lift force. Sit / pant breath
+  own the sit path.
+  Walk rump heaves Pelvis Visual on that same two-dip clock
+  (`walkRumpAmp`, `WalkRumpBob`) — leftover sit holds the pelvis
+  collider, so rear swing still rode a statue rump after withers
+  heaved. In phase with withers (a trot, not a see-saw). Forage
+  `idleWag` only (same gate as `walkBobAmp`); hunt stalk / CLI
+  `-dogWalk` stay still. Hop mutes. Leap / Sleep skip. `walkRumpAmp`
+  0 = the old still rump; not a lift force. Sit pant after EndWalk is
+  `SitRump` on `idlePant` (`sitRumpAmp`).   Sit yawn is `SitYawnRump`
+  on `idleYawn` (`sitYawnRumpAmp`). Sit sniff is `SitSniffRump` on
+  `idleSniff` (`sitSniffRumpAmp`). Sit scratch is `SitScratchRump`
+  on `idleScratch` (`sitScratchRumpAmp`). Sit look is `SitLookRump`
+  on `idleLook` (`sitLookRumpAmp`). Hunt recover sit is
+  `SitHuntRump` on `idleHunt` (`sitHuntRumpAmp`). Night Sleep is
+  `SitSleepRump` on `idleSleep` (`sitSleepRumpAmp`). Quiet sit is
+  `SitQuietRump` (`sitQuietRumpAmp`) — leftover sit held statue
+  after BreathLift already heaved the withers; hitch with the
+  quiet 0.0018 chest (same 2.5 clock, in phase). `sitQuietRumpAmp`
+  0 = the old statue quiet sit rump; no `idleRump`, `Walk()`
+  would zero it. Quiet sit neck is `SitQuietHead`
+  (`sitQuietHeadAmp`) — leftover sit held world 0 after
+  BreathLift / SitQuietRump already hitched the trunk; hitch with
+  the quiet 0.0018 chest (same 2.5 clock, in phase, 1.2°, not
+  SitHead's 3° pant). `sitQuietHeadAmp` 0 = the old statue
+  world-0 quiet sit neck; no `idleHead`, `Walk()` would zero it.
+  Quiet sit ears is `SitQuietEar` (`sitQuietEarAmp`) — leftover
+  sit held rest fold 0.20 after BreathLift / SitQuietRump /
+  SitQuietHead already hitched the trunk and neck; hitch with
+  the quiet 0.0018 chest (same 2.5 clock, in phase, fold 0.20
+  ± 0.05, not a 6.5 Hz pant and not WalkEarFlop).
+  `sitQuietEarAmp` 0 = the old statue rest fold 0.20; no
+  `idleEar`, `Walk()` would zero it.
+  Quiet sit brows is `SitQuietBrow` (`sitQuietBrowAmp`) —
+  leftover sit held the rest stamp after BreathLift /
+  SitQuietRump / SitQuietHead / SitQuietEar already hitched
+  the trunk, neck, and ears; hitch with the quiet 0.0018
+  chest (same 2.5 clock, in phase, droop ± a small lift, not
+  a 6.5 Hz pant and not WalkBrow). `sitQuietBrowAmp` 0 = the
+  old rest quiet sit forehead; no `idleBrow`, `Walk()` would
+  zero it.
+  Quiet sit mouth is `SitQuietMouth` (`sitQuietMouthAmp`) —
+  leftover sit held the rest flews after BreathLift /
+  SitQuietRump / SitQuietHead / SitQuietEar / SitQuietBrow
+  already hitched the trunk, neck, ears, and forehead; hitch
+  with the quiet 0.0018 chest (same 2.5 clock, in phase, droop
+  ± a small lift, not a 6.5 Hz pant, not a hunt raise, and not
+  SitLookMouth / SitYawnMouth). `sitQuietMouthAmp` 0 = the
+  old rest quiet sit flews; no `idleMouth`, `Walk()` would
+  zero it.
+  Quiet sit whiskers is `SitQuietWhisker` (`sitQuietWhiskerAmp`) —
+  leftover sit held the rest stamps after BreathLift /
+  SitQuietRump / SitQuietHead / SitQuietEar / SitQuietBrow /
+  SitQuietMouth already hitched the trunk, neck, ears,
+  forehead, and flews; hitch with the quiet 0.0018 chest (same
+  2.5 clock, in phase, droop ± a small lift, not a 6.5 Hz pant,
+  not an 11 Hz sniff twitch, and not WalkWhisker).
+  `sitQuietWhiskerAmp` 0 = the old rest quiet sit stamps; no
+  `idleWhisker`, `Walk()` would zero it.
+  Quiet sit distal is `SitQuietDistalTail` (`sitQuietDistalTailAmp`) —
+  leftover sit held the rest-spring stick after IdleTailTarget
+  already wagged the first hinge at 8.5 Hz (`TreeSpring` restAngle
+  0, muscles only on the first hinge — by design) so the hold
+  still read as a stiff caudal rod on a sitting wag; picture limp
+  follows that same 8.5 Hz metronome (accumulating 6°…12°, plus,
+  in phase via `Time.fixedTime`, not Sleep's 1.6 hitch, not a
+  6.5 Hz pant, and not a new distal muscle); `sitQuietDistalTailAmp`
+  0 = the old rest-spring quiet sit stick; no `idleTail`, `Walk()`
+  would zero it.   Distal Tail2–Tail5 perk on hunt recover sit is
+  `SitHuntDistalTail` (`sitHuntDistalTailAmp`) — leftover sit
+  held the rest-spring stick after `IdleTailTarget` already
+  raised the first hinge on `idleHunt` (`TreeSpring` restAngle
+  0, muscles only on the first hinge — by design) so the
+  0.70 s coil still read as a stiff caudal rod on a live snarl;
+  picture perk follows that same held `idleHunt` raise
+  (accumulating 6°…12°, minus, PoseVisual plus droops so the
+  env is negated vs `IdleTailTarget`, no extra clock, not
+  Sleep's 1.6 hitch, not quiet sit's 8.5 Hz, not Walk's
+  two-dip, not leap's IsLeap 0.85, and not a new distal
+  muscle); `sitHuntDistalTailAmp` 0 = the old rest-spring
+  recover sit stick; no `idleTail`, `Walk()` would zero it.
+  Distal Tail2–Tail5 perk on hunt stalk Walk is
+  `WalkHuntDistalTail` (`walkHuntDistalTailAmp`) — leftover
+  walk held the rest-spring stick after `IdleTailTarget`
+  already raised the first hinge on `idleHunt` so the chase
+  still read as a stiff caudal rod on a live snarl; picture
+  perk follows that same held `idleHunt` raise (accumulating
+  6°…12°, minus, PoseVisual plus droops so the env is negated
+  vs `IdleTailTarget`, hop keeps the coil); CLI `-dogWalk`
+  leaves `idleHunt` 0; `walkHuntDistalTailAmp` 0 = the old
+  rest-spring stalk Walk stick; no `idleTail`, `Walk()` would
+  zero it. Distal Tail2–Tail5 perk on hunt leap is
+  `LeapHuntDistalTail` (`leapHuntDistalTailAmp`) — leftover leap
+  held the rest-spring stick after `LeapHuntTail` already raised
+  the first hinge (`TreeSpring` restAngle 0, muscles only on
+  the first hinge — by design) so the pounce still read as a
+  stiff caudal rod on a live snarl; picture perk follows that
+  same held 0.85 raise (accumulating 6°…12°, minus, PoseVisual
+  plus droops so the env is negated vs `LeapHuntTail`, no extra
+  clock, not Sleep's 1.6 hitch, not quiet sit's 8.5 Hz, not
+  Walk's two-dip, and not a new distal muscle); CLI `-dogLeap`
+  still perks from `IsLeap()`; `leapHuntDistalTailAmp` 0 = the
+  old rest-spring leap stick; no `idleTail`, `Walk()` /
+  `LeapAttack` would zero it.
+  Walk forage wags the first tail hinge on that same two-dip clock
+  (`walkTailAmp`, `WalkTail`) — leftover sit held `IdleTailTarget` at
+  8.5 Hz, so withers / rump / neck already planted on `walkPhase`
+  while the tail still sat-wagged. In phase with withers (a trot, not
+  a sit metronome). Same 16° spring as sit `idleWag`, not a new
+  `idleTail` (`Walk()` would zero it). Forage `idleWag` only; hunt
+  stalk stays the stiff raise, CLI `-dogWalk` stays still. Hop mutes
+  (plant, not 8.5 Hz). Leap / Sleep skip. `walkTailAmp` 0 = the old
+  sit-rate wag on the trot. Distal Tail2–Tail5 limp is
+  `WalkDistalTail` (`walkDistalTailAmp`) — leftover walk held the
+  rest-spring stick while the first hinge already clocked
+  (`WalkTail`; muscles stay on the first hinge) so the gait still
+  read as a stiff caudal rod on a bobbing trunk; picture limp
+  follows that same two-dip clock (accumulating 6°…12°, plus, in
+  phase via `walkPhase`, not Sleep's 1.6 hitch, not quiet sit's
+  8.5 Hz, and not a new distal muscle); `walkDistalTailAmp` 0 =
+  the old rest-spring forage Walk stick; no `idleTail`, `Walk()`
+  would zero it. Sit pant after EndWalk is `SitPantTail`
+  on `idlePant` (`sitPantTailAmp`). Distal Tail2–Tail5 limp is
+  `SitPantDistalTail` (`sitPantDistalTailAmp`) — leftover sit held
+  the rest-spring stick while the first hinge already drooped
+  (`SitPantTail`; muscles stay on the first hinge); picture limp
+  follows the hang 0.55 + 6.5 Hz pump; `sitPantDistalTailAmp` 0 =
+  the old rest-spring pant stick; no `idleTail`, `Walk()` would
+  zero it. Quiet sit distal owns `SitQuietDistalTail`.
+  Walk forage ears flop on that same two-dip clock (`walkEarAmp`,
+  `WalkEarFlop`) — generic `walkWanted` pin made follow look like
+  hunt. Hunt pin stays on `idleHunt`. Wander sniff keeps the
+  half-fold. Sit pant after EndWalk is `SitEar` on `idlePant`
+  (`sitEarAmp`). CLI `-dogWalk` / hop / Leap / Sleep skip (same
+  gate as `walkHeadBob`). `walkEarAmp` 0 = the old walk pin; not
+  a hinge.
+  Walk forage hangs the tongue and a DriveJaw crack on that same
+  two-dip clock (`walkPantAmp`, `WalkPant`) — closed follow looked
+  stiffer than the hunt snarl. Hunt crack stays on `idleHunt`.
+  Wander sniff stays closed (nose on dirt). Sit pant after EndWalk
+  is still `idlePant`. CLI `-dogWalk` / hop / Leap / Sleep skip
+  (same gate as `walkHeadBob`). `walkPantAmp` 0 = the old closed
+  forage walk; not a new `idlePant` (`Walk()` would zero it).
+  Walk forage fans a milder whisker twitch on that same two-dip
+  clock (`walkWhiskerAmp`, `WalkWhisker`) — rest stamps next to a
+  hanging tongue still read as a hold. Hunt pin stays on `idleHunt`.
+  Wander sniff keeps its own fan. Sit pant after EndWalk is
+  `SitWhisker` on `idlePant` (`sitWhiskerAmp`). Sit chew is
+  `SitChewWhisker` on `idleChew` (`sitChewWhiskerAmp`). CLI `-dogWalk` /
+  hop / Leap / Sleep skip (same gate as `walkHeadBob`).
+  `walkWhiskerAmp` 0 = the old rest forage walk; not a new
+  `idleWhisker` (`Walk()` would zero it).
+  Walk forage squints a thinner lid slit on that same two-dip
+  clock (`walkSquintAmp`, `WalkSquint`) — rest pupil next to a
+  hanging tongue still read as hunt-lock.   Hunt recover sit owns
+  `SitHuntSquint`. Hunt stalk Walk owns `WalkHuntSquint` on
+  `idleHunt` (`walkHuntLidAmp`) — leftover walk held the round
+  rest (`WalkSquint` skips `idleHunt`; `SitHuntSquint` skips
+  Walk) while the pupil already drops, so the chase still read
+  as a wide forage stare on a live snarl; held slit (still
+  coil, not a 6.5 Hz pant and not WalkSquint's two-dip pump);
+  recover sit owns `SitHuntSquint`; forage sit pant owns
+  `SitSquint`; alert stare is `idleLook`, not this; CLI
+  `-dogWalk` leaves `idleHunt` 0; hop keeps the coil; Leap
+  owns `LeapHuntSquint`; Sleep skip; `walkHuntLidAmp` 0 = the
+  old round stalk eye; no
+  `idleBlink` (`Walk()` would zero it). Hunt leap owns
+  `LeapHuntSquint` on `IsLeap` (`leapHuntLidAmp`) — leftover
+  leap held the round rest (`WalkHuntSquint` / `SitHuntSquint`
+  skip `IsLeap`; `LeapAttack` zeros `idleHunt`) while the brow
+  already furrows, so the pounce still read as a wide forage
+  stare on a live snarl; held slit (still coil, same 0.85 as
+  stalk, not a 6.5 Hz pant and not WalkSquint's two-dip pump);
+  recover sit owns `SitHuntSquint`; stalk Walk owns
+  `WalkHuntSquint`; forage sit pant owns `SitSquint`; alert
+  stare is `idleLook`, not this; CLI `-dogLeap` still slits
+  from `IsLeap()`; Sleep / yawn / blink still own the full
+  cover; pupil drop is `LeapHuntEye`; `leapHuntLidAmp`
+  0 = the old round leap eye; no `idleBlink` (`Walk()` /
+  `LeapAttack` would zero it). Hunt leap owns
+  `LeapHuntEye` on `IsLeap` (`leapHuntEyeAmp`) — leftover
+  leap held rest-Y (`WalkEye` / `SitEye` skip `IsLeap`;
+  `LeapAttack` zeros `idleHunt`) while the lid already slits
+  and the brow already furrows, so the pounce still read as a
+  forage stare through a live snarl slit; held drop (still
+  coil, same 0.85 as stalk, not a 6.5 Hz pant and not
+  WalkEye's two-dip pump); recover sit / stalk Walk keep
+  `idleHunt`; forage sit pant owns `SitEye`; alert stare is
+  `idleLook`, not this; CLI `-dogLeap` still drops from
+  `IsLeap()`; Sleep / yawn / blink still hide the dot;
+  `leapHuntEyeAmp` 0 = the old rest-Y leap stare; no
+  `idleEye` (`Walk()` / `LeapAttack` would zero it). Hunt leap
+  owns `LeapHuntNose` on `IsLeap` (`leapHuntNoseAmp`) —
+  leftover leap held the rest muzzle (`WalkNose` / `SitNose`
+  skip `IsLeap`; `LeapAttack` zeros `idleHunt`) while the pupil
+  already drops and the brow/lips already furrow, so the pounce
+  still read as a forage snout on a live snarl; held drop (still
+  coil, same 0.85 as stalk, not a 6.5 Hz pant and not
+  WalkNose's two-dip pump); recover sit / stalk Walk keep
+  `idleHunt`; forage sit pant owns `SitNose`; alert stare is
+  `idleLook`, not this; CLI `-dogLeap` still drops from
+  `IsLeap()`; Sleep owns `SitSleepNose` (sprite stays on; lids
+  own the eye); `leapHuntNoseAmp` 0 = the old rest leap muzzle; no
+  `idleNose` (`Walk()` / `LeapAttack` would zero it). Wander sniff keeps the
+  open track eye. Sleep / yawn / blink still own the full slit.
+  Sit pant after EndWalk is `SitSquint` on `idlePant`
+  (`sitSquintAmp`). CLI `-dogWalk` / hop / Leap / Sleep skip
+  the forage pump (same gate as `walkHeadBob`). `walkSquintAmp`
+  0 = the old rest-stare forage walk; not a new `idleBlink`
+  (`Walk()` would zero it). Pupil stays visible under the squint.
+  Walk forage drops the snout on that same two-dip clock
+  (`walkNoseAmp`, `WalkNose`) — rest muzzle next to a hanging
+  tongue still read as hunt-lock. Hunt drop stays on `idleHunt`.
+  Hunt leap owns `LeapHuntNose` on `IsLeap`
+  (`leapHuntNoseAmp`) — leftover leap held the rest muzzle
+  (`WalkNose` / `SitNose` skip `IsLeap`; `LeapAttack` zeros
+  `idleHunt`) while the pupil already drops and the brow/lips
+  already furrow; held drop, same 0.85 as stalk;
+  `leapHuntNoseAmp` 0 = the old rest leap muzzle; no
+  `idleNose` (`Walk()` / `LeapAttack` would zero it). Wander
+  sniff keeps its own dirt drop. Sit pant after EndWalk
+  is `SitNose` on `idlePant` (`sitNoseAmp`). Sit chew is
+  `SitChewNose` on `idleChew` (`sitChewNoseAmp`). Sit chew lip is
+  `SitChewMouth` on `idleChew` (`sitChewMouthAmp`). Night Sleep is
+  `SitSleepNose` on `idleSleep` (`sitSleepNoseAmp`). CLI `-dogWalk` /
+  hop skip (same gate as `walkHeadBob`). Sleep owns `SitSleepNose`.
+  `walkNoseAmp` 0 = the old rest forage walk; not a new
+  `idleNose` (`Walk()` would zero it).
+  Walk forage drops the pupil on that same two-dip clock
+  (`walkEyeAmp`, `WalkEye`) — rest stare next to a dropped snout
+  still read as hunt-lock through the squint. Hunt drop stays on
+  `idleHunt`. Hunt leap owns `LeapHuntEye` on `IsLeap`
+  (`leapHuntEyeAmp`) — leftover leap held rest-Y (`WalkEye` /
+  `SitEye` skip `IsLeap`; `LeapAttack` zeros `idleHunt`) while
+  the lid already slits and the brow already furrows; held
+  drop, same 0.85 as stalk; `leapHuntEyeAmp` 0 = the old
+  rest-Y leap stare; no `idleEye` (`Walk()` / `LeapAttack`
+  would zero it). Wander sniff keeps its own dirt drop. Look-up stays
+  `idleLook`. Sleep / yawn / blink still hide the dot. Sit pant
+  after EndWalk is `SitEye` on `idlePant` (`sitEyeAmp`). Sit chew
+  is `SitChewEye` on `idleChew` (`sitChewEyeAmp`). CLI
+  `-dogWalk` / hop / Sleep skip (same gate as
+  `walkHeadBob`). `walkEyeAmp` 0 = the old rest forage walk; not a
+  new `idleEye` (`Walk()` would zero it). Pupil stays visible under
+  the squint.
+  Walk forage creases the brow on that same two-dip clock
+  (`walkBrowAmp`, `WalkBrow`) — rest forehead next to a hanging
+  tongue still read as hunt-lock on the yellow box. Hunt furrow
+  stays on `idleHunt`. Wander sniff keeps its own drop. Look-up
+  stays `idleLook`. Sleep droops. Sit pant after EndWalk is
+  `SitBrow` on `idlePant` (`sitBrowAmp`). Sit chew is
+  `SitChewBrow` on `idleChew` (`sitChewBrowAmp`). Sit chew
+  whiskers are `SitChewWhisker` on `idleChew`
+  (`sitChewWhiskerAmp`). CLI `-dogWalk` / hop /
+  Leap / Sleep skip (same gate as `walkHeadBob`). `walkBrowAmp` 0
+  = the old rest forage walk; not a new `idleBrow` (`Walk()`
+  would zero it).
+  Walk forage puffs a pale breath on that same two-dip clock
+  (`walkPuffAmp`, `WalkPuff`) — hanging tongue with no air still
+  read as a silent stamp (Bark puff is `Call`). Needs `WalkPant`
+  so a closed mouth does not leak vapor. Hunt recover sit owns
+  `SitHuntPuff` on `idleHunt`. Hunt stalk Walk owns
+  `WalkHuntPuff` on `idleHunt` (`walkHuntPuffAmp`) — leftover
+  walk held silent (`WalkPuff` skips `idleHunt`; `SitHuntPuff`
+  skips Walk) while the lid already slits and the snarl already
+  cracks, so the chase still read as a silent crack on a live
+  snarl; held puff (still coil, not a 6.5 Hz pant and not
+  WalkPuff's two-dip pump); recover sit owns `SitHuntPuff`;
+  forage sit pant owns `SitPuff`; alert stare is `idleLook`,
+  not this; CLI `-dogWalk` leaves `idleHunt` 0; hop keeps the
+  coil; hunt leap owns `LeapHuntPuff`; Sleep skip; `walkHuntPuffAmp` 0
+  = the old silent stalk snarl; no `idlePuff` (`Walk()` would
+  zero it). Hunt leap owns
+  `LeapHuntPuff` on `IsLeap` (`leapHuntPuffAmp`) —
+  leftover leap held silent (`WalkHuntPuff` /
+  `SitHuntPuff` skip `IsLeap`; `LeapAttack` zeros
+  `idleHunt`; fangs own the teeth slot) while the lid
+  already slits, the pupil already drops, and the
+  brow/lips already furrow, so the pounce still read
+  as a silent crack on a live snarl; held puff (still
+  coil, same 0.85 as stalk, not a 6.5 Hz pant and not
+  WalkPuff's two-dip pump); recover sit owns
+  `SitHuntPuff`; stalk Walk owns `WalkHuntPuff`; forage
+  sit pant owns `SitPuff`; alert stare is `idleLook`,
+  not this; CLI `-dogLeap` still puffs from `IsLeap()`;
+  Sleep skip; tongue stays off (fangs); `leapHuntPuffAmp`
+  0 = the old silent leap snarl; no `idlePuff` (`Walk()`
+  / `LeapAttack` would zero it). Hunt leap owns
+  `LeapHuntBreath` on `IsLeap` (`leapHuntBreathAmp`) —
+  leftover leap held a statue chest (`BreathLift` /
+  `SitHuntBreath` skip `IsLeap`; `LeapAttack` zeros
+  `idleHunt`) while the lid already slits, the pupil
+  already drops, the snout already drops, and the puff
+  already pulses, so the pounce still read as a quiet-sit
+  0.0018 wobble on a live snarl; held hitch (still coil,
+  same 0.85 as stalk, not a 6.5 Hz pant and not the quiet
+  sin); recover sit owns `SitHuntBreath`; stalk Walk stays
+  still (`WalkTrunkBob` on `idleWag` only); forage sit
+  pant owns the `idlePant` chest; alert stare is
+  `idleLook`, not this; CLI `-dogLeap` still heaves from
+  `IsLeap()`; Sleep skip; `leapHuntBreathAmp` 0 = the old
+  statue leap chest; no `idleBreath` (`Walk()` /
+  `LeapAttack` would zero it). Hunt leap owns
+  `LeapHuntRump` on `IsLeap` (`leapHuntRumpAmp`) —
+  leftover leap held a statue rump (`ApplyRump` /
+  `SitHuntRump` skip `IsLeap`; `LeapAttack` zeros
+  `idleHunt`) while the chest already heaved, so the
+  pounce still read as a chest-only hitch on a live
+  snarl; held hitch (still coil, same 0.85 as stalk,
+  in phase with chest, not a see-saw, not a 6.5 Hz
+  pant); recover sit owns `SitHuntRump`; stalk Walk
+  stays still (`WalkRumpBob` on `idleWag` only);
+  forage sit pant owns `SitRump`; alert stare is
+  `idleLook`, not this; CLI `-dogLeap` still heaves
+  from `IsLeap()`; Sleep skip; quiet sit / Sleep stay
+  chest-only; `leapHuntRumpAmp` 0 = the old statue
+  leap rump; no `idleRump` (`Walk()` / `LeapAttack`
+  would zero it). Hunt leap owns
+  `LeapHuntTail` on `IsLeap` (`leapHuntTailAmp`) —
+  leftover leap held rest (`DriveLeap` pins
+  `tailBaseAngle`; hunt raise lives on `idleHunt`;
+  `LeapAttack` zeros `idleHunt`) while the chest and
+  rump already hitched, so the pounce still read as a
+  rest tail on a live snarl; held raise (still coil,
+  same 0.85 as stalk, minus, same 16° as
+  `IdleTailTarget` hunt, not an 8.5 Hz wag); recover
+  sit / stalk Walk keep `idleHunt`; forage Walk owns
+  `WalkTail`; sit pant owns `SitPantTail`; alert
+  stare is `idleLook`, not this; CLI `-dogLeap` still
+  raises from `IsLeap()`; Sleep skip;
+  `leapHuntTailAmp` 0 = the old rest leap tail; no
+  `idleTail` (`Walk()` / `LeapAttack` would zero it). Hunt recover
+  sit distal is `SitHuntDistalTail` (`sitHuntDistalTailAmp`) —
+  leftover sit held the rest-spring stick while the first hinge
+  already raised (`IdleTailTarget` `idleHunt`; muscles stay on
+  the first hinge) so the 0.70 s coil still read as a stiff
+  caudal rod on a live snarl; picture perk follows that same
+  held `idleHunt` raise (accumulating 6°…12°, minus, PoseVisual
+  plus droops so the env is negated vs `IdleTailTarget`);
+  `sitHuntDistalTailAmp` 0 = the old rest-spring recover sit
+  stick; no `idleTail` (`Walk()` would zero it). Hunt stalk Walk
+  distal is `WalkHuntDistalTail` (`walkHuntDistalTailAmp`) —
+  leftover walk held the rest-spring stick while the first hinge
+  already raised (`IdleTailTarget` `idleHunt`) so the chase still
+  read as a stiff caudal rod on a live snarl; picture perk
+  follows that same held `idleHunt` raise; CLI `-dogWalk` leaves
+  `idleHunt` 0; `walkHuntDistalTailAmp` 0 = the old rest-spring
+  stalk Walk stick; no `idleTail` (`Walk()` would zero it). Hunt leap
+  distal is `LeapHuntDistalTail` (`leapHuntDistalTailAmp`) —
+  leftover leap held the rest-spring stick while the first hinge
+  already raised (`LeapHuntTail`; muscles stay on the first
+  hinge) so the pounce still read as a stiff caudal rod on a live
+  snarl; picture perk follows that same held 0.85 raise
+  (accumulating 6°…12°, minus, PoseVisual plus droops so the env
+  is negated vs `LeapHuntTail`, no extra clock, not a new distal
+  muscle); CLI `-dogLeap` still perks from `IsLeap()`;
+  `leapHuntDistalTailAmp` 0 = the old rest-spring leap stick; no
+  `idleTail` (`Walk()` / `LeapAttack` would zero it).
+  Wander sniff stays closed. Sit pant after EndWalk
+  is `SitPuff` on `idlePant` (`sitPuffAmp`). Sit yawn is
+  `SitYawnPuff` on `idleYawn` (`sitYawnPuffAmp`). Sit chew is
+  `SitChewPuff` on `idleChew` (`sitChewPuffAmp`). CLI `-dogWalk` /
+  hop / Leap / Sleep skip. `walkPuffAmp` 0 = the old silent
+  forage tongue; not a new `idlePuff` (`Walk()` would zero it).
+  No player (scene `Dog`): Forage wanders a short spawn leash
+  (`wanderRadius` / `wanderStep`), then sits. World follow and hunt
+  notice / stoop / `SetFacing` read `GetFollowPoint` (CoM), not the
+  spawn-stuck root — both ragdoll roots sit at spawn, so
+  `transform.position` vs player / `DogPrey` was a constant. Wander
+  `FaceToward` stays on the root (leash is spawn).
+  Idle while Forage sits (`CanIdle`): sniff (neck down + near-front
+  Visual shuffle; far paw stays planted; the first tail hinge droops
+  on that same `idleSniff`, `sitSniffTailAmp` — leftover sit held
+  the 8.5 Hz forage metronome while the nose already tracked dirt,
+  so the track still read as a dirt statue with a sit wag; droop
+  is plus, hitching with the sniff bob; hunt raise stays on
+  `idleHunt`; forage Walk keeps `WalkTail`; sit look keeps
+  `SitLookTail`; sit scratch keeps `SitScratchTail`; sit yawn
+  keeps `SitYawnTail`; sit pant owns `SitPantTail`; chew owns
+  `SitChewTail`; `sitSniffTailAmp` 0 = the old sniff
+  metronome; distal Tail2–Tail5 limp is `SitSniffDistalTail`
+  (`sitSniffDistalTailAmp`) — leftover sit held the rest-spring
+  stick while the first hinge already drooped (`SitSniffTail`;
+  muscles stay on the first hinge); picture limp follows the
+  ~3 Hz dirt bob; `sitSniffDistalTailAmp` 0 = the old
+  rest-spring sniff stick; no `idleTail`, `Walk()` would zero it; chest heaves
+  on that same Chest Visual, `sitSniffBreathAmp` — leftover sit
+  held quiet-sit 0.0018 (`BreathLift` only reads `idlePant` /
+  Sleep / walk / `idleYawn`) while the nose already tracked dirt,
+  so the track still read as a statue chest; hitch with the sniff
+  bob (`idleSniff` already pulses ~3 Hz), not a 6.5 Hz pant and
+  not the quiet sin; hunt keeps its own sit
+  pictures; sit look owns `SitLookBreath`; sit scratch owns `SitScratchBreath`; forage Walk owns
+  `WalkTrunkBob`; sit yawn owns
+  `SitYawnBreath`; sit pant owns the `idlePant` chest; chew
+  owns `SitChewBreath` (paw reuses `idleSniff`, zeros `idleWag`);
+  `sitSniffBreathAmp`
+  0 = the old quiet-sit sniff chest; no `idleBreath`, `Walk()`
+  would zero it; rump heaves on that same Pelvis Visual,
+  `sitSniffRumpAmp` — leftover sit held statue
+  (`ApplyRump` only reads `WalkRumpBob` / `SitRump` /
+  `SitYawnRump`) while the chest already heaved, so the
+  track still read as a chest-only bob; hitch with the
+  sniff bob (in phase with chest, not a see-saw, not a
+  6.5 Hz pant); hunt keeps its own sit pictures; sit look
+  owns `SitLookRump`; sit scratch owns `SitScratchRump`; forage Walk owns
+  `WalkRumpBob`; sit yawn owns `SitYawnRump`; sit pant
+  owns `SitRump`; chew owns
+  `SitChewRump` (paw reuses `idleSniff`, zeros `idleWag`);
+  quiet sit / Sleep stay chest-only; `sitSniffRumpAmp` 0 = the old statue
+  sniff rump; no `idleRump`, `Walk()` would zero it), scratch (near-hind Visual
+  reaches the near ear, cranial+up; far hind planted; neck tucks
+  toward that paw; near ear flinches on the kick — not a shin twitch;
+  pupil drops toward that paw on the same Walk/SitEye slot,
+  `sitScratchEyeAmp` — leftover sit held rest-Y while the ear already
+  kicked; Sleep / yawn / blink still hide the dot; forage Walk / sit
+  pant keep their own drops; `sitScratchEyeAmp` 0 = the old rest
+  scratch stare; no `idleEye`, `Walk()` would zero it; lids slit on
+  that same Walk/SitSquint slot, `sitScratchLidAmp` — leftover sit
+  held the round rest while the pupil already dropped, so the kick
+  still read as a wide forage stare; Sleep / yawn / blink still own
+  the full cover; forage Walk / sit pant keep their own slits;
+  `sitScratchLidAmp` 0 = the old round scratch stare; no `idleBlink`,
+  `Walk()` would zero it; brow creases on that same Walk/SitBrow
+  slot, `sitScratchBrowAmp` — leftover sit held the rest stamp
+  while the pupil already dropped and the lid already slit, so the
+  kick still read as a forage stare on the yellow box; hunt furrow
+  stays on `idleHunt`; forage Walk / sit pant keep their own
+  creases;   `sitScratchBrowAmp` 0 = the old rest scratch forehead;
+  no `idleBrow`, `Walk()` would zero it; whiskers fan on that same
+  Walk/SitWhisker slot, `sitScratchWhiskerAmp` — leftover sit held
+  rest stamps while the pupil already dropped, the lid already slit,
+  and the brow already creased, so the kick still read as a forage
+  stare on the yellow box; hunt pin stays on `idleHunt`; sniff keeps
+  its own fan; forage Walk / sit pant keep their own fans;
+  `sitScratchWhiskerAmp` 0 = the old rest scratch stamps; no
+  `idleWhisker`, `Walk()` would zero it; snout drops on that same
+  Walk/SitNose slot, `sitScratchNoseAmp` — leftover sit held the
+  rest muzzle while the pupil already dropped, the lid already slit,
+  the brow already creased, and the whiskers already fanned, so the
+  kick still read as a forage stare on the yellow box; hunt drop
+  stays on `idleHunt`; sniff keeps its own dirt drop; forage Walk /
+  sit pant keep their own drops; `sitScratchNoseAmp` 0 = the old
+  rest scratch muzzle; no `idleNose`, `Walk()` would zero it; lip
+  tucks on that same Head-Visual mouth, `sitScratchMouthAmp` —
+  leftover sit held the rest flews while the pupil already dropped,
+  the lid already slit, the brow already creased, the whiskers
+  already fanned, and the snout already dropped, so the kick still
+  read as a forage stare on the yellow box; hunt raise stays on
+  `idleHunt`; sniff keeps its own dirt tuck; pant / yawn / chew
+  still open with DriveJaw; `sitScratchMouthAmp` 0 = the old rest
+  scratch flews; no `idleMouth`, `Walk()` would zero it; the first
+  tail hinge droops on that same `idleScratch`, `sitScratchTailAmp`
+  — leftover sit held the 8.5 Hz forage metronome while the hind
+  already kicked and the face already weaves, so the itch still
+  read as a forage wag; droop is plus, hitching with the rake
+  (hang 0.55 + kick); hunt raise stays on `idleHunt`; forage Walk
+  keeps `WalkTail`; sit look keeps `SitLookTail`; sit sniff owns
+  `SitSniffTail`; sit yawn owns `SitYawnTail`; sit pant owns
+  `SitPantTail`; chew owns `SitChewTail`;
+  `sitScratchTailAmp` 0 = the old scratch metronome; distal
+  Tail2–Tail5 limp is `SitScratchDistalTail`
+  (`sitScratchDistalTailAmp`) — leftover sit held the
+  rest-spring stick while the first hinge already drooped
+  (`SitScratchTail`; muscles stay on the first hinge);
+  picture limp follows the hang 0.55 + ~14 Hz rake;
+  `sitScratchDistalTailAmp` 0 = the old rest-spring scratch
+  stick; no `idleTail`, `Walk()` would zero it; rump heaves on that
+  same Pelvis Visual, `sitScratchRumpAmp` — leftover sit
+  held statue (`ApplyRump` only reads `WalkRumpBob` /
+  `SitRump` / `SitYawnRump` / `SitSniffRump`) while the
+  hind already kicked, the face already weaves, and the
+  tail already droops, so the itch still read as a planted
+  pelvis on a kicking paw; hitch with the rake (hang 0.55
+  + kick, in phase with the hind, not a see-saw, not a
+  6.5 Hz pant); hunt keeps its own sit pictures; sit look
+  owns `SitLookRump`; forage Walk owns `WalkRumpBob`; sit yawn owns
+  `SitYawnRump`; sit sniff   owns `SitSniffRump`; sit pant
+  owns `SitRump`; chew owns `SitChewRump`
+  (paw reuses `idleSniff`, zeros `idleWag`);
+  quiet sit / Sleep stay chest-only; `sitScratchRumpAmp` 0
+  = the old statue scratch rump; no `idleRump`, `Walk()`
+  would zero it; chest heaves on that same Chest Visual,
+  `sitScratchBreathAmp` — leftover sit held quiet-sit
+  0.0018 (`BreathLift` only reads `idlePant` / Sleep /
+  walk / `idleYawn` / `idleSniff`) while the hind already
+  kicked, the face already weaves, the tail already droops,
+  and the rump already hitches, so the itch still read as
+  a statue chest on a kicking paw; hitch with the rake
+  (hang 0.55 + kick, in phase with the rump, not a
+  see-saw, not a 6.5 Hz pant and not the quiet sin); hunt
+  / sniff keep their own sit pictures; sit look owns
+  `SitLookBreath`; forage Walk
+  owns `WalkTrunkBob`; sit yawn owns `SitYawnBreath`; sit
+  sniff owns `SitSniffBreath`; sit pant owns the `idlePant`
+  chest; chew owns `SitChewBreath`; quiet sit
+  / Sleep stay the 0.0018 sin; `sitScratchBreathAmp` 0 =
+  the old quiet-sit scratch chest; no `idleBreath`,
+  `Walk()` would zero it),
+  yawn (jaw + head lift; lids squint + tongue curl on Jaw
+  Visual so the gape is not a silent Bark; the first tail
+  hinge droops on that same `idleYawn`, `sitYawnTailAmp` —
+  leftover sit held the 8.5 Hz forage metronome while the jaw
+  already gaped and the head already lifted, so the stretch
+  still read as a forage wag; droop is plus, hitching with the
+  yawn envelope; hunt raise stays on `idleHunt`; forage Walk
+  keeps `WalkTail`; sit look keeps `SitLookTail`; sit sniff
+  owns `SitSniffTail`; sit scratch owns `SitScratchTail`; sit
+  pant owns `SitPantTail`; chew owns `SitChewTail`;
+  `sitYawnTailAmp` 0 = the old yawn metronome; distal Tail2–Tail5
+  limp is `SitYawnDistalTail` (`sitYawnDistalTailAmp`) —
+  leftover sit held the rest-spring stick while the first hinge
+  already drooped (`SitYawnTail`; muscles stay on the first
+  hinge); picture limp follows the yawn envelope; `sitYawnDistalTailAmp`
+  0 = the old rest-spring yawn stick; no `idleTail`, `Walk()`
+  would zero it; ears hitch on that
+  same Head-Visual pair, `sitYawnEarAmp` — leftover sit held
+  a statue half-fold 0.50 while the jaw already gaped and
+  the head already lifted, so the stretch still read as a
+  forage head on a gaping jaw; fold back with the yawn
+  envelope; hunt pin stays on `idleHunt`; sniff keeps its
+  own half-fold; sit chew owns `SitChewEar`; forage Walk /
+  sit pant keep their own flops; sit look owns `SitLookEar`;
+  scratch keeps its
+  kick; `sitYawnEarAmp` 0 = the old statue yawn half-fold;
+  no `idleEar`, `Walk()` would zero it; whiskers fan on
+  that same Walk/SitWhisker slot, `sitYawnWhiskerAmp` —
+  leftover sit held rest stamps while the jaw already
+  gaped, the head already lifted, the tail already drooped,
+  and the ears already folded, so the stretch still read
+  as a forage muzzle on a gaping jaw; fan with the yawn
+  envelope, no twitch (slow stretch, not a 14 Hz rake);
+  hunt pin stays on `idleHunt`; sniff keeps its own fan;
+  forage Walk / sit pant / scratch keep their own fans;
+  sit look owns `SitLookWhisker`; `sitYawnWhiskerAmp` 0
+  = the old rest yawn stamps; no `idleWhisker`, `Walk()`
+  would zero it; brows hitch on that same Walk/SitBrow
+  slot, `sitYawnBrowAmp` — leftover sit held the rest
+  stamp while the jaw already gaped, the head already
+  lifted, the tail already drooped, the ears already
+  folded, and the whiskers already fanned, so the stretch
+  still read as a forage forehead on a gaping jaw; raise
+  with the yawn envelope (stretch, not a hunt furrow);
+  hunt furrow stays on `idleHunt`; sniff keeps its own
+  drop; forage Walk / sit pant / scratch keep their own
+  creases; `sitYawnBrowAmp` 0 = the old rest yawn forehead;
+  no `idleBrow`, `Walk()` would zero it; snout lifts on
+  that same Walk/SitNose slot, `sitYawnNoseAmp` —
+  leftover sit held the rest muzzle while the jaw already
+  gaped, the head already lifted, the tail already drooped,
+  the ears already folded, the whiskers already fanned, and
+  the brow already raised, so the stretch still read as a
+  forage snout on a gaping jaw; lift with the yawn envelope
+  (stretch, not a hunt drop); hunt drop stays on
+  `idleHunt`; sniff keeps its own dirt drop; forage Walk /
+  sit pant / scratch keep their own drops; `sitYawnNoseAmp`
+  0 = the old rest yawn muzzle; no `idleNose`, `Walk()`
+  would zero it; lip stretches on that same Head-Visual
+  mouth, `sitYawnMouthAmp` — leftover sit held the rest
+  flews (DriveJaw open is the pant drop) while the jaw
+  already gaped, the head already lifted, the tail already
+  drooped, the ears already folded, the whiskers already
+  fanned, the brow already raised, and the snout already
+  lifted, so the stretch still read as forage flews on a
+  gaping jaw; lift with the yawn envelope (stretch, not a
+  hunt raise); hunt raise stays on `idleHunt`; sniff keeps
+  its own dirt tuck; pant / yawn / chew still open with
+  DriveJaw; forage Walk / sit pant / scratch keep their
+  own gape / tuck; sit look owns `SitLookMouth`; sit chew
+  owns `SitChewMouth`;
+  `sitYawnMouthAmp` 0 = the old rest yawn flews; no
+  `idleMouth`, `Walk()` would zero it; breath puffs on
+  that same Jaw-Visual `PantPuff`, `sitYawnPuffAmp` —
+  leftover sit held silent (`SitPuff` only reads
+  `idlePant`) while the jaw already gaped, the tongue
+  already curled, and the lip already stretched, so the
+  gape still read as a silent stretch; hitch with the
+  yawn envelope (needs open gape ≥0.20, same as tongue,
+  not a 6.5 Hz pant); hunt crack stays on `idleHunt`;
+  forage Walk / sit pant keep their own puffs; Bark puff
+  is `Call`; chew hides; `sitYawnPuffAmp` 0 = the old
+  silent yawn tongue; no `idlePuff`, `Walk()` would
+  zero it; chest heaves on that same Chest Visual,
+  `sitYawnBreathAmp` — leftover sit held quiet-sit
+  0.0018 (`BreathLift` only reads `idlePant` / Sleep /
+  walk) while the jaw already gaped, the tongue already
+  curled, the lip already stretched, and the puff
+  already hitched, so the gape still read as a statue
+  chest; hitch with the yawn envelope (slow inhale, not
+  a 6.5 Hz pant and not the quiet sin); hunt keeps its
+  own sit pictures; sit look owns `SitLookBreath`; sit sniff owns
+  `SitSniffBreath`; sit scratch owns `SitScratchBreath`;
+  forage
+  Walk owns `WalkTrunkBob`; sit pant owns the
+  `idlePant` chest; `sitYawnBreathAmp` 0 = the old
+  quiet-sit yawn chest; no `idleBreath`, `Walk()` would
+  zero it; rump heaves on that same Pelvis Visual,
+  `sitYawnRumpAmp` — leftover sit held statue
+  (`ApplyRump` only reads `WalkRumpBob` / `SitRump` /
+  `idlePant`) while the chest already heaved, so the
+  gape still read as a chest-only inhale; hitch with
+  the yawn envelope (in phase with chest, not a
+  see-saw, not a 6.5 Hz pant); hunt keeps its own sit
+  pictures; sit look owns `SitLookRump`; sit scratch owns `SitScratchRump`;
+  sit sniff owns `SitSniffRump`; forage Walk owns
+  `WalkRumpBob`; sit pant owns `SitRump`; quiet sit /
+  Sleep stay chest-only; `sitYawnRumpAmp` 0 = the old
+  statue yawn rump; no `idleRump`, `Walk()` would zero
+  it),
+  look (neck bob, optional facing glance with no player; sit
+  `SetFacing` hops near-front + near-hind then plants,
+  `sitTurnAmp` — Look scale alone read as a texture swap; Walk
+  keeps the stride, Sleep / hunt-recover plant / scratch skip;
+  `sitTurnAmp` 0 = the old instant flip; not a yaw force; ears hitch
+  on that same Head-Visual pair, `sitLookEarAmp` — leftover sit
+  held rest fold 0.20 except a binary perk at `idleLook` > 0.45,
+  so the glance still read as a statue head on a nodding neck;
+  look-up perks, look-down folds; hunt pin stays on `idleHunt`;
+  sniff keeps its own half-fold; sit chew owns `SitChewEar`;
+  sit yawn owns `SitYawnEar`; forage Walk /
+  sit pant keep their own flops; `sitLookEarAmp` 0 = the old
+  rest fold / binary perk; no `idleEar`, `Walk()` would zero
+  it; whiskers fan on that same Walk/SitWhisker slot,
+  `sitLookWhiskerAmp` — leftover sit held rest stamps while
+  the neck already nodded and the ears already hitched, so
+  the glance still read as a statue muzzle on a yellow box;
+  look-up spreads, look-down tucks; hunt pin stays on
+  `idleHunt`; sniff keeps its own fan; sit yawn owns
+  `SitYawnWhisker`; forage Walk / sit
+  pant / scratch keep their own fans; `sitLookWhiskerAmp` 0
+  = the old rest look stamps; no `idleWhisker`, `Walk()`
+  would zero it; lids slit on that same Walk/SitSquint slot,
+  `sitLookLidAmp` — leftover sit held the round rest while
+  the pupil already dropped, the ears already hitched, and
+  the whiskers already fanned, so look-down still read as a
+  wide forage stare on a nodding head; look-down slits,
+  look-up stays open; hunt recover owns `SitHuntSquint`;
+  hunt stalk Walk owns `WalkHuntSquint`; hunt leap owns
+  `LeapHuntSquint`;
+  sniff keeps the open track eye; forage Walk / sit pant /
+  scratch keep their own slits; Sleep / yawn / blink still
+  own the full cover; `sitLookLidAmp` 0 = the old round
+  look eye; no `idleBlink`, `Walk()` would zero it; lip
+  tucks on that same Head-Visual mouth, `sitLookMouthAmp` —
+  leftover sit held rest flews while the pupil already
+  dropped, the ears already hitched, the whiskers already
+  fanned, and the lids already slit, so the glance still
+  read as a forage stare on the yellow box; look-up lifts
+  with the nose, look-down tucks; hunt raise stays on
+  `idleHunt`; sniff keeps its own dirt tuck; pant / yawn /
+  chew still open with DriveJaw; forage Walk / sit pant /
+  scratch keep their own gape / tuck; sit yawn owns
+  `SitYawnMouth`; sit chew owns `SitChewMouth`;
+  `sitLookMouthAmp` 0
+  = the old rest look flews; no `idleMouth`, `Walk()`
+  would zero it; the first tail hinge hitches on that
+  same `idleLook`, `sitLookTailAmp` — leftover sit held
+  the 8.5 Hz forage metronome while the neck already
+  nodded and the face already hitched, so the glance
+  still read as a nodding statue with a sit wag; look-up
+  perks (minus, same as hunt raise), look-down droops;
+  hunt raise stays on `idleHunt`; forage Walk keeps
+  `WalkTail`; sit sniff owns `SitSniffTail`; sit scratch
+  owns `SitScratchTail`; sit yawn owns `SitYawnTail`; sit pant
+  owns `SitPantTail`; chew owns `SitChewTail`; quiet sit between acts keeps 8.5 Hz;
+  `sitLookTailAmp` 0 = the old look metronome; distal
+  Tail2–Tail5 limp is `SitLookDistalTail`
+  (`sitLookDistalTailAmp`) — leftover sit held the
+  rest-spring stick while the first hinge already hitched
+  (`SitLookTail`; muscles stay on the first hinge);
+  picture limp follows the signed bob (look-up perks,
+  look-down droops); `sitLookDistalTailAmp` 0 = the old
+  rest-spring look stick; no `idleTail`, `Walk()` would
+  zero it; chest heaves on
+  that same Chest Visual, `sitLookBreathAmp` — leftover
+  sit held quiet-sit 0.0018 (`BreathLift` only reads
+  `idlePant` / Sleep / walk / `idleYawn` / `idleSniff` /
+  `idleScratch`) while the neck already nodded, the face
+  already hitched, and the tail already weaved, so the
+  glance still read as a statue chest on a nodding neck;
+  hitch with the signed bob (look-up lifts, look-down
+  settles, not a 6.5 Hz pant and not the quiet sin);
+  hunt recover owns `SitHuntBreath`; sniff / scratch /
+  yawn / pant keep their own sit pictures; forage Walk
+  owns `WalkTrunkBob`; quiet
+  sit / Sleep stay the 0.0018 sin; rump heaves on that
+  same Pelvis Visual, `sitLookRumpAmp` — leftover sit
+  held statue (`ApplyRump` only reads `WalkRumpBob` /
+  `SitRump` / `SitYawnRump` / `SitSniffRump` /
+  `SitScratchRump`) while the chest already heaved, so
+  the glance still read as a chest-only bob on a nodding
+  neck; hitch with the signed bob (look-up lifts,
+  look-down settles, in phase with chest, not a
+  see-saw, not a 6.5 Hz pant); hunt recover owns `SitHuntRump`; chew owns `SitChewRump`; sniff / scratch /
+  yawn / pant keep their own sit pictures; forage Walk
+  owns `WalkRumpBob`; quiet sit / Sleep stay chest-only;
+  `sitLookRumpAmp` 0 = the old statue look rump; no
+  `idleRump`, `Walk()` would zero it; `sitLookBreathAmp` 0 = the old quiet-sit look
+  chest; no `idleBreath`, `Walk()` would zero it), tail wag
+  (`idleWag` on the first tail joint).   Forage trot restores `idleWag`
+  after `Walk()`; `DriveWalk` reads `IdleTailTarget` (`WalkTail` on
+  the two-dip clock, quiet sit keeps 8.5 Hz, sit look hitches
+  `SitLookTail`, sit sniff hitches `SitSniffTail`, sit scratch
+  hitches `SitScratchTail`, sit yawn hitches `SitYawnTail`, sit
+  pant hitches `SitPantTail`, sit chew hitches `SitChewTail`) and
+  nods neck/head on the trot clock (`walkHeadBob`, two dips per period
+  as each diagonal plants). Same SPD world target as sit idle, not a
+  new `neckP`. 0 disables. Sit pant after EndWalk is `SitHead` on
+  `idlePant` (`sitHeadAmp`) — leftover sit held world 0 while jaw /
+  chest / rump already pumped. Quiet sit owns `SitQuietHead`
+  (`sitQuietHeadAmp`) — leftover sit held world 0 while chest / rump
+  already hitch; same 2.5 clock as BreathLift / SitQuietRump, 1.2°,
+  not SitHead's 3° pant. Quiet sit ears own `SitQuietEar`
+  (`sitQuietEarAmp`) — leftover sit held rest fold 0.20 while
+  chest / rump / neck already hitch; same 2.5 clock, fold 0.20
+  ± 0.05. Sleep stay hold. `sitHeadAmp` 0 = the old
+  statue sit-pant neck. `sitQuietHeadAmp` 0 = the old statue
+  world-0 quiet sit neck.   `sitQuietEarAmp` 0 = the old statue
+  rest fold 0.20. Quiet sit brows own `SitQuietBrow`
+  (`sitQuietBrowAmp`) — leftover sit held the rest stamp while
+  chest / rump / neck / ears already hitch; same 2.5 clock,
+  droop ± a small lift. `sitQuietBrowAmp` 0 = the old rest
+  quiet sit forehead. Quiet sit mouth owns `SitQuietMouth`
+  (`sitQuietMouthAmp`) — leftover sit held the rest flews while
+  chest / rump / neck / ears / brows already hitch; same 2.5
+  clock, droop ± a small lift. `sitQuietMouthAmp` 0 = the old
+  rest quiet sit flews. Night Sleep mouth owns `SitSleepMouth`
+  (`sitSleepMouthAmp`) — leftover sit held statue droop while
+  chin / lids / ears / brows already hitch; same 1.6 clock,
+  droop ± a small lift. `sitSleepMouthAmp` 0 = the old statue
+  sleep droop. Night Sleep whiskers own `SitSleepWhisker`
+  (`sitSleepWhiskerAmp`) — leftover sit held statue droop while
+  chin / lids / ears / brows / flews already hitch; same 1.6
+  clock, droop ± a small lift. `sitSleepWhiskerAmp` 0 = the old
+  statue sleep droop. Night Sleep distal owns `SitSleepDistalTail`
+  (`sitSleepDistalTailAmp`) — leftover sit held the rest-spring
+  stick while the first hinge already drooped; same 1.6 clock,
+  accumulating limp ± hitch. `sitSleepDistalTailAmp` 0 = the old
+  rest-spring sleep stick. Quiet sit whiskers own `SitQuietWhisker`
+  (`sitQuietWhiskerAmp`) — leftover sit held the rest stamps while
+  chest / rump / neck / ears / brows / flews already hitch; same
+  2.5 clock, droop ± a small lift. `sitQuietWhiskerAmp` 0 = the
+  old rest quiet sit stamps. Hunt recover sit
+  is `SitHuntHead` on `idleHunt` (`sitHuntHeadAmp`) — leftover sit
+  held world 0 while chest / rump / snarl already coiled; same 12°
+  as stalk `WalkNeckWorldTarget`. `sitHuntHeadAmp` 0 = the old
+  statue recover neck. Sit chew is `SitChewHead` on `idleChew`
+  (`sitChewHeadAmp`) — leftover sit held sniff 16°
+  (`IdleNeckWorldTarget` reads `idleSniff`; `SitHead` skips
+  `idleChew`) while jaw / chest / rump / tail / lid / ear / brow /
+  whisker already snap; hang 0.55 + snap, same 16° as sit sniff,
+  not SitHead's 3° pump. `sitChewHeadAmp` 0 = the old held-sniff
+  chew neck. Sit chew is `SitChewNose` on `idleChew`
+  (`sitChewNoseAmp`) — leftover sit held sniff drop
+  (`ApplyNose` reads `idleSniff`; `WalkNose` / `SitNose` skip
+  `idleChew`) while jaw / chest / rump / tail / lid / ear /
+  brow / whisker / neck already snap; hang 0.55 + snap, same
+  0.007 as sit sniff, not SitNose's 0.005 pant. `sitChewNoseAmp`
+  0 = the old held-sniff chew muzzle. Sit chew is `SitChewMouth`
+  on `idleChew` (`sitChewMouthAmp`) — leftover sit held sniff tuck
+  (`ApplyMouth` reads `idleSniff`; Scratch / Look / Yawn skip
+  `idleChew`) while jaw / chest / rump / tail / lid / ear / brow /
+  whisker / neck / nose already snap; hang 0.55 + snap, same 0.006 /
+  6° as sit sniff, not SitYawnMouth's stretch lift and not a hunt
+  raise. `sitChewMouthAmp` 0 = the old held-sniff chew flews. Sit
+  chew is `SitChewEye` on `idleChew` (`sitChewEyeAmp`) — leftover
+  sit held sniff drop (`ApplyEyes` reads `idleSniff`; `WalkEye` /
+  `SitEye` skip `idleChew`) while jaw / chest / rump / tail / lid /
+  ear / brow / whisker / neck / nose / lip already snap; hang 0.55
+  + snap, same 0.008 as sit sniff, not SitEye's 0.004 pant.
+  `sitChewEyeAmp` 0 = the old held-sniff chew stare. Sit
+  chew is `SitChewPuff` on `idleChew` (`sitChewPuffAmp`) — leftover
+  sit held silent (`SitYawnPuff` / `SitPuff` skip `idleChew`;
+  morsel owns the Jaw-Visual teeth slot) while jaw / chest / rump /
+  tail / lid / ear / brow / whisker / neck / nose / lip / pupil
+  already snap; pulse with the snap, cranial of the morsel, not a
+  hang (vapor on a closed mouth would leak). `sitChewPuffAmp`
+  0 = the old silent chew lump. No
+  `idleHead` / `idleNose` / `idleMouth` / `idleEye` / `idlePuff`
+  (`Walk()` would zero them). No-player wander also restores `idleSniff`
+  after `Walk()`: `WalkNeckWorldTarget` drops the nose (same 16° as sit
+  sniff) so a search is not a follow bob around 0. Follow / hunt / CLI
+  `-dogWalk` leave sniff 0. Paw Visual shuffle stays sit-only and
+  near-front only (far planted); the trot uses `walkStrideAmp` on the
+  swing diagonal instead. Kill chew reuses `idleSniff` so it
+  paws with that same foot, not a march. Ears half-fold on that sniff,
+  not the hunt pin. CLI `-dogWalk` / Sleep /
+  Leap leave `idleWag` 0 so the head and tail stay the hold.
+  Pursue Walk after the lock stare writes `idleHunt` (`huntStalk` 0.85):
+  nose down ~10° and a stiff tail raise (minus on the caudal hinge),
+  ears stay the hunt pin — not `idleSniff`, which would half-fold.
+  `huntStalk` 0 = the old still chase. CLI `-dogWalk` does not write it.
+  Stalk / leap snarl: DriveJaw opens a crack (`idleHunt` 0.20, coil 0.28,
+  air 0.40) and two cream slivers on Jaw Visual (`LevelArt.White`, no PNG).
+  Coil also `LookTiltTowardAim` (was world 0). Call puff / chew / pant
+  hide the fangs. No `idleSnarl` (`Walk()` would zero it). CLI `-dogLeap`
+  still snarls from `IsLeap()`. Hunt hackles: three dark slices on Chest
+  Visual withers (`LevelArt.White`, no PNG). Raise on `idleHunt` / Leap;
+  forage / Sleep / chew / pant hide. Alert stare is `idleLook` so the
+  ridge stays down until stalk. No `idleHackles` (`Walk()` would zero
+  it). CLI `-dogLeap` still raises from `IsLeap()`. First notice: `Bark()`
+  once and a short stand-stare (`huntAlert` 0.55 s, `idleLook` perk) so
+  Forage→Pursue is not a silent trot; 0 = bark then chase. `noticeRange` /
+  `stoopRange` / hunt `SetFacing` use CoM (`GetFollowPoint`), same leftover
+  as follow; wander `FaceToward` stays on the root. Then stalk Walk /
+  Leap. After a leap that leaves the mark alive, stand-snarl
+  (`huntRecover` 0.70 s, same `idleHunt`) so the next pounce is not an
+  instant re-coil; 0 = the old machine-gun leap. Recover also plants the
+  near-front paw Visual (held lift, collider stays) so the wait is not a
+  statue; chest heaves on that same Chest Visual, `sitHuntBreathAmp` —
+  leftover sit held quiet-sit 0.0018 (`BreathLift` only reads `idlePant`
+  / Sleep / walk / `idleYawn` / `idleSniff` / `idleScratch` / `idleLook`)
+  while the snarl, hackles, and paw already live, so the coil still read
+  as a statue chest; held hitch with `idleHunt` (still coil, not a 6.5 Hz
+  pant and not the quiet sin); hunt stalk Walk stays still (`WalkTrunkBob`
+  on `idleWag` only); forage sit look owns `SitLookBreath`; sit sniff
+  owns `SitSniffBreath`; sit scratch owns `SitScratchBreath`; sit yawn
+  owns `SitYawnBreath`; sit pant owns the `idlePant` chest; hunt leap
+  owns `LeapHuntBreath` (`leapHuntBreathAmp`); `sitHuntBreathAmp`
+  0 = the old quiet-sit recover chest; no `idleBreath`, `Walk()` would
+  zero it; rump heaves on that same Pelvis Visual, `sitHuntRumpAmp` —
+  leftover sit held statue (`ApplyRump` only reads `WalkRumpBob` /
+  `SitRump` / `SitYawnRump` / `SitSniffRump` / `SitScratchRump` /
+  `SitLookRump`) while the chest already heaved, so the coil still
+  read as a chest-only hitch; held hitch with `idleHunt` (still coil,
+  in phase with chest, not a see-saw, not a 6.5 Hz pant); hunt stalk
+  Walk stays still (`WalkRumpBob` on `idleWag` only); forage sit look
+  owns `SitLookRump`; sit sniff owns `SitSniffRump`; sit scratch owns
+  `SitScratchRump`; sit yawn owns `SitYawnRump`; sit pant owns
+  `SitRump`; quiet sit / Sleep stay chest-only;   `sitHuntRumpAmp` 0 =
+  the old statue recover rump; no `idleRump`, `Walk()` would zero it;
+  hunt leap owns `LeapHuntRump` (`leapHuntRumpAmp`);
+  hunt leap owns `LeapHuntTail` (`leapHuntTailAmp`);
+  hunt recover sit distal owns `SitHuntDistalTail`
+  (`sitHuntDistalTailAmp`);
+  hunt stalk Walk distal owns `WalkHuntDistalTail`
+  (`walkHuntDistalTailAmp`);
+  hunt leap distal owns `LeapHuntDistalTail`
+  (`leapHuntDistalTailAmp`);
+  neck drops on that same SPD world target, `sitHuntHeadAmp` —
+  leftover sit held world 0 (`IdleNeckWorldTarget` only reads
+  sleep / sniff / scratch / look / yawn / hop / `SitHead`;
+  `SitHead` skips `idleHunt`) while the snarl, hackles, paw,
+  chest, and rump already coil, so the wait still read as a
+  statue head on a live snarl; same 12° as stalk
+  `WalkNeckWorldTarget` (held coil, not a 6.5 Hz pant and not
+  SitHead's 3° pump); hunt stalk Walk already drops
+  (`WalkNeckWorldTarget` on `idleHunt`); forage sit pant owns
+  `SitHead`; sit chew owns `SitChewHead`; quiet sit owns
+  `SitQuietHead`; sit look / sniff / scratch / yawn keep their own
+  sit necks; alert stare is `idleLook`, not this; Sleep stay
+  hold; `sitHuntHeadAmp` 0 = the old statue recover
+  neck; no `idleHead`, `Walk()` would zero it;
+  lids slit on that same Walk/SitSquint slot, `sitHuntLidAmp` —
+  leftover sit held the round rest (`SitSquint` /
+  `SitLookSquint` / `SitScratchSquint` skip `idleHunt`) while
+  the pupil already drops and the neck already coils, so the
+  wait still read as a wide forage stare on a live snarl; held
+  slit with `idleHunt` (still coil, not a 6.5 Hz pant and not
+  SitSquint's pump); hunt stalk Walk owns `WalkHuntSquint`
+  (`walkHuntLidAmp`); hunt leap owns `LeapHuntSquint`
+  (`leapHuntLidAmp`); forage sit pant owns `SitSquint`; sit
+  look owns `SitLookSquint`; sit scratch owns
+  `SitScratchSquint`;   sit chew owns `SitChewSquint` /
+  `SitChewEar` / `SitChewBrow` / `SitChewWhisker`; alert stare is `idleLook`, not this;
+  Sleep / yawn / blink still own the full cover; pupil stays
+  visible under the squint; `sitHuntLidAmp` 0 = the old round
+  recover eye; no `idleBlink`, `Walk()` would zero it;
+  puff pulses on that same Jaw-Visual `PantPuff`, `sitHuntPuffAmp` —
+  leftover sit held silent (`SitPuff` / `SitYawnPuff` /
+  `SitChewPuff` skip `idleHunt`; fangs own the teeth slot) while
+  the snarl, hackles, paw, chest, rump, neck, and lid already
+  coil, so the wait still read as a silent crack on a live
+  snarl; held puff with `idleHunt` (still coil, not a 6.5 Hz
+  pant, cranial of the near fang); hunt stalk Walk owns
+  `WalkHuntPuff` (`walkHuntPuffAmp`); hunt leap owns
+  `LeapHuntPuff` (`leapHuntPuffAmp`) — leftover leap
+  held silent (`LeapAttack` zeros `idleHunt`;
+  `SitHuntPuff` / `WalkHuntPuff` skip `IsLeap`; fangs
+  own the teeth slot) while the lid already slits and
+  the snarl already cracks; forage sit pant owns `SitPuff`;
+  sit yawn owns `SitYawnPuff`; sit chew owns `SitChewPuff`;
+  Bark puff is `Call`; tongue stays off (fangs); `sitHuntPuffAmp`
+  0 = the old silent recover snarl; no `idlePuff`, `Walk()`
+  would zero it;
+  stalk Walk and Leap leave the pictures on the swing / coil.
+  CLI `-dogLeap` does not recover (Drive is silent). `JawStrike` Hurt to health 0 eats the mark (`DogPrey` destroys,
+  same as `Insect`) and `ChooseWake` returns Forage — scene `Dog` then
+  sits and chews (`idleChew` + nose-down sniff, no tongue) instead of
+  leaping the corpse forever. Chest Visual hitches with the snap
+  (`sitChewBreathAmp`) so the meal is not a quiet-sit 0.0018
+  wobble after the jaw already snaps (`SitSniffBreath` skips
+  wag-off sniff). `sitChewBreathAmp` 0 = the old quiet-sit chew
+  chest. Pelvis Visual hitches with that same snap
+  (`sitChewRumpAmp`) so the meal is not a chest-only hitch after
+  the withers already lift (`SitSniffRump` skips wag-off sniff).
+  `sitChewRumpAmp` 0 = the old statue chew rump. First-hinge
+  droops with that same snap (`sitChewTailAmp`) so the meal is
+  not a rest tail after the withers and rump already hitch
+  (`SitSniffTail` skips idleChew; chew zeros wag).
+  `sitChewTailAmp` 0 = the old rest chew tail. Distal Tail2–Tail5
+  limp is `SitChewDistalTail` (`sitChewDistalTailAmp`) — leftover
+  sit held the rest-spring stick while the first hinge already
+  drooped (`SitChewTail`; muscles stay on the first hinge); picture
+  limp follows the hang 0.55 + 11 Hz snap; `sitChewDistalTailAmp` 0
+  = the old rest-spring chew stick; no `idleTail`, `Walk()` would
+  zero it. Lids slit with
+  that same snap (`sitChewLidAmp`) so the meal is not an open
+  sniff-track eye after the jaw / chest / rump / tail already
+  hitch (`SitSquint` skips idleChew; sniff keeps the open
+  track eye). `sitChewLidAmp` 0 = the old open chew eye.
+  Ears hitch with that same snap (`sitChewEarAmp`) so the
+  meal is not a statue sniff half-fold 0.42 after the jaw /
+  chest / rump / tail / lid already hitch (`EarFoldWanted`
+  sniff returns 0.42 before idleChew; sniff keeps the forage
+  half-fold). `sitChewEarAmp` 0 = the old statue chew ear.
+  Brow creases with that same snap (`sitChewBrowAmp`) so the
+  meal is not a statue sniff furrow after the jaw / chest /
+  rump / tail / lid / ear already hitch (`ApplyBrows` reads
+  `idleSniff`; `WalkBrow` / `SitBrow` skip idleChew).
+  `sitChewBrowAmp` 0 = the old statue chew brow.
+  Whiskers hitch with that same snap (`sitChewWhiskerAmp`) so
+  the meal is not a sniff fan+11 Hz after the jaw / chest /
+  rump / tail / lid / ear / brow already hitch (`ApplyWhiskers`
+  reads `idleSniff`; `WalkWhisker` / `SitWhisker` skip idleChew).
+  `sitChewWhiskerAmp` 0 = the old sniff-fan chew stamps.
+  Neck hitches with that same snap (`sitChewHeadAmp`) so
+  the meal is not a held sniff 16° after the jaw / chest /
+  rump / tail / lid / ear / brow / whisker already hitch
+  (`IdleNeckWorldTarget` reads `idleSniff`; `SitHead` skips
+  idleChew). `sitChewHeadAmp` 0 = the old held-sniff chew neck.
+  Snout hitches with that same snap (`sitChewNoseAmp`) so
+  the meal is not a held sniff drop after the jaw / chest /
+  rump / tail / lid / ear / brow / whisker / neck already hitch
+  (`ApplyNose` reads `idleSniff`; `WalkNose` / `SitNose` skip
+  idleChew). `sitChewNoseAmp` 0 = the old held-sniff chew muzzle.
+  Lip tucks with that same snap (`sitChewMouthAmp`) so
+  the meal is not a held sniff tuck after the jaw / chest /
+  rump / tail / lid / ear / brow / whisker / neck / nose already hitch
+  (`ApplyMouth` reads `idleSniff`; Scratch / Look / Yawn skip
+  idleChew). `sitChewMouthAmp` 0 = the old held-sniff chew flews.
+  Pupil drops with that same snap (`sitChewEyeAmp`) so
+  the meal is not a held sniff drop after the jaw / chest /
+  rump / tail / lid / ear / brow / whisker / neck / nose / lip already hitch
+  (`ApplyEyes` reads `idleSniff`; `WalkEye` / `SitEye` skip
+  idleChew). `sitChewEyeAmp` 0 = the old held-sniff chew stare.
+  Puff pulses with that same snap (`sitChewPuffAmp`) so
+  the meal is not a silent lump after the jaw / chest /
+  rump / tail / lid / ear / brow / whisker / neck / nose / lip /
+  pupil already hitch (`SitYawnPuff` / `SitPuff` skip idleChew;
+  morsel owns the teeth slot). `sitChewPuffAmp` 0 = the old
+  silent chew lump.
+  `eatChew` 0 = the old post-leap pant.
+  After Forage `EndWalk`
+  (wander arrive or follow sit): a short pant (`idlePant`) pumps the
+  jaw and a milder SPD neck drop (`sitHeadAmp`) so EndWalk is not a
+  statue world-0 neck after Walk already nodded `walkHeadBob`. Picture:
+  sliced tongue on Jaw Visual
+  (`LevelArt.White`, no PNG) plus a cooler breath puff
+  (`sitPuffAmp`) on the same Jaw child as the trot, so the hang is
+  not a silent stamp after Walk already puffed, plus a thinner lid
+  slit (`sitSquintAmp`) so the hang is not a round rest eye after
+  Walk already squinted, plus a milder snout drop (`sitNoseAmp`) so
+  the hang is not a rest muzzle after Walk already dropped the nose,
+  plus a milder pupil drop (`sitEyeAmp`) so the hang is not a rest
+  stare through the squint after Walk already dropped the pupil,
+  plus a milder brow crease (`sitBrowAmp`) so the hang is not a
+  rest forehead after Walk already creased, plus a milder whisker
+  fan (`sitWhiskerAmp`) so the hang is not rest stamps after Walk
+  already fanned, plus a milder ear flop (`sitEarAmp`) so the
+  hang is not a rest half-fold after Walk already flopped, plus a
+  milder rump heave (`sitRumpAmp`) so the hang is not a statue
+  pelvis after Walk already bobbed the rump, plus a first-hinge
+  droop (`sitPantTailAmp`) so the hang is not an 8.5 Hz forage
+  wag after Walk already clocked `WalkTail`, plus a distal limp
+  (`sitPantDistalTailAmp`) so the hang is not a rest-spring stick
+  after the first hinge already droops (`SitPantTail`; muscles stay
+  on the first hinge).
+  Hidden during the Bark puff. `sitPuffAmp` 0 = the old silent sit
+  tongue. `sitSquintAmp` 0 = the old round sit-pant eye.
+  `sitNoseAmp` 0 = the old rest sit-pant snout. `sitEyeAmp` 0 =
+  the old rest sit-pant stare. `sitBrowAmp` 0 = the old rest
+  sit-pant forehead. `sitWhiskerAmp` 0 = the old rest sit-pant
+  stamps. `sitEarAmp` 0 = the old rest sit-pant half-fold.
+  `sitRumpAmp` 0 = the old statue sit-pant rump. `sitHeadAmp` 0 =
+  the old statue sit-pant neck.   `sitPantTailAmp` 0 = the old
+  sit-pant metronome. `sitPantDistalTailAmp` 0 = the old
+  rest-spring sit-pant stick. No
+  `idlePuff` / `idleBlink` /
+  `idleNose` / `idleEye` / `idleBrow` / `idleWhisker` / `idleEar` /
+  `idleRump` / `idleHead` (`Walk()` would zero them). No `idleTail`
+  (`Walk()` would zero it). Forage follow
+  Walk reuses that tongue on `walkPantAmp` so
+  the trot is not a closed mouth stiffer than hunt, plus a cooler
+  breath puff (`walkPuffAmp`) so the hanging strip is not silent,
+  plus `walkSquintAmp` on the same slits. Sit yawn reuses that
+  tongue (wider curl) plus the Sleep-lid slits on the peak
+  (`idleYawn` > 0.45) plus that cooler puff (`sitYawnPuffAmp`)
+  so the curl is not a silent stretch after Walk already
+  puffed; no `idleYawnLids`. A live hunt and Sleep
+  do not pant.
+  After a kill, a sliced dark morsel on Jaw Visual
+  (`LevelArt.White`, no PNG) pulses with `idleChew`; tongue stays off.
+  Sit-arrival or the player walking into `sitRange`: `Bark()`
+  once (`Call`, cooldown 4 s) and hold a look-up at the human
+  (`idleLook` from dy, not `neckP`). Picture: sliced cream puff on Jaw Visual
+  (`LevelArt.White`, no PNG). Forage Walk / sit pant / sit yawn
+  use a cooler puff (`walkPuffAmp` / `sitPuffAmp` /
+  `sitYawnPuffAmp`), not this Call stamp.
+  Ears are two sliced boxes on Head Visual (no PNG, no hinge): perk
+  on greet / hunt-lock `idleLook`, rest sit, pin on hunt Walk / Leap /
+  recover `idleHunt` / Sleep, half-fold on sit sniff / wander track,
+  sit chew folds with the snap (`sitChewEarAmp`), sit yawn folds with the gape (`sitYawnEarAmp`), forage follow Walk flops on the trot clock
+  (`walkEarAmp`). Sit pant after EndWalk reuses that flop on
+  `idlePant` (`sitEarAmp`). Sit look reuses a signed hitch on
+  `idleLook` (`sitLookEarAmp`) so the neck bob is not a rest
+  fold except a binary perk at `idleLook` > 0.45. Sit yawn
+  reuses a fold hitch on `idleYawn` (`sitYawnEarAmp`) so the
+  gape is not a statue half-fold after the jaw already opens.
+  Sit chew reuses a fold hitch on `idleChew` (`sitChewEarAmp`)
+  so the meal is not a statue sniff half-fold after the jaw
+  already snaps. Night Sleep reuses a breath hitch on
+  `idleSleep` (`sitSleepEarAmp`) so the hold is not statue fold
+  0.88 after the snout already dropped. Quiet Forage sit reuses
+  a breath hitch (`sitQuietEarAmp`) so the hold is not statue
+  rest fold 0.20 after chest / rump / neck already hitch. Quiet
+  Forage sit also reuses a breath hitch (`sitQuietBrowAmp`) so
+  the hold is not a rest stamp after chest / rump / neck / ears
+  already hitch. Quiet Forage sit also reuses a breath hitch
+  (`sitQuietMouthAmp`) so the hold is not rest flews after
+  chest / rump / neck / ears / brows already hitch. Quiet
+  Forage sit also reuses a breath hitch (`sitQuietWhiskerAmp`)
+  so the hold is not rest stamps after chest / rump / neck /
+  ears / brows / flews already hitch. Sit chew also creases the brow on that same
+  snap (`sitChewBrowAmp`) so the meal is not a statue sniff
+  furrow after the ear already folds. Sit chew also fans the
+  whiskers on that same snap (`sitChewWhiskerAmp`) so the meal
+  is not a sniff fan+11 Hz after the brow already creases. No
+  `idleEar` / `idleBrow` / `idleWhisker`
+  (`Walk()` would zero them).   Sit look also fans the whiskers
+  (`sitLookWhiskerAmp`) so that hitch is not rest stamps on
+  a nodding snout. Sit yawn also fans the whiskers
+  (`sitYawnWhiskerAmp`) so the gape is not rest stamps after
+  the ears already fold. Sit yawn also raises the brow
+  (`sitYawnBrowAmp`) so the gape is not a rest forehead after
+  the whiskers already fan. Sit yawn also lifts the snout
+  (`sitYawnNoseAmp`) so the gape is not a rest muzzle after
+  the brow already raises. Sit yawn also stretches the lip
+  (`sitYawnMouthAmp`) so the gape is not rest flews after
+  the snout already lifts.   Sit yawn also puffs
+  (`sitYawnPuffAmp`) so the gape is not a silent stretch
+  after the lip already lifts.   Sit yawn also heaves the
+  chest (`sitYawnBreathAmp`) so the gape is not a
+  quiet-sit 0.0018 wobble after the puff already
+  hitches. Sit yawn also heaves the rump
+  (`sitYawnRumpAmp`) so the gape is not a chest-only
+  inhale after the withers already lift. No `idleWhisker` (`Walk()` would zero it).
+  No `idleBrow` (`Walk()` would zero it).
+  No `idleNose` (`Walk()` would zero it).
+  No `idleMouth` (`Walk()` would zero it).
+  No `idlePuff` (`Walk()` would zero it).
+  No `idleBreath` (`Walk()` would zero it).
+  No `idleRump` (`Walk()` would zero it).
+  Sit look also slits the lids on look-down (`sitLookLidAmp`)
+  so that hitch is not a round rest eye on a nodding head.
+  Look-up stays open. Hunt recover owns `SitHuntSquint`.
+  Hunt stalk Walk owns `WalkHuntSquint`. Hunt leap owns
+  `LeapHuntSquint`.
+  No `idleBlink` (`Walk()` would zero it).
+  Sit look also tucks the lip (`sitLookMouthAmp`) so that
+  hitch is not rest flews on a nodding snout. Look-up lifts
+  with the nose; look-down tucks. Sit yawn owns
+  `SitYawnMouth`. Sit chew owns `SitChewMouth`. No `idleMouth` (`Walk()`
+  would zero it).
+  Sit look also heaves Chest Visual (`sitLookBreathAmp`)
+  so that hitch is not a quiet-sit 0.0018 wobble after
+  the neck already nods and the tail already weaves.
+  Look-up lifts; look-down settles. Sit sniff owns
+  `SitSniffBreath`. Sit scratch owns `SitScratchBreath`.
+  Sit yawn owns `SitYawnBreath`. Sit pant owns the
+  `idlePant` chest. Hunt recover owns `SitHuntBreath`. Sit look also heaves Pelvis Visual
+  (`sitLookRumpAmp`) so that hitch is not a chest-only
+  bob after the withers already lift. Look-up lifts;
+  look-down settles. Sit sniff owns `SitSniffRump`. Sit
+  scratch owns `SitScratchRump`. Sit yawn owns
+  `SitYawnRump`. Sit pant owns `SitRump`. Hunt recover owns
+  `SitHuntRump`. Night Sleep owns `SitSleepRump`. Quiet sit
+  owns `SitQuietRump`. No `idleBreath` / `idleRump`
+  (`Walk()` would zero them).
+  Walk also hangs the tongue (`walkPantAmp`), fans the
+  whiskers (`walkWhiskerAmp`), squints the lids (`walkSquintAmp`),
+  drops the snout (`walkNoseAmp`), drops the pupil
+  (`walkEyeAmp`), creases the brow (`walkBrowAmp`), and puffs a
+  pale breath (`walkPuffAmp`).
+  Sit scratch also tucks the near ear on the
+  hind-paw kick (far ear stays the half-fold), drops the pupil
+  toward that paw (`sitScratchEyeAmp`), slits the lid on that
+  kick (`sitScratchLidAmp`), creases the brow on that kick
+  (`sitScratchBrowAmp`), fans the whiskers on that kick
+  (`sitScratchWhiskerAmp`), drops the snout toward that paw
+  (`sitScratchNoseAmp`), tucks the lip toward that paw
+  (`sitScratchMouthAmp`), droops the first tail hinge
+  (`sitScratchTailAmp`), limps Tail2–Tail5 Visual on that
+  kick (`sitScratchDistalTailAmp`), heaves Pelvis Visual on that
+  kick (`sitScratchRumpAmp`), and heaves Chest Visual on
+  that kick (`sitScratchBreathAmp`).
+  Night is shared `Sleep`
+  (`DayNightCycle.Night01`, enter 0.58 / leave 0.38): `EndWalk`, chin
+  down, lids on Head Visual, ears folded, no wag. The first tail hinge
+  droops on that same `idleSleep` (`sitSleepTailAmp`) — leftover sit
+  held rest (`TickSleep` zeros `idleWag`; `IdleTailTarget` fell to
+  `tailBaseAngle`) while the chin already dropped, the lids already
+  shut, and the ears already folded, so the hold still read as an
+  alert tail on a sleeping face; droop is plus, limp, same 12° as sit
+  sniff / yawn, not an 8.5 Hz wag; distal Tail2–Tail5 stay rest spring
+  in physics (muscles only on the first hinge — by design); picture
+  limp is `SitSleepDistalTail`; hunt raise stays on
+  `idleHunt`; hunt leap owns `LeapHuntTail`; forage Walk keeps
+  `WalkTail`; sit look / sniff / scratch / yawn / pant / chew keep
+  their sit droops; `sitSleepTailAmp` 0 = the old rest sleep tail; no
+  `idleTail`, `Walk()` would zero it. Pelvis Visual hitches on that
+  same `idleSleep` (`sitSleepRumpAmp`) — leftover sit held statue
+  (`ApplyRump` skipped Sleep; `TickSleep` zeros `idleWag`) while
+  the chin already dropped, the lids already shut, the ears already
+  folded, the tail already drooped, and Chest Visual already heaved
+  (`BreathLift` 0.0024 slow sin), so the hold still read as a
+  chest-only hitch on a sleeping face; hitch with the sleep breath
+  (same 1.6 clock, in phase, not a see-saw, not a 6.5 Hz pant);
+  hunt recover owns `SitHuntRump`; hunt leap owns `LeapHuntRump`;
+  forage Walk keeps `WalkRumpBob`; sit look / sniff / scratch /
+  yawn / pant / chew keep their sit rumps; quiet sit stays
+  chest-only; `sitSleepRumpAmp` 0 = the old statue sleep rump; no
+  `idleRump`, `Walk()` would zero it. Snout drops on that same
+  `idleSleep` (`sitSleepNoseAmp`) — leftover sit held rest
+  (`ApplyNose` never read idleSleep; TickSleep zeros idleWag; lids
+  own the pupil, not the snout) while the chin already dropped, the
+  lids already shut, the ears already folded, the tail already
+  drooped, mouth / whisker / brow already drooped, and Chest /
+  Pelvis Visual already heaved, so the hold still read as a forage
+  snout on a sleeping face; held drop (milder than sniff dirt, same
+  0.005 as sit pant, not a 6.5 Hz pant); sprite stays on (lids own
+  the eye); hunt drop stays on `idleHunt`; hunt leap owns
+  `LeapHuntNose`; forage Walk keeps `WalkNose`; sit look / sniff /
+  scratch / yawn / pant / chew keep their sit noses; `sitSleepNoseAmp`
+  0 = the old rest sleep muzzle; no `idleNose`, `Walk()` would zero
+  it. Head-Visual ears hitch on that same `idleSleep`
+  (`sitSleepEarAmp`) — leftover sit held statue fold 0.88
+  (`EarFoldWanted` returns 0.88 on idleSleep; TickSleep zeros
+  idleWag) while the chin already dropped, the lids already shut,
+  the tail already drooped, the snout already dropped, mouth /
+  whisker / brow already drooped, and Chest / Pelvis Visual already
+  heaved, so the hold still read as statue ears on a sleeping face;
+  hitch with the sleep breath (same 1.6 clock, in phase, fold
+  0.88 ± 0.06, not a 6.5 Hz pant and not WalkEarFlop); hunt pin
+  stays on `idleHunt`; hunt leap keeps the leap pin; forage Walk
+  keeps `WalkEarFlop`; sit look / yawn / chew / pant keep their sit
+  ears; scratch keeps its kick; `sitSleepEarAmp` 0 = the old statue
+  fold 0.88; no `idleEar`, `Walk()` would zero it. Head-Visual brows
+  hitch on that same `idleSleep` (`sitSleepBrowAmp`) — leftover sit
+  held statue droop (`ApplyBrows` sleep*4 / y −0.003 / ang +10;
+  TickSleep zeros idleWag) while the chin already dropped, the lids
+  already shut, the ears already hitched, the tail already drooped,
+  the snout already dropped, mouth / whisker already drooped, and
+  Chest / Pelvis Visual already heaved, so the hold still read as
+  statue brows on a sleeping face; hitch with the sleep breath
+  (same 1.6 clock, in phase, droop ± a small lift, not a 6.5 Hz
+  pant and not WalkBrow); hunt furrow stays on `idleHunt`; forage
+  Walk keeps `WalkBrow`; sit look / yawn / chew / pant / scratch
+  keep their sit brows; Sleep mouth owns `SitSleepMouth`; Sleep
+  whisker owns `SitSleepWhisker`;
+  `sitSleepBrowAmp` 0 = the old statue sleep droop; no `idleBrow`,
+  `Walk()` would zero it. Head-Visual flews hitch on that same
+  `idleSleep` (`sitSleepMouthAmp`) — leftover sit held statue droop
+  (`ApplyMouth` sleep*4 / y −0.004 / ang −12; TickSleep zeros
+  idleWag) while the chin already dropped, the lids already shut,
+  the ears already hitched, the brows already hitched, the tail
+  already drooped, the snout already dropped, whisker already
+  drooped, and Chest / Pelvis Visual already heaved, so the hold
+  still read as statue flews on a sleeping face; hitch with the
+  sleep breath (same 1.6 clock, in phase, droop ± a small lift,
+  not a 6.5 Hz pant, not a hunt raise, and not SitLookMouth /
+  SitYawnMouth); hunt raise stays on `idleHunt`; forage Walk /
+  sit pant open via WalkPant / idlePant; sit look / yawn / chew /
+  scratch keep their sit flews; Sleep whisker owns `SitSleepWhisker`;
+  `sitSleepMouthAmp` 0 = the old statue sleep droop; no `idleMouth`,
+  `Walk()` would zero it. Head-Visual whiskers hitch on that same
+  `idleSleep` (`sitSleepWhiskerAmp`) — leftover sit held statue
+  droop (`ApplyWhiskers` sleep*4 / sleepAng 10°+30°; TickSleep
+  zeros idleWag) while the chin already dropped, the lids already
+  shut, the ears already hitched, the brows already hitched, the
+  tail already drooped, the snout already dropped, flews already
+  hitch, and Chest / Pelvis Visual already heaved, so the hold
+  still read as statue stamps on a sleeping face; hitch with the
+  sleep breath (same 1.6 clock, in phase, droop ± a small lift,
+  not a 6.5 Hz pant, not an 11 Hz sniff twitch, and not
+  WalkWhisker); hunt pin stays on `idleHunt`; forage Walk /
+  sit pant keep WalkWhisker / SitWhisker; sit look / yawn / chew /
+  scratch keep their sit fans; Quiet sit owns `SitQuietWhisker`;
+  `sitSleepWhiskerAmp` 0 = the old statue sleep droop; no
+  `idleWhisker`, `Walk()` would zero it. Distal Tail2–Tail5 Visuals
+  hitch on that same `idleSleep` (`sitSleepDistalTailAmp`) —
+  leftover sit held the rest-spring stick (`TreeSpring` restAngle
+  0, muscles only on the first hinge — by design; `SitSleepTail`
+  already droops that hinge) so the hold still read as a stiff
+  caudal rod on a sleeping face; picture limp (plus, accumulating
+  6°…12°, hitch ±2° with the sleep breath, same 1.6 clock, in
+  phase, not a 6.5 Hz pant and not a new distal muscle); colliders
+  / springs stay; hunt raise stays on `idleHunt`; forage Walk
+  keeps `WalkTail`; forage Walk distal is `WalkDistalTail`; sit look distal is `SitLookDistalTail`; sit
+  scratch distal is `SitScratchDistalTail`; sit sniff distal is
+  `SitSniffDistalTail`; sit yawn distal is `SitYawnDistalTail`;
+  sit pant distal is `SitPantDistalTail`; sit chew distal is
+  `SitChewDistalTail`; quiet sit distal is `SitQuietDistalTail`;
+  hunt recover sit distal is `SitHuntDistalTail`; hunt stalk Walk
+  distal is `WalkHuntDistalTail`; hunt leap distal is
+  `LeapHuntDistalTail`;
+  `sitSleepDistalTailAmp` 0 =
+  the old rest-spring sleep stick; no `idleTail`, `Walk()` would
+  zero it. Scene `Dog` has no cycle so
+  Night01 stays 0. A live mark still Pursue. Not `Walk()`, not `AddForce`,
+  not a sprite PNG. A dark pupil sits on Head Visual (`LevelArt.White`,
+  no PNG). Without it greet / sit `idleLook` / hunt-lock is a blank
+  yellow box, and the blink slit covers nothing. Look lifts the dot;
+  sniff / hunt drop it. Hunt leap reuses that drop (`leapHuntEyeAmp`)
+  so the pounce is not a rest-Y stare after the lid already slits
+  (`LeapHuntSquint`) and the brow already furrows (`WalkEye` /
+  `SitEye` skip `IsLeap`; `LeapAttack` zeros `idleHunt`). Sleep / yawn peak / blink hide it. Forage
+  follow Walk reuses a milder pant drop on the trot clock
+  (`walkEyeAmp`). Sit pant after EndWalk reuses that drop on
+  `idlePant` (`sitEyeAmp`).   Sit scratch reuses that drop on
+  `idleScratch` (`sitScratchEyeAmp`) so the hind-paw kick is not a
+  rest stare through the ear. Sit chew reuses a drop hitch on
+  `idleChew` (`sitChewEyeAmp`) so the meal is not a held sniff
+  drop after the jaw / neck / nose / lip already snap. Sit chew
+  also reuses a puff hitch on `idleChew` (`sitChewPuffAmp`) so
+  the meal is not a silent lump after the jaw / morsel already
+  snap (`SitYawnPuff` / `SitPuff` skip idleChew). No `idleEye` /
+  `idlePuff` (`Walk()` would zero them). Sit scratch also reuses the Walk/SitSquint slit
+  (`sitScratchLidAmp`) so that drop is not a round rest eye on the
+  kick. No `idleBlink` (`Walk()` would zero it). Two dark
+  brows sit above that pupil (`LevelArt.White`, no PNG). Pupil
+  without a brow is still a yellow box. Look raises; sniff / hunt
+  furrow; Sleep droops and hitches with the breath (`sitSleepBrowAmp`).
+  Night Sleep also hitches the flews (`sitSleepMouthAmp`) so the
+  hold is not statue droop after the brows already hitch.
+  Night Sleep also hitches the whiskers (`sitSleepWhiskerAmp`) so
+  the hold is not statue droop after the flews already hitch.
+  Quiet Forage sit hitches with the quiet chest (`sitQuietBrowAmp`)
+  so the hold is not a rest stamp after chest / rump / neck / ears
+  already hitch. Quiet Forage sit also hitches the flews
+  (`sitQuietMouthAmp`) so the hold is not rest flews after the
+  brows already hitch. Forage follow Walk reuses a milder pant
+  crease on the trot clock (`walkBrowAmp`). Sit pant after
+  EndWalk reuses that crease on `idlePant` (`sitBrowAmp`). Sit
+  scratch reuses that crease on `idleScratch` (`sitScratchBrowAmp`)
+  so the hind-paw kick is not a rest forehead after the pupil
+  already dropped and the lid already slit. Sit yawn reuses a
+  raise hitch on `idleYawn` (`sitYawnBrowAmp`) so the gape is
+  not a rest forehead after the ears already fold and the
+  whiskers already fan.   Sit chew reuses a crease hitch on
+  `idleChew` (`sitChewBrowAmp`) so the meal is not a statue
+  sniff furrow after the jaw already snaps, the lid already
+  slits, and the ear already folds. Sit chew also fans the
+  whiskers on that same snap (`sitChewWhiskerAmp`) so the meal
+  is not a sniff fan+11 Hz after the brow already creases. No
+  `idleBrow` (`Walk()` would zero it). A dark nose sits on the cranial Head Visual
+  (`LevelArt.White`, no PNG). Pupil without a muzzle is still a yellow
+  box. Look lifts; sniff / hunt drop it. Sleep reuses that drop
+  (`sitSleepNoseAmp`) so the hold is not a rest forage muzzle after
+  the lip / whisker / brow already droop and the chest / rump
+  already hitch (`ApplyNose` never read idleSleep; lids still own
+  the pupil, sprite stays on). Hunt leap reuses that drop (`leapHuntNoseAmp`) so the
+  pounce is not a rest muzzle after the pupil already drops
+  (`LeapHuntEye`) and the brow/lips already furrow (`WalkNose` /
+  `SitNose` skip `IsLeap`; `LeapAttack` zeros `idleHunt`). Forage follow Walk reuses a milder pant drop on the trot
+  clock (`walkNoseAmp`). Sit pant after EndWalk reuses that drop
+  on `idlePant` (`sitNoseAmp`). Sit chew reuses a drop hitch on
+  `idleChew` (`sitChewNoseAmp`) so the meal is not a held sniff
+  drop after the jaw / neck already snap. Sit scratch reuses that drop on
+  `idleScratch` (`sitScratchNoseAmp`) so the hind-paw kick is not
+  a rest muzzle after the pupil already dropped, the lid already
+  slit, the brow already creased, and the whiskers already fanned.
+  Sit yawn reuses a lift hitch on `idleYawn` (`sitYawnNoseAmp`)
+  so the gape is not a rest muzzle after the brow already
+  raises.   Sit yawn also stretches the lip (`sitYawnMouthAmp`)
+  so that hitch is not rest flews after the snout already
+  lifts. Sit yawn also puffs (`sitYawnPuffAmp`) so that
+  hitch is not a silent stretch after the lip already
+  lifts.   Sit yawn also heaves the chest (`sitYawnBreathAmp`)
+  so that hitch is not a quiet-sit 0.0018 wobble after
+  the puff already hitches. Sit yawn also heaves the
+  rump (`sitYawnRumpAmp`) so that hitch is not a
+  chest-only inhale after the withers already lift.
+  No `idleNose` (`Walk()` would zero it).
+  No `idleMouth` (`Walk()` would zero it).
+  No `idlePuff` (`Walk()` would zero it).
+  No `idleBreath` (`Walk()` would zero it).
+  No `idleRump` (`Walk()` would zero it). Three thin whiskers sit
+  caudal of that nose (`LevelArt.White`, no PNG). Nose without them is
+  still a stamp on the yellow box. Sniff fans and twitches; hunt / Leap
+  pin back; Sleep droops. Look follows the nose. Forage follow Walk
+  fans a milder twitch on the trot clock (`walkWhiskerAmp`). Sit
+  pant after EndWalk reuses that fan on `idlePant`
+  (`sitWhiskerAmp`). Sit scratch reuses that fan on
+  `idleScratch` (`sitScratchWhiskerAmp`) so the hind-paw kick is
+  not rest stamps after the pupil already dropped, the lid already
+  slit, and the brow already creased. Sit look reuses a signed
+  fan on `idleLook` (`sitLookWhiskerAmp`) so the neck bob is
+  not rest stamps after the ears already hitch. Sit yawn
+  reuses a fold fan on `idleYawn` (`sitYawnWhiskerAmp`) so
+  the gape is not rest stamps after the ears already fold.
+  Sit chew reuses a fan hitch on `idleChew` (`sitChewWhiskerAmp`)
+  so the meal is not a sniff fan+11 Hz after the jaw already
+  snaps, the lid already slits, the ear already folds, and the
+  brow already creases. Quiet Forage sit reuses a breath hitch
+  (`sitQuietWhiskerAmp`) so the hold is not rest stamps after
+  chest / rump / neck / ears / brows / flews already hitch.
+  Night Sleep reuses a breath hitch (`sitSleepWhiskerAmp`) so
+  the hold is not statue droop after the flews already hitch
+  (`ApplyWhiskers` held sleep*4). No `idleWhisker`
+  (`Walk()` would zero it). Sit look also slits the lids on
+  look-down (`sitLookLidAmp`) so that bob is not a round rest
+  eye after the pupil already dropped. Look-up stays open.
+  No `idleBlink` (`Walk()` would zero it). A dark lip sits ventral of that nose on Head
+  Visual (`LevelArt.White`, no PNG). Whiskers without a mouth are still
+  stamps on the yellow box. Look follows the nose; sniff drops; hunt /
+  Leap raise the flews so Jaw fangs read as a snarl; Sleep droops;
+  pant / yawn / chew open with DriveJaw. Sit scratch reuses a
+  sniff-like tuck on `idleScratch` (`sitScratchMouthAmp`) so the
+  hind-paw kick is not rest flews after the snout already dropped.
+  Sit look reuses a signed hitch on `idleLook` (`sitLookMouthAmp`)
+  so the neck bob is not rest flews after the lids already slit.
+  Look-up lifts with the nose; look-down tucks. Sit yawn reuses a
+  lift hitch on `idleYawn` (`sitYawnMouthAmp`) so the gape is not
+  rest flews after the snout already lifts. Stretch, not a hunt
+  raise. Hunt raise stays on `idleHunt`. Sniff keeps its own dirt
+  tuck. Sit chew reuses a tuck hitch on `idleChew`
+  (`sitChewMouthAmp`) so the meal is not a held sniff tuck after
+  the jaw / neck / nose already snap. Quiet Forage sit reuses a
+  breath hitch (`sitQuietMouthAmp`) so the hold is not rest
+  flews after chest / rump / neck / ears / brows already hitch.
+  Night Sleep reuses a breath hitch (`sitSleepMouthAmp`) so the
+  hold is not statue droop after the brows already hitch
+  (`ApplyMouth` held sleep*4). Night Sleep also reuses a breath
+  hitch (`sitSleepWhiskerAmp`) so the hold is not statue droop
+  after the flews already hitch (`ApplyWhiskers` held sleep*4).
+  Quiet Forage sit also reuses a
+  breath hitch (`sitQuietWhiskerAmp`)
+  so the hold is not rest stamps after the flews already hitch.
+  Sit yawn also puffs (`sitYawnPuffAmp`) so that gape is
+  not a silent stretch after the lip already lifts. Slow
+  stretch, not a 6.5 Hz pant. Hunt crack stays on `idleHunt`.
+  Sit yawn also heaves the chest (`sitYawnBreathAmp`) so that
+  gape is not a quiet-sit 0.0018 wobble after the puff already
+  hitches. Sit yawn also heaves the rump (`sitYawnRumpAmp`) so
+  that gape is not a chest-only inhale after the withers already
+  lift. No `idleMouth` (`Walk()` would zero it).
+  No `idlePuff` (`Walk()` would zero it).
+  No `idleBreath` (`Walk()` would zero it).
+  No `idleRump` (`Walk()` would zero it). Sit look also hitches
+  the first tail hinge (`sitLookTailAmp`) so that bob is not an
+  8.5 Hz sit metronome after the face already weaves. Look-up
+  perks; look-down droops. Sit look also limps Tail2–Tail5 Visual
+  (`sitLookDistalTailAmp`) so the glance is not a rest-spring
+  stick after the first hinge already hitches (`SitLookTail`;
+  muscles stay on the first hinge). Hunt raise stays on `idleHunt`. Sit look
+  also heaves Chest Visual (`sitLookBreathAmp`) so that bob is
+  not a quiet-sit 0.0018 wobble after the tail already weaves.
+  Look-up lifts; look-down settles. Sit sniff owns
+  `SitSniffBreath`. Sit scratch owns `SitScratchBreath`. Sit
+  yawn owns `SitYawnBreath`. Sit pant owns the `idlePant`
+  chest. Hunt recover owns `SitHuntBreath`. Sit look also heaves Pelvis Visual
+  (`sitLookRumpAmp`) so that bob is not a chest-only hitch
+  after the withers already lift. Look-up lifts;
+  look-down settles. Sit sniff owns `SitSniffRump`. Sit
+  scratch owns `SitScratchRump`. Sit yawn owns
+  `SitYawnRump`. Sit pant owns `SitRump`. Hunt recover owns
+  `SitHuntRump`. Night Sleep owns `SitSleepRump`. Quiet sit
+  owns `SitQuietRump`. No `idleBreath` / `idleRump`
+  (`Walk()` would zero them). Sit
+  pant droops that same hinge (`sitPantTailAmp`) so EndWalk is
+  not an 8.5 Hz sit metronome after the jaw already pumps. Sit
+  pant also limps Tail2–Tail5 Visual (`sitPantDistalTailAmp`) so
+  the hang is not a rest-spring stick after the first hinge already
+  droops (`SitPantTail`; muscles stay on the first hinge). Sit
+  sniff droops that same
+  hinge (`sitSniffTailAmp`) so the dirt track is not an 8.5 Hz
+  sit metronome after the muzzle already weaves. Sit sniff also
+  limps Tail2–Tail5 Visual (`sitSniffDistalTailAmp`) so the
+  track is not a rest-spring stick after the first hinge already
+  droops (`SitSniffTail`; muscles stay on the first hinge). Sit scratch
+  droops that same hinge (`sitScratchTailAmp`) so the hind-paw
+  kick is not an 8.5 Hz sit metronome after the face already
+  weaves. Sit scratch also limps Tail2–Tail5 Visual
+  (`sitScratchDistalTailAmp`) so the kick is not a rest-spring
+  stick after the first hinge already droops (`SitScratchTail`;
+  muscles stay on the first hinge). Sit yawn droops that same hinge (`sitYawnTailAmp`) so
+  the gape is not an 8.5 Hz sit metronome after the jaw already
+  opens. Sit yawn also limps Tail2–Tail5 Visual
+  (`sitYawnDistalTailAmp`) so the gape is not a rest-spring
+  stick after the first hinge already droops (`SitYawnTail`;
+  muscles stay on the first hinge). Sit chew droops that same hinge (`sitChewTailAmp`) so
+  the meal is not a rest tail after the jaw already snaps. Sit chew
+  also limps Tail2–Tail5 Visual (`sitChewDistalTailAmp`) so the
+  meal is not a rest-spring stick after the first hinge already
+  droops (`SitChewTail`; muscles stay on the first hinge).
+  Quiet sit also limps Tail2–Tail5 Visual (`sitQuietDistalTailAmp`)
+  so the hold is not a rest-spring stick after the first hinge
+  already wags at 8.5 Hz (`IdleTailTarget`; muscles stay on the
+  first hinge).   Forage Walk also limps Tail2–Tail5 Visual
+  (`walkDistalTailAmp`) so the gait is not a rest-spring stick
+  after the first hinge already clocks `walkPhase` (`WalkTail`;
+  muscles stay on the first hinge). Hunt recover sit also perks
+  Tail2–Tail5 Visual (`sitHuntDistalTailAmp`) so the 0.70 s coil
+  is not a rest-spring stick after the first hinge already
+  raises (`IdleTailTarget` `idleHunt`; muscles stay on the first
+  hinge). Hunt stalk Walk also perks Tail2–Tail5 Visual
+  (`walkHuntDistalTailAmp`) so the chase is not a rest-spring
+  stick after the first hinge already raises (`IdleTailTarget`
+  `idleHunt`; muscles stay on the first hinge). Hunt leap also perks
+  Tail2–Tail5 Visual (`leapHuntDistalTailAmp`) so the pounce is
+  not a rest-spring stick after the first hinge already raises
+  (`LeapHuntTail`; muscles stay on the first hinge). Night Sleep droops that same
+  hinge (`sitSleepTailAmp`) so the hold is not a rest tail after the
+  chin already drops, the lids already shut, and the ears already
+  fold. No `idleTail`
+  (`Walk()` would zero it).   Awake Forage blinks the same Head-Visual slits
+  (~0.12 s, 2–5 s gap); Sleep holds them shut; yawn peak holds them
+  shut so the jaw gape is not a stare. Forage follow Walk reuses a
+  thinner slit on the trot clock (`walkSquintAmp`). Sit pant after
+  EndWalk reuses that slit on `idlePant` (`sitSquintAmp`). Sit
+  scratch reuses that slit on `idleScratch` (`sitScratchLidAmp`) so
+  the hind-paw kick is not a round rest eye after the pupil already
+  dropped. Sit look reuses that slit on look-down (`sitLookLidAmp`)
+  so the neck bob is not a round rest eye after the pupil already
+  dropped. Look-up stays open. Hunt recover sit reuses that slit
+  (`sitHuntLidAmp`) so the 0.70 s coil is not a round rest eye
+  after the pupil already drops. Hunt stalk Walk reuses that
+  slit (`walkHuntLidAmp`) so the chase is not a round rest eye
+  after the pupil already drops (`WalkSquint` skips `idleHunt`;
+  `SitHuntSquint` skips Walk). Hunt leap reuses that slit
+  (`leapHuntLidAmp`) so the pounce is not a round rest eye
+  after the brow already furrows (`WalkHuntSquint` /
+  `SitHuntSquint` skip `IsLeap`; `LeapAttack` zeros
+  `idleHunt`). Sit chew reuses that slit (`sitChewLidAmp`) so
+  the meal is not an open sniff-track eye after the jaw already
+  snaps (`SitSquint` skips idleChew; sniff keeps the open
+  track eye). Sit chew also reuses that pupil drop
+  (`sitChewEyeAmp`) so the meal is not a held sniff stare
+  after the lid already slits (`WalkEye` / `SitEye` skip
+  idleChew; sniff keeps the held dirt drop). No `idleBlink` /
+  `idleEye` (`Walk()` would zero them). Off-camera
+  `energyRest` skips the pulse.
+  Sit / Sleep also heave Chest Visual (collider stays): slow on Sleep,
+  quiet Forage sit, bigger on `idlePant`. Sit yawn reuses that
+  heave (`sitYawnBreathAmp`) so the gape is not a quiet-sit
+  0.0018 wobble after the jaw already opens. Sit sniff reuses that
+  heave (`sitSniffBreathAmp`) so the dirt track is not a quiet-sit
+  0.0018 wobble after the nose already tracks. Sit scratch reuses that
+  heave (`sitScratchBreathAmp`) so the hind-paw kick is not a quiet-sit
+  0.0018 wobble after the rump already hitches. Sit look reuses that
+  heave (`sitLookBreathAmp`) so the neck bob is not a quiet-sit
+  0.0018 wobble after the face and tail already weave. Hunt recover
+  sit reuses that heave (`sitHuntBreathAmp`) so the 0.70 s coil is
+  not a quiet-sit 0.0018 wobble after the snarl and paw already live.
+  Sit chew reuses that heave (`sitChewBreathAmp`) so the meal is
+  not a quiet-sit 0.0018 wobble after the jaw already snaps and
+  the paw already shuffles. Hunt leap reuses that heave
+  (`leapHuntBreathAmp`) so the pounce is not a statue chest after
+  the lid / pupil / nose / puff already coil (`BreathLift` /
+  `SitHuntBreath` skip `IsLeap`; `LeapAttack` zeros `idleHunt`).
+  Hunt leap also heaves Pelvis Visual (`leapHuntRumpAmp`) so the
+  pounce is not a chest-only hitch after the withers already
+  lift (`ApplyRump` / `SitHuntRump` skip `IsLeap`; `LeapAttack`
+  zeros `idleHunt`).   Hunt leap also raises the first hinge
+  (`leapHuntTailAmp`) so the pounce is not a rest tail after
+  the withers and rump already hitch (`DriveLeap` holds
+  `tailBaseAngle`; hunt raise on `idleHunt`; `LeapAttack`
+  zeros `idleHunt`). Hunt leap also perks Tail2–Tail5 Visual
+  (`leapHuntDistalTailAmp`) so the pounce is not a rest-spring
+  stick after the first hinge already raises (`LeapHuntTail`;
+  muscles stay on the first hinge).   Night Sleep also heaves Pelvis Visual
+  (`sitSleepRumpAmp`) so the hold is not a chest-only hitch after
+  the withers already lift (`ApplyRump` skipped `idleSleep`;
+  `TickSleep` zeros `idleWag`). Night Sleep also drops the snout
+  (`sitSleepNoseAmp`) so the hold is not a rest forage muzzle after
+  the lip / whisker / brow already droop (`ApplyNose` never read
+  `idleSleep`). Night Sleep also hitches the Head-Visual ears
+  (`sitSleepEarAmp`) so the hold is not statue fold 0.88 after
+  the snout already dropped (`EarFoldWanted` returns 0.88 on
+  idleSleep). Night Sleep also hitches the Head-Visual brows
+  (`sitSleepBrowAmp`) so the hold is not statue droop after the
+  ears already hitch (`ApplyBrows` held sleep*4). Night Sleep also
+  hitches the Head-Visual flews (`sitSleepMouthAmp`) so the hold
+  is not statue droop after the brows already hitch (`ApplyMouth`
+  held sleep*4). Night Sleep also hitches the Head-Visual whiskers
+  (`sitSleepWhiskerAmp`) so the hold is not statue droop after the
+  flews already hitch (`ApplyWhiskers` held sleep*4). Night Sleep
+  also limps Tail2–Tail5 Visual (`sitSleepDistalTailAmp`) so the
+  hold is not a rest-spring stick after the first hinge already
+  droops (`SitSleepTail`; muscles stay on the first hinge).
+     Sit chew also heaves Pelvis Visual
+  (`sitChewRumpAmp`) so the meal is not a chest-only hitch after
+  the withers already lift. Sit chew also droops the first hinge
+  (`sitChewTailAmp`) so the meal is not a rest tail after the
+  withers and rump already hitch. Sit chew also limps Tail2–Tail5
+  Visual (`sitChewDistalTailAmp`) so the meal is not a rest-spring
+  stick after the first hinge already droops (`SitChewTail`;
+  muscles stay on the first hinge). Sit chew also slits the lids
+  (`sitChewLidAmp`) so the meal is not an open sniff-track
+  eye after the jaw already snaps.   Sit chew also folds the
+  ears (`sitChewEarAmp`) so the meal is not a statue sniff
+  half-fold 0.42 after the lid already slits. Sit chew also
+  creases the brow (`sitChewBrowAmp`) so the meal is not a
+  statue sniff furrow after the ear already folds. Sit chew
+  also fans the whiskers (`sitChewWhiskerAmp`) so the meal is
+  not a sniff fan+11 Hz after the brow already creases. Sit chew
+  also drops the SPD neck (`sitChewHeadAmp`) so the meal is not
+  a held sniff 16° after the whiskers already hitch. Sit chew
+  also drops the snout (`sitChewNoseAmp`) so the meal is not a
+  held sniff drop after the neck already hitches. Sit chew
+  also tucks the lip (`sitChewMouthAmp`) so the meal is not a
+  held sniff tuck after the snout already hitches. Sit chew
+  also drops the pupil (`sitChewEyeAmp`) so the meal is not a
+  held sniff drop after the lip already hitches. Sit chew
+  also puffs (`sitChewPuffAmp`) so the meal is not a silent
+  lump after the pupil already hitches. Forage trot reuses that
+  child (`walkBobAmp`). Sit pant after EndWalk also heaves Pelvis
+  Visual (`sitRumpAmp`) so the hang is not a statue rump after Walk
+  already bobbed; sit yawn reuses that heave (`sitYawnRumpAmp`) so
+  the gape is not a chest-only inhale after the withers already
+  lift; sit sniff reuses that heave (`sitSniffRumpAmp`) so the
+  dirt track is not a chest-only bob after the withers already
+  lift; sit scratch reuses that heave (`sitScratchRumpAmp`) so
+  the hind-paw kick is not a statue rump after the face and
+  tail already weave; sit look reuses that heave
+  (`sitLookRumpAmp`) so the neck bob is not a chest-only
+  hitch after the withers already lift; hunt recover sit
+  reuses that heave (`sitHuntRumpAmp`) so the 0.70 s coil
+  is not a chest-only hitch after the withers already
+  lift; hunt leap reuses that heave (`leapHuntRumpAmp`) so
+  the pounce is not a chest-only hitch after the withers
+  already lift; hunt leap also raises the first hinge
+  (`leapHuntTailAmp`) so the pounce is not a rest tail after
+  the withers and rump already hitch; hunt recover sit also
+  perks Tail2–Tail5 Visual (`sitHuntDistalTailAmp`) so the
+  0.70 s coil is not a rest-spring stick after the first hinge
+  already raises; hunt stalk Walk also perks Tail2–Tail5 Visual
+  (`walkHuntDistalTailAmp`) so the chase is not a rest-spring
+  stick after the first hinge already raises; hunt leap also perks
+  Tail2–Tail5 Visual (`leapHuntDistalTailAmp`) so the pounce
+  is not a rest-spring stick after the first hinge already
+  raises; sit chew reuses that heave (`sitChewRumpAmp`) so
+  the meal is not a chest-only hitch after the withers
+  already lift; night Sleep reuses that heave (`sitSleepRumpAmp`)
+  so the hold is not a chest-only hitch after the withers already
+  lift; night Sleep also drops the snout (`sitSleepNoseAmp`) so
+  the hold is not a rest forage muzzle; night Sleep also hitches
+  the ears (`sitSleepEarAmp`) so the hold is not statue fold 0.88;
+  night Sleep also hitches the brows (`sitSleepBrowAmp`) so the
+  hold is not statue droop; night Sleep also hitches the flews
+  (`sitSleepMouthAmp`) so the hold is not statue droop; night Sleep
+  also hitches the whiskers (`sitSleepWhiskerAmp`) so the hold is
+  not statue droop; night Sleep also limps Tail2–Tail5 Visual
+  (`sitSleepDistalTailAmp`) so the hold is not a rest-spring stick;
+  quiet sit owns `SitQuietRump`. Sit pant also
+  drops the SPD neck (`sitHeadAmp`, hang 0.55 + pump, ~3°) so the
+  hang is not a statue world-0 head after Walk already nodded; quiet
+  sit owns `SitQuietHead` (`sitQuietHeadAmp`, 1.2° on the 2.5 chest
+  clock); quiet sit ears own `SitQuietEar` (`sitQuietEarAmp`, fold
+  0.20 ± 0.05 on that same clock); quiet sit brows own
+  `SitQuietBrow` (`sitQuietBrowAmp`, droop ± lift on that same
+  clock); quiet sit mouth owns `SitQuietMouth`
+  (`sitQuietMouthAmp`, droop ± lift on that same clock); quiet
+  sit whiskers own `SitQuietWhisker` (`sitQuietWhiskerAmp`,
+  droop ± lift on that same clock); Sleep mouth owns
+  `SitSleepMouth` (`sitSleepMouthAmp`, droop ± lift on the 1.6
+  sleep clock); Sleep whiskers own `SitSleepWhisker`
+  (`sitSleepWhiskerAmp`, droop ± lift on the 1.6 sleep clock);
+  Sleep distal owns `SitSleepDistalTail` (`sitSleepDistalTailAmp`,
+  accumulating limp ± hitch on the 1.6 sleep clock). Sit sniff
+  distal owns `SitSniffDistalTail` (`sitSniffDistalTailAmp`,
+  accumulating limp on the ~3 Hz dirt bob). Sit yawn distal
+  owns `SitYawnDistalTail` (`sitYawnDistalTailAmp`, accumulating
+  limp on the yawn envelope). Sit pant distal owns
+  `SitPantDistalTail` (`sitPantDistalTailAmp`, accumulating limp
+  on the hang 0.55 + 6.5 Hz pump).   Sit chew distal owns
+  `SitChewDistalTail` (`sitChewDistalTailAmp`, accumulating limp
+  on the hang 0.55 + 11 Hz snap). Sit look distal owns
+  `SitLookDistalTail` (`sitLookDistalTailAmp`, accumulating limp
+  on the signed bob). Sit scratch distal owns
+  `SitScratchDistalTail` (`sitScratchDistalTailAmp`, accumulating limp
+  on the hang 0.55 + ~14 Hz rake). Quiet sit distal owns
+  `SitQuietDistalTail` (`sitQuietDistalTailAmp`, accumulating limp
+  on the 8.5 Hz first-hinge wag).   Forage Walk distal owns
+  `WalkDistalTail` (`walkDistalTailAmp`, accumulating limp on the
+  two-dip `walkPhase` first-hinge wag). Hunt recover sit distal
+  owns `SitHuntDistalTail` (`sitHuntDistalTailAmp`, accumulating
+  perk on the held `idleHunt` first-hinge raise). Hunt stalk Walk
+  distal owns `WalkHuntDistalTail` (`walkHuntDistalTailAmp`,
+  accumulating perk on the held `idleHunt` first-hinge raise).
+  Hunt leap distal owns
+  `LeapHuntDistalTail` (`leapHuntDistalTailAmp`, accumulating
+  perk on the held 0.85 first-hinge raise).
+  `energyRest` / CLI walk
+  restore. Hunt leap owns `LeapHuntBreath` / `LeapHuntRump` /
+  `LeapHuntTail` / `LeapHuntDistalTail`. Hunt recover sit
+  owns `SitHuntBreath` / `SitHuntRump` / `SitHuntHead` /
+  `SitHuntSquint` / `SitHuntPuff` / `SitHuntDistalTail`. Hunt stalk Walk owns
+  `WalkHuntSquint` / `WalkHuntPuff` / `WalkHuntDistalTail`. Hunt
+  leap owns `LeapHuntSquint` / `LeapHuntEye` / `LeapHuntNose` /
+  `LeapHuntPuff` / `LeapHuntBreath` / `LeapHuntRump` /
+  `LeapHuntTail` / `LeapHuntDistalTail`.
+  Night Sleep owns `SitSleepTail` / `SitSleepRump` / `SitSleepNose` /
+  `SitSleepEar` / `SitSleepBrow` / `SitSleepMouth` /
+  `SitSleepWhisker` / `SitSleepDistalTail`.   Quiet sit owns `SitQuietRump` /
+  `SitQuietHead` / `SitQuietEar` / `SitQuietBrow` /
+  `SitQuietMouth` / `SitQuietWhisker` / `SitQuietDistalTail`.
+  Sit chew owns `SitChewBreath` / `SitChewRump` / `SitChewTail` /
+  `SitChewDistalTail` / `SitChewSquint` / `SitChewEar` /
+  `SitChewBrow` / `SitChewWhisker` /
+  `SitChewHead` / `SitChewNose` / `SitChewMouth` / `SitChewEye` /
+  `SitChewPuff`. No
+  `idleBreath` / `idleRump` / `idleHead` / `idleBlink` /
+  `idleEye` / `idleNose` / `idleTail` / `idleEar` /
+  `idleBrow` / `idleWhisker` / `idleMouth` / `idlePuff`
+  (`Walk()` would zero them).
+  Brain writes the floats; body overlays SPD targets
+  in `Balancing`, and the tail / forage-neck overlay also in `Walk`.
+  Leap tail overlay is `DriveLeap` (`LeapHuntTail`). Sleep tail
+  overlay is `IdleTailTarget` (`SitSleepTail`). Sleep rump overlay
+  is `ApplyRump` (`SitSleepRump`). Sleep nose overlay is `ApplyNose`
+  (`SitSleepNose`). Sleep ear overlay is `ApplyEars` (`SitSleepEar`).
+  Sleep brow overlay is `ApplyBrows` (`SitSleepBrow`). Sleep mouth
+  overlay is `ApplyMouth` (`SitSleepMouth`). Sleep whisker overlay
+  is `ApplyWhiskers` (`SitSleepWhisker`).   Distal overlay is
+  `ApplyDistalTail` (`SitSleepDistalTail` / `SitSniffDistalTail` /
+  `SitYawnDistalTail` / `SitPantDistalTail` / `SitChewDistalTail` /
+  `SitLookDistalTail` / `SitScratchDistalTail` /
+  `SitQuietDistalTail` / `SitHuntDistalTail` / `WalkHuntDistalTail` /
+  `WalkDistalTail` / `LeapHuntDistalTail`). Quiet sit
+  rump overlay is `ApplyRump` (`SitQuietRump`).   Quiet sit neck
+  overlay is `IdleNeckWorldTarget` (`SitQuietHead`). Quiet sit
+  ear overlay is `ApplyEars` (`SitQuietEar`). Quiet sit brow
+  overlay is `ApplyBrows` (`SitQuietBrow`). Quiet sit mouth
+  overlay is `ApplyMouth` (`SitQuietMouth`). Quiet sit whisker
+  overlay is `ApplyWhiskers` (`SitQuietWhisker`). Quiet sit
+  distal overlay is `ApplyDistalTail` (`SitQuietDistalTail`).
+  Forage Walk distal overlay is `ApplyDistalTail` (`WalkDistalTail`).
+  Hunt recover sit distal overlay is `ApplyDistalTail` (`SitHuntDistalTail`).
+  Hunt stalk Walk distal overlay is `ApplyDistalTail` (`WalkHuntDistalTail`).
+  Hunt leap distal overlay is `ApplyDistalTail` (`LeapHuntDistalTail`).
+  `Walk()` /
+  `LeapAttack` clear them; Forage then writes `idleWag` again (wander
+  also `idleSniff`).
+  Baked leftover (DOG-3 `dog_w10`): period **0.40**, hip/shoulder
+  flex **8**, extend **10**, knee/elbow **18**, plant **0.70**,
+  chest **−8**. Best honest speed **0.079 m/s (0.286 km/h)**;
+  5 km/h not reached. Large flex/extend pitches the pelvis
+  (L/R share X, so a diagonal is a pitch couple).
+- No `AddForce` up. No `HingeJoint2D.useMotor`. No play keys.
+
+## Paw torque (geometry)
+
+`τ_max = m * g * lever_to_edge / n`. At 25 kg, paw ~0.08 m, toe ~0.055,
+heel ~0.025, four-way share ≈ **3.4 / 1.5 N·m**; pair-pitch ≈ **7 / 3**.
+Do not copy human 65 / 22.
+
+## Sensors
+
+Read only. `VestibularSystem` may `Find("Chest")` after `Torso` (human
+unchanged). Do not use stock `CenterOfMassCalculator` (`LeftLegFoot`).
+Four named paws; last support if all airborne. No player camera as eyes.
+
+## Ostrich-class bugs (dog)
+
+- Rear knee `−120…0`: shin folds cranial of the hip–paw line.
+- Front elbow `−140…0` (human arm): paw reaches forward/up.
+- Knee plus and elbow minus (human pair): one pair mirrored.
+- Front carpus with wrist PD, or any paw muscle-D: fall in ~2–3 s.
+- Chest PD to pelvis angle: chest rides the pelvis down.
+- Checking the sign by summing a near-zero chain (flat paws).
+
+## Budget
+
+One dog ≈ 22 bodies (four columns + jaw + five-vertebra tail). Not a pack in `World`.

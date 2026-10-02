@@ -1,0 +1,48 @@
+---
+description: Russian only in live chat with Yury. Everything else is English, always — existing and new.
+alwaysApply: true
+---
+
+# Language — ironclad
+
+**Russian exists in exactly one place: live chat between an agent and Yury.**
+That is the only exception. Token thrift is the reason: rules, cards, comments,
+scripts, and reports stay English so every agent rereads one language.
+
+**Everything else is English. Always. Existing and new.**
+If leftover Russian is found, translate it or rename the file. Do not leave
+Cyrillic in the repo “because it is old”.
+
+| Surface | Language |
+|---|---|
+| Live chat answers to Yury | Russian |
+| Rule files (`.mdc`), agent profiles, task cards | English |
+| Code comments (C#, PowerShell, Python, Bash, …) | English |
+| `[Header]`, `[Tooltip]`, Inspector text | English |
+| `Debug.Log` / `Write-Host` / overlay / exceptions | English |
+| `DOCS.md`, `CURRENT.md`, READMEs, trial narrative `.md` | English |
+| Git commit messages | English |
+| Agent-to-agent notes in the project | English |
+| File and folder names | English (rename leftovers) |
+
+Do not put Russian — including quotes and examples — inside a rule, card,
+agent profile, README, or source file.
+
+# What must not be translated
+
+Class names, function names, variables, Unity API names, CLI arguments, and
+metric names stay in their original English/code form (`FixedUpdate`,
+`Rigidbody2D`, `HingeJoint2D`, `fell`, `pelvisDrop`).
+
+Do not rename historical trial labels or baseline folder names
+(`Trials/Baselines/stable-pd/`, run ids). Those are identifiers, not prose.
+
+Do not rewrite historical `Trials/Runs/*.json` / `*.csv` payloads. They are
+stand records, not documents.
+
+# Comments
+
+New comments explain why and the physical meaning; they do not restate the
+line. A leftover Russian comment is not “existing style” — translate it.
+
+When editing any project file, the result must contain no Cyrillic.

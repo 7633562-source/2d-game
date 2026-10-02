@@ -1,0 +1,848 @@
+---
+description: World layer — procedural levels, no body physics
+alwaysApply: true
+---
+
+# Levels
+
+World layer: `LevelGenerator`, `StaticPlatform`, `LevelPiece`, `LevelGrove`.
+Showcase scene: `Assets/Scenes/World.unity`. Drawn level: `Assets/Scenes/Level1.unity`.
+There are no level prefabs.
+
+## Scenes — do not mix
+
+| Scene | Whose | What is inside |
+|---|---|---|
+| `SampleScene` | physics / stand | camera + `GameManager` (`GameProcess`, `GroundBuilder`). Simple. **Do not touch.** |
+| `Bird` | flight + bird AI | flat ground, `humanCount = 0`, `birdCount = 1`, `birdDrive` wander. No generator. |
+| `BirdFlock50` | flock AI | flat ground, `birdCount = 50`, `birdDrive` wander. No generator. |
+| `Chicken` | hens | flat ground, `birdCount = 5`, `birdKind` chicken. No generator. |
+| `Tree` | plants | flat ground, `treeCount = 9`, `flowerCount = 12`. Do not attach the generator. |
+| `Dog` | quadruped | flat ground, `dogCount ≥ 1`. Do not attach the generator. |
+| `Campfire` | fire lab | flat ground, `spawnCampfire`. Logs + tongue pool + ParticleSystem at x = 0, y = −2. No generator, no human, no birds, no trees. |
+| `World` | showcase | `WorldManager` + `LevelGenerator` Test1. One human, flock 6, hens 10, dogs 3, Static grove. `treeCount` 0. No apple / strawberries / hedgehog. |
+| `Level1` | drawn yard | `Level1Manager` + Test1 tape. Player at x = −8, Static apple at x = 0 with 20 crows, campfire −4.6, three strawberries, hedgehog at −6.4. `plantDrawnLevel` on. No hens, no dogs, `treeCount` 0. |
+| `Clearing` | first real location | `ClearingManager` + Test1 tape, `clearingProps` on with `plantDrawnLevel`. Player at x = −8. Static grove + one Sway oak at −14, three strawberries, the seven-flower bed, campfire at its drawn spot, `DayNightCycle`. No birds / hens / dogs / hedgehog, `treeCount` 0. |
+
+`HeadlessTrial` and `HeadlessBuild` stay on `SampleScene` and draw flat
+ground themselves. `World`, `Level1`, and `Bird` are not in the stand build.
+
+Do not attach the generator on `SampleScene`, `Bird`, `BirdFlock50`,
+`Chicken`, `Tree`, `Dog`, or `Campfire`, and do not call `AddComponent<LevelGenerator>`.
+`GameProcess` starts the yard when a human is present and `LevelGenerator`
+is already on the object. Bird / Chicken / Dog scenes have no generator,
+so their leash stays on flat ground. World is the all-creatures showcase
+on the Test1 tape. Level1 is the drawn tableau on the same tape. Do not
+set `treeCount` on World or Level1. Clearing is the first real location on
+the same tape: `clearingProps` keeps the drawn arrangement (spawn −8, the
+fire at its drawn spot) but plants the showcase Static grove and the
+clearing's own props (berries, the bed, one oak) instead of the Level1
+tableau; it plants no creatures and its `treeCount` stays 0 too.
+
+## Profiles
+
+| Profile | Where | Ground |
+|---|---|---|
+| `Flat` | stand, no `LevelGenerator` | `GroundBuilder`, one rectangle |
+| `Test1` | `World` and `Level1` | authored "Yard": 5 cm curbs with a dip, square, gate and lookout; finish sign at x=48; tape to x=96 |
+| `Course` | `course` flag | random steps with no gaps |
+| `Steps` | `steps` flag | even stair by `stepHeight` |
+
+`LevelGenerator.plantDrawnLevel` splits the two Test1 scenes: off = World
+grove only; on = Level1 apple / strawberries / hedgehog. `playerSpawnX`
+is copied to `LevelTest1.PlayerX` in `ApplyOverrideFlag` (World 0, Level1 −8).
+
+Textures: `Assets/Resources/Level/` and fallback path `Art/dirt`, `Art/grass`.
+visul assignment — `Tools/visul-test1-textures.md`.
+Do not touch `SampleScene`.
+
+Parallax: `LevelBackdrop` builds 9 layers under `ParallaxRoot` (not under
+`Level`): sky, drifting clouds, horizon, mountains, hills, woods.
+`follow` near 1 = horizon almost glued to the camera; near 0 =
+moves like the ground. Clouds are picture boxes on follow 0.985; wind is
+a local X drift with a wrap around the camera, not a long tape.
+Night stars live on `DayNightCycle`, not under `ParallaxRoot`: glued to
+the camera, alpha from `Night01`. They stay out of the hill day-tint
+list so noon does not paint white dots on the sky.
+Distant sky flocks live on the same clock, not under `ParallaxRoot`:
+two side-view silhouette packs (5 dashes, wing flap), wind +X, wrap
+around the camera. Alpha falls with `Night01` (they roost). Not `Bird`,
+not a force. Same tint reason as the stars — noon must not bleach them
+into clouds.
+Dusk/dawn warmth also lives on `DayNightCycle`: sky, sun disc, a glow
+ellipse, horizon haze and clouds blush orange when `Night01` is near 0.5
+(sun on the horizon). Not a Light2D. Woods stay on the day/night lerp.
+Yard picture life (`YardAmbient`, Test1 chunks): grass tufts and saplings
+sway in `LateUpdate`. Day flies / butterflies wander and sleep at night.
+Night fireflies pulse over the grass (sorting above the night veil).
+Wind-fall leaves recycle from a ceiling to the slab (drift +X like the
+clouds). Standing puddles on `DrainDip` / `RainGutter` (Unlit ellipses,
+sky/dusk/night tint, no collider). Sparrows hop the back-fence high
+rails (picture only, roost when `Night01` is high). Not `Bird`. Laundry
+hangs on a line between the east back-fence posts (x = −9…−3, post-top
+y = −1.38); short hang so it clears the high rail and the sparrows in
+front (order 6). Same LateUpdate sway as the grass. A loafing cat sits on
+the east low rail (x = −7.4, opening shot) and the courtyard bench
+(x = 34); tail flick, Unlit eyes at night. Not `Dog`. Hanging lanterns
+on the east fence post (−3, into the yard), a path post at spawn
+(x = 3.25), the entry posts (8.35 / 10.65), and the gate (40.25 / 41.75).
+Unlit glow follows `Night01`, same LateUpdate sway as the laundry. Not a
+Light2D. An ajar five-bar gate hangs from the west gate post (x = 40.29);
+picture only, same LateUpdate sway as the laundry. Not a collider. Sparrow
+nests sit on the back-fence high rails (−8.50 / −4.62 east, −29.85 west);
+a sitter fades in with `Night01`. Not `Bird`. Terracotta flower pots sit
+on the slab at −13.20 (Level1 west dirt), the spawn lamp (3.55), the
+entry bay (9.50), and GardenWalk (12.20 / 16.80). Stem sway as the
+grass. Not `PlantFlower`. Birdhouses sit on the east fence post (−9,
+between the rails) and on picture stakes at 5.20 (World +X past the
+lamp) and 25.15 (CurbReturn). Occupant fades with `Night01`. Not `Bird`.
+Bird baths sit on the slab at −11.40 (Level1 west dirt), 6.65 (World +X
+past the stake house), GardenWalk 14.50, and the courtyard 36.40 (east
+of the bench). Unlit water follows `Night01`; a drinker fades out as
+night rises (the sitters take the nests). Not `Bird`, not a puddle.
+Frogs sit on the slab at −12.30 (Level1 west between the pot and the
+bath), 4.40 (World +X between the lamp pot and the stake house),
+DrainDip 19.15, and RainGutter 59.10. Day hop; night Unlit throat.
+Not `Insect`, not `Bird`.
+Dragonflies hover over the bird baths (−11.40 Level1, 6.65 World) and
+the DrainDip / RainGutter grates (20 / 58). Day station hover; they
+roost when `Night01` rises. Not `Insect`, not `Bird`.
+Bees hover the terracotta blooms (−13.20 Level1, 3.55 spawn lamp, 9.50
+entry, GardenWalk 12.20 / 16.80). Day station hover; they roost when
+`Night01` rises. Not `Insect`, not `Bird`, not `PlantFlower`.
+Snails climb the same terracotta (clay, not bloom air). Slow crawl all
+day; `Night01` biases them toward the rim. Not `Insect`, not `Bird`.
+Lizards bask the post lumber (−9 Level1 under the house, −3 lantern
+post in both openings, 3.25 World lamp, 40.25 west gate). Day push-up;
+`Night01` flattens them into the wood. Not `Insect`, not `Bird`, not `Dog`.
+Grasshoppers sit the dry grass (−10.20 Level1 west dirt between the
+bath and the fence, 1.80 World +X before the lamp, GardenWalk 13.50,
+CurbReturn 23.40). Day hop; `Night01` hides them in the blades. Not
+`Insect`, not `Bird`.
+Ants crawl the bare dirt (−7.15 Level1 opening between the player
+and the hedgehog, −0.55 berry approach toward the apple, 2.45 World
++X between the hopper and the lamp, 31.20 CourtyardSquare west of
+the World fire). Day trail; `Night01` sinks them into the dirt. Not
+`Insect`, not `Bird`.
+Crickets sit the dry grass (−8.55 Level1 opening at the player's
+feet, 0.55 World spawn +X, GardenWalk 15.15, CourtyardSquare 33.05
+between the fire and the bench). Day hide in the blades; `Night01`
+chirps. Not `Insect`, not `Bird`.
+Worms crawl the bare dirt (−5.45 Level1 between the hedgehog and
+the drawn fire, −3.70 east of that fire / west of the berries,
+7.40 World +X between the bath and the entry curb, CourtyardSquare
+31.70 west of the World fire). Day sink into the dirt; `Night01`
+crawls with an Unlit sheen. Not `Insect`, not `Bird`.
+Water striders skate the standing puddles (18.50 / 21.45 DrainDip
+u0 / u2, 56.50 / 59.55 RainGutter u0 / u2). Day skate on the film;
+`Night01` hides them at the rim. Not `Insect`, not `Bird`, not a
+puddle collider.
+Bats circle the hanging lanterns (−3 east fence, 3.25 World lamp,
+10.65 east entry, 40.25 west gate). Night hunt against the Unlit
+glow; they roost when `Night01` is low. Not `Bird`, not `Insect`.
+Spider webs sit the bay between the back-fence rails (−5.20 / −3.90
+east bay both openings, −27.50 west bay, −17.00 middle high-rail
+break). A spider crawls the silk; Unlit dew follows `Night01`. Not
+`Insect`, not `Bird`, not a collider.
+Mice dart the night slab under the east-fence cat (−7.85) and at
+fire crumbs (Level1 −4.15, World 32.15) plus the World lamp (2.90).
+Day they sink; Unlit eyes follow `Night01`. Not `Dog`, not `Insect`,
+not `Hedgehog`.
+Rabbits sit the day grass (−9.40 Level1 west of the player, 1.25
+World spawn +X, GardenWalk 11.70, CourtyardSquare 35.20 east of the
+bench). Day nibble and a freeze-hop; `Night01` sinks them into the
+blades. Not `Dog`, not `Insect`, not `Hedgehog`.
+Squirrels sit the birdhouse roofs (−9 Level1, 5.20 World, 25.15
+CurbReturn) and the east entry post (10.65). Day freeze-scamper;
+`Night01` hides them so the house sitters can take the hole. Not
+`Dog`, not `Insect`, not `Bird`.
+Owls sit the lantern post caps (−3 Level1 east fence, 3.25 World
+lamp, 8.35 west entry, 40.25 west gate). Night roost against the
+Unlit glow; they hide when `Night01` is low. Not `Bird`, not
+`Insect`, not `Dog`.
+Raccoons wash the night slab at firewood (−5.30 Level1 west of the
+drawn fire, 32.88 World fire east), the berry approach (−0.90), and
+west of the World bath (6.20). Sit-wash, not a mouse dart; Unlit
+eyes follow `Night01`, day they sink. Not `Dog`, not `Hedgehog`,
+not `Insect`.
+Turtles bask the puddle banks (−10.70 Level1 east of the bath,
+17.55 / 22.60 DrainDip banks, 55.70 RainGutter west). Day crawl;
+`Night01` tucks them into the mud. Not `Insect`, not `Bird`, not
+`Dog`.
+Ducks loaf the water's edge (−14.15 Level1 west of the pot, 7.20
+World east of the bath, 20.55 DrainDip east of the grate, 57.40
+RainGutter). Day dabble; `Night01` tucks the head. Not `Bird`,
+not `Insect`.
+Herons wade the puddles (18.28 / 21.72 DrainDip, 56.88 / 58.72
+RainGutter). Day spear; `Night01` folds the neck. Not `Bird`,
+not `Insect`.
+Minnows dart under the puddle film (18.85 / 21.10 DrainDip,
+57.12 / 58.95 RainGutter). Day cruise; `Night01` sinks them
+into the mud. Not `Insect`, not `Bird`.
+Cattails stand the wet banks (−13.68 Level1 between the duck
+and the pot, 7.76 World east of the duck before the curb, 17.90
+DrainDip west bank, 55.32 RainGutter west). Same LateUpdate sway
+as the grass. Not `PlantFlower`, not `TreeRig.Sway`.
+Lily pads sit the puddle film (19.36 / 21.22 DrainDip,
+56.28 / 59.22 RainGutter). Same LateUpdate sway as the grass.
+Not `PlantFlower`, not a puddle collider.
+Dandelions stand the dry grass (−9.82 Level1 west between the
+hopper and the rabbit, 4.80 World +X between the frog and the
+stake house, GardenWalk 14.00, CurbReturn 24.28). Same LateUpdate
+sway as the grass. Not `PlantFlower`, not `TreeRig.Sway`.
+Mushrooms sit the damp shade (−11.85 Level1 between the frog
+and the bath, 5.70 World +X between the stake house and the
+raccoon before the bath, CurbReturn 23.00 east of DrainDip,
+LowerWalk 60.80 east of RainGutter). Same LateUpdate sway as
+the grass (tiny amp — a stiff nod, not a stem). Not
+`PlantFlower`, not `Insect`.
+Ivy climbs the post lumber (−14.50 Level1 middle-fence east
+post, −9 east post L in the opening, 3.25 World lamp, 41.75
+east gate). Same LateUpdate sway as the laundry (small amp).
+Lizards draw on top (order 6). Not `PlantFlower`, not
+`TreeRig.Sway`.
+Ferns sit the shade at a fence foot or grove (−15.60 Level1
+middle-fence bay, 9.95 World entry bay, 25.85 CurbReturn east
+of the stake house, 38.55 grove/gate). Same LateUpdate sway
+as the laundry (small amp). Not `PlantFlower`, not
+`TreeRig.Sway`.
+Clover sits the dry lawn (−12.75 Level1 between the pot and
+the frog, 2.35 World +X between the hopper and the mouse,
+GardenWalk 12.85, CourtyardSquare 35.80). Same LateUpdate sway
+as the laundry (small amp). Not `PlantFlower`, not
+`TreeRig.Sway`.
+Thistles sit the dry waste verge (−5.92 Level1 between the
+hedgehog and the worm, 3.90 World +X between the lamp pot and
+the frog, CurbReturn 26.40, CourtyardSquare 39.20 west of the
+gate). Same LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `TreeRig.Sway`.
+Plantain sits the trodden path edge (−6.78 Level1 between the
+ants and the hedgehog, 0.90 World spawn +X between the cricket
+and the rabbit, GardenWalk 15.85, CourtyardSquare 29.55 west
+of the ants). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `TreeRig.Sway`.
+Nettles sit the damp fence-foot waste (−15.05 Level1 between
+the fern and the ivy post, 8.90 World CurbEntry between the
+lantern and the pot, GardenWalk 17.20 into DrainDip, CourtyardSquare
+38.10 grove drip west of the fern). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not `TreeRig.Sway`.
+Docks sit the open disturbed verge (−3.35 Level1 between the
+worm and the lantern, toward the berries, 7.00 World +X between
+the bath and the duck, GardenWalk 16.40 between the plantain and
+the pot, CourtyardSquare 30.38 west of the ants). Same LateUpdate
+sway as the laundry (small amp). Not `PlantFlower`, not
+`TreeRig.Sway`.
+Brambles arch the fence-bay hedge (−11.05 Level1 west of the
+east fence between the bath and the turtle, 2.70 World spawn +X
+between the clover and the lamp, CurbReturn 24.80 between the
+dandelion and the stake house, CourtyardSquare 39.55 between the
+thistle and the west gate). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `TreeRig.Sway`.
+Hollyhocks stand the sunny garden column (−2.40 Level1 between
+the first two strawberry bushes, 1.58 World spawn +X between
+the rabbit and the hopper, CurbReturn 26.85 east of the thistle,
+CourtyardSquare 35.48 east of the bench between the rabbit and
+the clover). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `TreeRig.Sway`.
+Roses sit the sunny garden shrub (−1.55 Level1 between the last
+two strawberry bushes, 0.22 World spawn +X / Level1 apple foot,
+CurbReturn 27.42 east of the hollyhock, CourtyardSquare 36.95
+east of the bath before the grove). Same LateUpdate sway as the
+laundry (small amp). Not `PlantFlower`, not `TreeRig.Sway`.
+Lavender sits the sunny herb border (−0.20 Level1 apple west /
+World spawn −X of the rose, GardenWalk 15.50 between the cricket
+and plantain, CurbReturn 23.80 between the hopper and the
+dandelion, CourtyardSquare 29.10 west of the plantain). Same
+LateUpdate sway as the laundry (small amp). Not `PlantFlower`,
+not `TreeRig.Sway`.
+Irises stand the sunny garden fan (−0.72 Level1 apple approach
+east of the last strawberry / west of lavender, World spawn +X
+2.08 between the hopper and the clover, GardenWalk 12.52 between
+the pot and clover, CourtyardSquare 29.82 east of the plantain
+west of the dock). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `TreeRig.Sway`.
+Tulips stand the sunny garden cup (−2.60 Level1 between the
+first strawberry and the hollyhock, World spawn +X 3.70 between
+the lamp pot and the thistle, GardenWalk 11.20 west of the
+rabbit east of the entry, CourtyardSquare 28.55 east of the
+curb west of lavender). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `TreeRig.Sway`.
+Daffodils stand the sunny garden trumpet (−1.78 Level1 between
+the middle strawberry and the rose, World spawn +X 1.08 between
+the plantain and the rabbit, GardenWalk 13.18 between the clover
+and the hopper, CourtyardSquare 28.82 east of the tulip west of
+lavender). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `TreeRig.Sway`.
+Daisies sit the sunny garden disk (−2.20 Level1 between the
+hollyhock and the middle strawberry, World spawn +X 2.22 between
+the iris and the clover, GardenWalk 11.45 between the tulip and
+the rabbit, CourtyardSquare 28.28 east of the curb west of the
+tulip). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `TreeRig.Sway`.
+Poppies sit the sunny garden bowl (−1.38 Level1 between the
+rose and the last strawberry, World spawn +X 1.40 between the
+rabbit and the hollyhock, GardenWalk 11.95 between the rabbit
+and the pot, CourtyardSquare 30.10 east of the iris west of the
+dock). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `TreeRig.Sway`.
+Lilies stand the sunny garden star (−0.38 Level1 apple approach
+between the ant and lavender, World spawn +X 0.38 between the
+rose and the cricket, GardenWalk 13.75 between the hopper and
+the dandelion, CourtyardSquare 30.78 east of the dock west of
+the ants). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `TreeRig.Sway`, not a lily-pad film.
+Sunflowers stand the sunny garden disk-on-a-stalk (−3.18 Level1
+between the dock and the lantern, west of the first strawberry,
+World spawn +X 4.15 between the thistle and the frog, GardenWalk
+14.25 between the dandelion and the bath, CourtyardSquare 36.10
+between the clover and the bath). Same LateUpdate sway as the
+laundry (small amp). Not `PlantFlower`, not `TreeRig.Sway`, not
+a daisy ray-disk, not a dandelion clock.
+Violets sit the damp shade cushion (−10.45 Level1 between the
+turtle and the hopper, east of the bath; World spawn +X 5.45
+between the stake house and the mushroom; CurbEntry 9.20 between
+the nettle and the pot, west of the fern; CurbReturn 25.50
+between the stake house and the fern). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not `TreeRig.Sway`.
+Crocuses sit the cool lawn goblet (−12.08 Level1 between the
+frog and the mushroom, east of the clover; World spawn +X 5.95
+between the mushroom and the raccoon, west of the bath;
+GardenWalk 14.82 between the bath and the cricket; CurbReturn
+26.12 between the fern and the thistle). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not `TreeRig.Sway`,
+not a tulip cup, not a violet face.
+Bluebells hang the damp woodland raceme (−13.92 Level1 between
+the duck and the cattail, west of the pot; World spawn +X 6.42
+between the raccoon and the bath; CurbEntry 8.70 between the
+lantern and the nettle; CourtyardSquare 38.32 grove drip between
+the nettle and the fern). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `TreeRig.Sway`, not a crocus
+goblet, not a lavender spike.
+Tomatoes climb a kitchen stake (−3.52 Level1 between the worm
+and the dock, west of the first strawberry; World spawn +X 4.58
+between the frog and the dandelion, east of the sunflower;
+GardenWalk 15.32 between the cricket and lavender;
+CourtyardSquare 29.36 between lavender and the plantain). Same
+LateUpdate sway as the laundry (small amp). Not `PlantFlower`,
+not `PlantStrawberry`, not `TreeRig.Sway`, not a hollyhock
+column, not a sunflower disk.
+Cabbages sit the round kitchen head (−4.95 Level1 between the
+raccoon and the drawn fire, west of the tomato stake; World
+spawn +X 5.00 between the dandelion and the stake house, east
+of the tomato; GardenWalk 16.18 between the plantain and the
+dock; CourtyardSquare 30.99 between the lily and the ants).
+Same LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`, not a
+tomato stake, not a sunflower disk, not a mushroom cap.
+Pumpkins sit the ribbed kitchen gourd (−4.28 Level1 between
+the drawn fire and the mouse crumbs, east of the cabbage, west
+of the tomato stake; World spawn +X 5.58 between the violet
+and the mushroom, east of the cabbage / stake house; GardenWalk
+16.58 between the dock and the pot, east of the cabbage;
+CourtyardSquare 31.45 between the ants and the worm, east of
+the cabbage, west of the World fire). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a cabbage wrapper,
+not a tomato stake, not a mushroom cap.
+Corn stands the kitchen tassel (−5.68 Level1 between the
+thistle and the worm, west of the cabbage; World spawn +X 6.08
+between the crocus and the raccoon, east of the pumpkin;
+GardenWalk 17.00 between the pot and the nettle, east of the
+pumpkin; CourtyardSquare 30.58 between the dock and the lily,
+west of the cabbage). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a pumpkin vine, not a cabbage wrapper, not
+a tomato stake, not a sunflower disk, not a cattail sausage.
+Carrots sit the tapering kitchen root (−6.16 Level1 between the
+hedgehog and the thistle, west of the corn; World spawn +X 5.82
+between the mushroom and the crocus, east of the pumpkin, west
+of the corn; GardenWalk 15.68 between lavender and the plantain,
+east of the tomato; CourtyardSquare 31.82 between the worm and
+the mouse, east of the pumpkin, west of the World fire). Same
+LateUpdate sway as the laundry (small amp). Not `PlantFlower`,
+not `PlantStrawberry`, not `TreeRig.Sway`, not a pumpkin gourd,
+not a cabbage wrapper, not a tomato stake, not a corn tassel,
+not a fern pinna, not a plantain oval.
+Leeks stand the kitchen spear (−6.96 Level1 between the ants
+and the plantain, west of the carrot; World spawn +X 6.84
+between the bath and the dock, east of the corn; GardenWalk
+15.00 between the crocus and the cricket, west of the tomato;
+CourtyardSquare 27.85 between the rose and the daisy, west of
+the kitchen row). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a carrot cone, not a corn tassel, not a
+tomato stake, not a cattail sausage, not a plantain oval.
+Beans climb a kitchen pole (−7.75 Level1 between the mouse
+and the ants, west of the leek; World spawn +X 7.58 between
+the worm and the cattail, east of the leek; GardenWalk 14.66
+between the bath and the crocus, west of the leek;
+CourtyardSquare 28.06 between the leek and the daisy, west of
+the kitchen row). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a tomato stake, not a leek spear, not a
+cattail sausage, not a carrot cone.
+Onions sit the round kitchen bulb (−8.22 Level1 between the
+cricket and the mouse, at the player's feet, west of the bean
+pole; World CurbEntry 8.12 between the cattail and the entry
+lantern, east of the bean; GardenWalk 13.88 between the lily
+and the dandelion, west of the sunflower / bath / bean pole;
+CurbReturn 27.64 between the rose and the leek, west of the
+kitchen row). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a bean pod, not a carrot cone, not a
+leek spear, not a cabbage wrapper.
+Garlic sits the clustered kitchen cloves (−8.90 Level1
+between the rabbit and the cricket, west of the onion, at
+the east-fence foot; World CurbEntry 8.52 between the entry
+lantern hang and the bluebell, east of the onion; GardenWalk
+13.32 between the daffodil and the hopper, west of the lily
+/ onion; CurbReturn 26.62 between the thistle and the
+hollyhock, west of the rose / onion, west of the kitchen
+row). Same LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not a round onion globe, not a leek spear, not a bean pod.
+Radishes sit the small round red kitchen root (−9.62 Level1
+between the dandelion and the rabbit, west of the garlic,
+west of the east-fence rabbit; World CurbEntry 9.05 between
+the nettle and the violet, east of the garlic / entry
+lantern; GardenWalk 12.68 between the iris and the clover,
+west of the garlic / daffodil; CurbReturn 25.68 between the
+violet and the fern, west of the garlic / crocus, west of
+the kitchen row). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a garlic clove cluster, not a round
+onion globe, not a carrot cone.
+Potatoes sit the irregular brown kitchen tuber (−10.01 Level1
+between the dandelion and the hopper, west of the radish,
+west of the east-fence rabbit; World CurbEntry 9.72 between
+the pot and the fern, east of the radish / violet; GardenWalk
+12.36 between the pot and the iris, west of the radish /
+clover; CurbReturn 25.32 between the stake house and the
+violet, west of the radish / fern, west of the kitchen
+row). Same LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not a round red radish, not a papery onion globe, not a
+carrot cone.
+Beets sit the round purple kitchen root (−10.88 Level1
+between the turtle and the bramble, west of the potato,
+west of the hopper; World CurbEntry 10.28 between the fern
+and the lantern, east of the potato; GardenWalk 11.32
+between the tulip and the daisy, west of the potato /
+radish; CurbReturn 24.54 between the dandelion and the
+bramble, west of the potato / stake house, west of the
+kitchen row). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not an irregular brown tuber, not a small
+round red radish, not a papery onion globe.
+Parsnips sit the creamy kitchen cone (−11.22 Level1
+between the bramble and the bath, west of the beet, west
+of the turtle; World CurbEntry 10.82 between the lantern
+and the GardenWalk curb, east of the beet; GardenWalk
+11.58 between the daisy and the rabbit, east of the beet
+/ tulip; CurbReturn 24.04 between lavender and the
+dandelion, west of the beet / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not an orange carrot taper, not a round purple beet, not
+an irregular brown tuber.
+Turnips sit the round white kitchen globe (−11.62 Level1
+between the bath and the mushroom, west of the parsnip,
+west of the turtle; World CurbEntry 11.04 between the
+GardenWalk curb and the tulip, east of the parsnip;
+GardenWalk 11.82 between the rabbit and the poppy, east
+of the parsnip / daisy; CurbReturn 23.60 between the
+hopper and lavender, west of the parsnip / beet / fire
+logs 32.5). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a creamy parsnip cone, not a round
+purple beet, not an orange carrot taper.
+Rutabagas sit the larger yellow kitchen globe (−12.52
+Level1 between the frog and the clover, west of the
+turnip / mushroom, west of the bath; World CurbEntry
+10.48 between the beet and the lantern, east of the
+potato, west of the parsnip; GardenWalk 13.02 between
+the clover and the daffodil, east of the radish / iris;
+CurbReturn 23.20 between the mushroom and the hopper, west
+of the turnip / lavender / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not a round white turnip, not a creamy parsnip cone, not
+a round purple beet.
+Kohlrabis sit the pale-green kitchen stem on the slab
+(−12.96 Level1 between the clover and the pot, west of
+the rutabaga / frog, west of the bath; World CurbEntry
+10.12 between the fern and the beet, east of the potato,
+west of the rutabaga; GardenWalk 12.08 between the poppy
+and the pot, east of the turnip / rabbit; CurbReturn
+22.80 between the turtle and the mushroom, west of the
+rutabaga / hopper / fire logs 32.5). Same LateUpdate
+sway as the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a yellow globe
+in dirt, not a white turnip, not a purple beet globe, not
+a cabbage wrapper.
+Celeries sit the ribbed kitchen stalks on the slab
+(−13.44 Level1 between the cattail and the pot, west of
+the kohlrabi, west of the bath; World CurbEntry 9.84
+between the potato and the fern, west of the kohlrabi;
+GardenWalk 12.44 between the potato and the iris, east
+of the kohlrabi / pot; CurbReturn 22.30 between DrainDip
+and the turtle, west of the kohlrabi / mushroom / fire
+logs 32.5). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a swollen green stem, not a leek
+spear, not a cabbage wrapper.
+Fennels sit the swollen pale kitchen bulb on the slab
+(−14.78 Level1 between the ivy and the nettle, west of
+the duck / celery, west of the cattail; World CurbEntry
+9.35 between the violet and the pot, west of the potato
+/ celery; GardenWalk 13.62 between the hopper and the
+lily, east of the garlic; CurbReturn 22.12 just inside
+the DrainDip curb, west of the celery / turtle / fire
+logs 32.5). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not ribbed celery stalks, not a leek
+spear, not a kohlrabi swollen stem.
+Asparagus sit the thin green kitchen spears on the slab
+(−15.32 Level1 between the fern and the nettle, west of
+the fennel; World CurbEntry 8.24 between the onion and
+the lantern, west of the fennel / garlic; GardenWalk
+14.12 between the dandelion and the sunflower, east of
+the fennel / onion; CurbReturn 22.45 between celery and
+the turtle, east of fennel / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not a pale fennel bulb, not a leek spear, not ribbed
+celery stalks.
+Rhubarbs sit the thick red kitchen stalks on the slab
+(−15.88 Level1 west of the fern, west of asparagus, west
+of the nettle; World spawn +X 7.94 between the cattail
+and the onion, west of asparagus / lantern; GardenWalk
+14.38 between the sunflower and the bath, east of
+asparagus; CurbReturn 22.70 between the turtle and the
+kohlrabi, east of asparagus / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not thin green asparagus spears, not a leek spear, not a
+pale fennel bulb.
+Kale sits the corrugated blue-green kitchen rosette on
+the slab (−16.44 Level1 west of rhubarb, east of the web
+bay, west of the fern; World spawn +X 7.10 between the
+dock and the duck, west of rhubarb / cattail; GardenWalk
+16.29 between the cabbage and the dock, east of rhubarb
+/ bath; CurbReturn 22.90 between the kohlrabi and the
+mushroom, east of rhubarb / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not `TreeRig.Sway`,
+not thick red rhubarb petioles, not a round cabbage
+wrapper, not thin green asparagus spears.
+Chard sits the bright kitchen stalks with a lobed leaf
+on the slab (−17.56 Level1 west of kale, west of the web
+bay, east of the middle-fence post; World spawn +X 6.54
+between the bluebell and the bath, west of kale / leek /
+dock; GardenWalk 16.69 between the pumpkin and the pot,
+east of kale / cabbage; CurbReturn 23.10 between the
+mushroom and the rutabaga, east of kale / fire logs
+32.5). Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a corrugated blue-green kale
+rosette, not thick red rhubarb petioles, not a round
+cabbage wrapper.
+Spinach sits the smooth dark-green kitchen rosette
+low on the slab (−18.22 Level1 west of chard, west of
+the web bay, east of the middle-fence post; World
+spawn +X 7.30 between the duck and the worm, east of
+kale / chard; GardenWalk 17.10 between the corn and
+the nettle, east of chard / pot; CurbReturn 23.30
+between the rutabaga and the hopper, east of chard /
+fire logs 32.5). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `PlantStrawberry`,
+not `TreeRig.Sway`, not bright chard stalks with a
+lobed leaf, not a corrugated blue-green kale rosette,
+not a round cabbage wrapper.
+Lettuce sits the loose pale-green kitchen head
+on the slab (−18.88 Level1 west of spinach, east of
+the middle-fence post; World spawn +X 7.48 between
+the worm and the bean, east of spinach / kale;
+GardenWalk 17.38 between the nettle and the turtle,
+east of spinach / corn; CurbReturn 23.50 between
+the hopper and the turnip, east of spinach / fire
+logs 32.5). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `PlantStrawberry`,
+not `TreeRig.Sway`, not a smooth dark-green spinach
+rosette, not a tight round cabbage wrapper, not a
+corrugated blue-green kale rosette.
+Broccoli sits the tight green kitchen floret on a
+thick stem on the slab (−19.22 Level1 west of
+lettuce, east of the middle-fence post; World spawn
++X 7.68 between the bean and the cattail, east of
+lettuce / spinach; GardenWalk 17.72 between the
+turtle and the cattail, east of lettuce / nettle;
+CurbReturn 23.70 between the turnip and lavender,
+east of lettuce / hopper / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a loose pale-green lettuce head,
+not a tight round cabbage wrapper, not a smooth
+dark-green spinach rosette.
+Cauliflower sits the tight creamy-white kitchen
+curd on a thick stem on the slab (−19.88 Level1
+west of broccoli, west of the middle-fence post;
+World spawn +X 7.85 between the cattail and
+rhubarb, east of broccoli / bean; GardenWalk 17.81
+between broccoli and the cattail, east of the turtle
+/ lettuce; CurbReturn 23.92 between lavender and
+the parsnip, east of broccoli / turnip / fire logs
+32.5). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a tight green broccoli floret,
+not a tight round cabbage wrapper, not a loose
+pale-green lettuce head.
+Brussels sits the tight green kitchen sprouts on a
+tall stem on the slab (−20.54 Level1 west of
+cauliflower, west of the middle-fence post; World
+CurbEntry 8.03 between rhubarb and the onion, east
+of cauliflower / rhubarb; DrainDip 18.09 between
+the cattail and the heron, east of cauliflower /
+broccoli; CurbReturn 24.16 between the parsnip and
+the dandelion, east of cauliflower / parsnip / fire
+logs 32.5). Same LateUpdate sway as the laundry
+(small amp). Not `PlantFlower`, not `PlantStrawberry`,
+not `TreeRig.Sway`, not a tight green broccoli
+floret, not a tight creamy-white cauliflower curd,
+not a tight round cabbage wrapper.
+Artichoke sits the scaly edible kitchen bud on a
+thick stem on the slab (−21.20 Level1 west of
+Brussels, west of the middle-fence post; World
+CurbEntry 8.61 between garlic and the bluebell,
+east of Brussels / onion / asparagus / lantern;
+DrainDip 18.38 between the heron and the strider,
+east of Brussels / cauliflower; CurbReturn 24.41
+between the dandelion and the beet, east of
+Brussels / dandelion / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a tight green broccoli floret,
+not a tight creamy-white cauliflower curd, not
+tight green sprouts along a tall stem, not a
+thistle purple bloom on the dry verge.
+Eggplant sits the glossy purple kitchen fruit on a
+stem on the slab (−21.86 Level1 west of artichoke,
+west of the middle-fence post; World CurbEntry 8.80
+between the bluebell and the nettle, east of
+artichoke / garlic; DrainDip 21.85 between the
+heron and the CurbReturn curb, east of artichoke /
+duck; CurbReturn 24.67 between the beet and the
+bramble, east of artichoke / beet / fire logs
+32.5). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`,
+not `TreeRig.Sway`, not a thistle purple bloom on
+the dry verge, not a scaly artichoke bud, not a
+round red tomato ball.
+Pepper sits the glossy blocky kitchen pod on a
+stem on the slab (−22.52 Level1 west of eggplant,
+west of the middle-fence post; World CurbEntry 8.97
+between the nettle and the radish, east of
+eggplant / bluebell; DrainDip 19.58 between the
+lily and the dragonfly, east of artichoke; CurbReturn
+24.95 between the bramble and the birdhouse, east of
+eggplant / bramble / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not an elongated purple eggplant
+teardrop, not a round red tomato ball, not a scaly
+artichoke bud.
+Cucumber sits the long green kitchen fruit on a
+vine on the slab (−23.18 Level1 west of pepper,
+west of the middle-fence post, east of the west
+fence post; World CurbEntry 9.12 between the
+radish and the violet, east of pepper / nettle;
+DrainDip 20.28 between the dragonfly / grate and
+the duck, east of pepper; CurbReturn 25.24 between
+the birdhouse and the potato, east of pepper /
+birdhouse / fire logs 32.5). Same LateUpdate sway
+as the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a
+glossy blocky pepper pod, not a round red tomato
+ball, not an elongated purple eggplant teardrop.
+Melon sits the netted round kitchen fruit on a
+vine on the slab (−23.84 Level1 west of cucumber,
+west of the middle-fence post, east of the west
+fence post; World CurbEntry 9.28 between the
+violet and the fennel, east of cucumber / radish;
+DrainDip 20.42 between the cucumber and the duck,
+east of cucumber / dragonfly / grate; CurbReturn
+25.41 between the potato and the violet, east of
+cucumber / birdhouse / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a long green cucumber fruit,
+not a ribbed pumpkin gourd, not a glossy blocky
+pepper pod.
+Watermelon sits the striped oval kitchen fruit on a
+vine on the slab (−25.16 Level1 west of the west
+fence post, west of melon, east of the web bay;
+World CurbEntry 9.42 between the fennel and the
+pot, east of melon / violet; DrainDip 20.70 east
+of the duck, west of the minnow / lily, east of
+melon; CurbReturn 25.76 between the radish and the
+fern, east of melon / violet / fire logs 32.5).
+Same LateUpdate sway as the laundry (small amp).
+Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a netted round melon fruit, not
+a long green cucumber fruit, not a ribbed pumpkin
+gourd.
+Zucchini sits the yellow hook kitchen fruit on a
+vine on the slab (−25.82 Level1 west of watermelon,
+west of the west fence post, east of the web bay;
+World CurbEntry 9.58 between the pot and the
+potato, east of watermelon / fennel; DrainDip 20.90
+east of watermelon / duck, west of the minnow /
+lily; CurbReturn 25.98 between the fern and the
+crocus, east of watermelon / fern / fire logs
+32.5). Same LateUpdate sway as the laundry (small
+amp). Not `PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a striped oval watermelon fruit,
+not a netted round melon fruit, not a ribbed
+pumpkin gourd.
+Pattypan sits the yellow scalloped-disk kitchen
+fruit on a vine on the slab (−26.48 Level1 west of
+zucchini, west of the west fence post, east of the
+web bay; World CurbEntry 10.04 between the fern
+and the kohlrabi, east of zucchini / potato / celery;
+DrainDip 21.34 between the lily and the strider,
+east of zucchini / minnow; CurbReturn 26.26
+between the crocus and the thistle, east of
+zucchini / fern / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a yellow hook zucchini fruit,
+not a striped oval watermelon fruit, not a
+ribbed pumpkin gourd.
+Butternut sits the beige bottle kitchen fruit on a
+vine on the slab (−27.14 Level1 west of pattypan,
+west of the west fence post, east of the web bay;
+World CurbEntry 10.20 between the kohlrabi and the
+beet, east of pattypan / fern; DrainDip 21.58
+between the strider and the heron, east of
+pattypan / lily; CurbReturn 26.51 between the
+thistle and the garlic, east of pattypan / fern /
+fire logs 32.5). Same LateUpdate sway as the
+laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a
+yellow scalloped-disk pattypan fruit, not a
+yellow hook zucchini fruit, not a ribbed pumpkin
+gourd.
+Acorn sits the dark-green ribbed-acorn kitchen
+fruit on a vine on the slab (−27.80 Level1 west of
+butternut, west of the web bay, east of the west
+nest / west post; World CurbEntry 10.36 between
+the beet and the rutabaga, east of butternut /
+kohlrabi; DrainDip 21.65 between the butternut
+and the heron, east of pattypan / lily; CurbReturn
+26.74 between the garlic and the hollyhock, east
+of butternut / thistle / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a beige bottle butternut fruit,
+not a yellow scalloped-disk pattypan fruit, not a
+ribbed pumpkin gourd.
+Spaghetti sits the pale-yellow oblong kitchen
+fruit on a vine on the slab (−28.46 Level1 west of
+acorn, west of the web bay, east of the west nest
+/ west post; World CurbEntry 10.56 between the
+rutabaga and the east entry lantern, east of acorn
+/ beet; DrainDip 21.78 between the heron and the
+eggplant, east of acorn / lily; CurbReturn 27.12
+between the hollyhock and the rose, east of acorn
+/ garlic / fire logs 32.5). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a
+dark-green ribbed acorn heart, not a beige bottle
+butternut fruit, not a ribbed pumpkin gourd.
+Delicata sits the cream-striped oblong kitchen
+fruit on a vine on the slab (−29.12 Level1 west of
+spaghetti, west of the web bay, east of the west
+nest / west post; World CurbEntry 10.93 between the
+parsnip and the turnip / GardenWalk curb, east of
+spaghetti / the east entry lantern; DrainDip 21.96
+between the eggplant and the CurbReturn curb, east
+of spaghetti / heron; CurbReturn 27.27 between
+spaghetti and the rose, east of spaghetti /
+hollyhock / fire logs 32.5). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a
+pale-yellow spaghetti oval, not a dark-green ribbed
+acorn heart, not a beige bottle butternut fruit.
+Carnival sits the round cream mottled kitchen
+fruit on a vine on the slab (−29.78 Level1 west of
+delicata, west of the web bay, east of the west
+post; World GardenWalk 11.12 between the turnip
+and the tulip, east of delicata / GardenWalk curb;
+CurbReturn 22.04 just inside the DrainDip curb,
+west of fennel, east of delicata; CurbReturn 27.52
+between the rose and the onion, east of delicata /
+rose / fire logs 32.5). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a
+cream-striped delicata oblong, not a pale-yellow
+spaghetti oval, not a dark-green ribbed acorn
+heart.
+Sweet dumpling sits the small round cream ribbed
+kitchen fruit on a vine on the slab (−30.22 Level1
+west of carnival, west of the web bay, east of the
+west post; World GardenWalk 11.26 between the
+tulip and the beet, east of carnival / GardenWalk
+curb; CurbReturn 22.20 between fennel and celery,
+east of carnival / DrainDip curb; CurbReturn 27.74
+between the onion and the leek, east of carnival /
+onion / fire logs 32.5). Same LateUpdate sway as
+the laundry (small amp). Not `PlantFlower`, not
+`PlantStrawberry`, not `TreeRig.Sway`, not a
+round cream mottled carnival globe, not a
+cream-striped delicata oblong, not a pale-yellow
+spaghetti oval.
+Kabocha sits the squat dark-green speckled
+kitchen fruit on a vine on the slab (−30.90 Level1
+west of sweet dumpling, west of the west post;
+World GardenWalk 11.40 between the beet and the
+daisy, east of sweet dumpling / GardenWalk curb;
+CurbReturn 22.38 between celery and asparagus,
+east of sweet dumpling / DrainDip curb; CurbReturn
+27.96 between the leek and the bean, east of
+sweet dumpling / leek / fire logs 32.5). Same
+LateUpdate sway as the laundry (small amp). Not
+`PlantFlower`, not `PlantStrawberry`, not
+`TreeRig.Sway`, not a small round cream ribbed
+sweet dumpling, not a round cream mottled carnival
+globe, not a cream-striped delicata oblong.
+Three moths at the campfire.
+Not `Insect`, not `TreeRig.Sway`.
+Yard `PlantTree` stay in world space. No colliders
+on backdrop. Update in `LateUpdate` after `CameraFollow`.
+
+Yard grove: `LevelGrove` plants `PlantTree` with `TreeRig.Static` on
+World Test1 (six along the tape plus three at the gate, x ≈ 37.5 / 44.2 / 52).
+Level1 skips that row and plants the apple at x = 0 instead.
+Campfire: `Campfire` at x = 32.5 on World Test1; Level1 relocates it to
+`LevelGrove.DrawnCampfireX` (−4.6) so the opening shot sees it. Picture
+logs, 24 Unlit disc tongues (white → yellow → orange → red, recycle),
+flicker, night glow, ParticleSystem sparks / warm-gray smoke / red
+embers (pooled, +X wind on smoke), three moths. Play lab is scene
+`Campfire` (`spawnCampfire`, x = 0). Not a Light2D while
+`SceneLighting` is off. Do not bring back sprite smoke boxes.
+Strawberries and the hedgehog sit between the player and the apple
+for the same reason: ortho 5 at x = −8 cannot see the courtyard at 32–38.
+Do not set `GameProcess.treeCount` on World or Level1 (that path is `Sway`,
+scene `Tree` only). Do not change `PlantTree` sizes or springs.
+
+When `humanCount > 1`, it stays `Flat`.
+
+Spawn surface is **y = −2.0**, the human is at **y = −0.82**. Chunks ≤ 0
+are always flat at this height.
+
+## Spawn platforms
+
+Static `BoxCollider2D`, no `Rigidbody2D`. Size is `sprite.size` and
+`collider.size`, not `localScale`.
+No gaps between pieces: a gap for a ragdoll is a fall, not an obstacle.
+Chunk generation is in `Update`, not in `FixedUpdate`.
