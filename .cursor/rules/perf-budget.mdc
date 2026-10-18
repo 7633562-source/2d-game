@@ -1,0 +1,224 @@
+---
+description: CPU budget — full ragdoll count, 200 Hz, jobs, CCD, do not retune PD for FPS
+alwaysApply: true
+---
+
+# Physics budget
+
+A full physical character `Human` or `Bird` is about 16 `Rigidbody2D`,
+muscles, and a 200 Hz step. This is the hero budget: keep 1–2 such
+characters on screen at once, not a crowd.
+
+- Leave the player at 200 Hz. Switching to 50 Hz breaks the controller
+  and is not a way to raise FPS.
+- `humanCount` 10–50 is allowed only as a laboratory load in
+  `SampleScene`, not as the `World` game mode.
+- In the `World` game `treeCount` stays 0 (grove is `TreeRig.Static`).
+  The yard may hold a small Flock, hens, and a few leftover dogs.
+  Off-camera NPCs rest (`NpcRest`): Kinematic, no 200 Hz drive.
+  The hero Human stays at 200 Hz. Watch flight in scene `Bird`, the
+  tree in scene `Tree`. Do not plant `Sway` in World.
+- In the game, `Physics2D jobs` may be on. `HeadlessTrial` must turn
+  them off: one-leg probe `oneg_r` determinism depends on it.
+- Keep `Maximum Allowed Timestep` low, about 0.05 s, not 0.333 s,
+  so a dropped frame does not queue a long physics-step backlog.
+- `OverlapBoxAll` in `FixedUpdate` is forbidden: use `NonAlloc`.
+  Do not call `Find` or `GetComponent` every step — cache the references.
+- `CollisionDetectionMode2D.Continuous` is needed on the feet, not on
+  every segment. Do not turn `Interpolate` off for FPS: physics runs at
+  200 Hz, the frame is about 60 Hz.
+- A 10 s stand measurement is skewed by exe startup. Estimate the budget
+  from a 30 s run or from the difference between runs of different
+  duration.
+- Do not change `lumbarP`, muscles, or other control gains for
+  performance: that changes body stability, not the cost of the model.
+
+# Course (college 28.08)
+
+The game is one controlled `Human` with honest muscle physics, not a
+crowd of active ragdolls and not a platformer with an upward force.
+Do not stop the model. Do not lower 200 Hz: the `World` profile is
+already taken (below); there is no new controller. 50 Hz is closed by
+the stand. A controller substep on coarser physics is not a saving.
+Do not amputate the arms: they are in the CoM and the stance. Do not
+fuse the pelvis with the chest. Merging `Muscle`+`JointFriction` into
+one pass is legitimate plumbing after the profile. 100 Hz
+(`-fixedDelta 0.01`) is a separate experiment with no other edits, not
+the next step. The bottleneck is the main thread and 3–4 steps per
+frame, not "all cores busy".
+
+# World profile (28.08, cycle 2)
+
+Scene `World`, 1 human, `birdCount = 0`, jobs ON, batch Play 35 s
+(warmup 5 s). Summary `Trials/Runs/world_perf_capture.json`.
+
+| | Number |
+|---|---|
+| Frames after warmup | 1801 |
+| FPS | **60** (`targetFrameRate` cap) |
+| Frame p50 / p95 / p99 | 16.67 / **16.72** / 16.83 ms |
+| Physics2D | **0.17 ms** |
+| FixedUpdate scripts | **0.13 ms** |
+| Render marker | 0 (batch did not catch URP) |
+| `maxFixedSteps` | 4, once **5** (frame 26.7 ms around t=9) |
+| GC.Alloc | ~34 bytes/frame |
+
+`Main Thread` ≈ 16.66 ms here equals the 60 FPS frame length: the
+`WaitForTargetFPS` marker in batch is almost zero, so `busyMain` cannot
+be taken from it. Physics+scripts work ≈ **0.3 ms**. There is no step
+spiral.
+
+**Verdict:** the main thread is in the green zone. Do not cut 200 Hz.
+Next is swing liftoff on walk, not a new profile and not 100 Hz.
+
+# Frame lab (30.08, PERF-1)
+
+Colleague note: `Trials/Runs/perf_wave1_lab.md`. Numbers:
+`perf_wave1_lab.json`. Do not drop the 28.08 table above.
+
+| | Test1 c20 | Flat c21 |
+|---|---|---|
+| Physics2D | 0.198 ms | 0.184 ms |
+| Scripts | 0.126 ms | 0.121 ms |
+| **knownWork** | **0.32 ms** | **0.30 ms** |
+| `maxFixedSteps` | 10 (Play-enter hitch) | **4** |
+| render | 0, `renderMarkerEmpty` | same |
+
+Yard − Flat ≈ 0.01 ms. The level does not eat the frame.
+`busyMain` in batch is the 60 FPS cap. `renderAvgMs = 0` is not GPU cost.
+URP CPU and FrameTiming stay **−1** in Editor batch. GPU-10 max **7%**.
+Do not cut 200 Hz. Do not retune PD. Lights/bloom stay closed.
+
+# Five margin cycles (college 28.08 evening)
+
+Course: not FPS (already 60 / 0.3 ms), but the cost of adding a hinge
+and a contact at 200 Hz. 100 Hz is not in the series. Production solver
+is **8/3**; do not lower it "into the piggy bank". Do not drop
+`IgnoreCollision` inside the body.
+
+| Cycle | What | Acceptance |
+|---|---|---|
+| 1 ruler | JSON: `wallPerSim`, CCD=2, probe saturation, `Muscle`/`JointFriction` count | CSV without forces; stance 10+30 s |
+| 2 actuators | one pass `JointFriction` then `Muscle`, no `Muscle.FixedUpdate` | listed: stance, pf24/pb23, `oneg_l`, walk 40 s |
+| 3 layers | ground layer + probe mask; self-contact as now | listed; Test1 must not lose ground |
+| 4 contacts | `GetContacts` NonAlloc instead of `OverlapBox` 0.06, or revert | do not break `oneg`/`walk`; do not retune PD |
+| 5 solver floor | sweep 6/2, 8/3, 10/4; prod stays 8/3 | table, not a new default |
+
+# Five cycles — result (29.08)
+
+| Cycle | Verdict | Numbers |
+|---|---|---|
+| 1 ruler | accepted | CCD=2, Muscle=30, Friction=15, `wallPerSim`≈0.77, probeSat≈0; stance 10+30 s |
+| 2 actuators | accepted | `ActuatorDriver`: friction→muscles; stance/oneg_l/walk/pb23 ok; forward threshold **23** (24 falls — as early SPD, not from the merge) |
+| 3 layers | accepted | `Ground` layer + probe mask; `meanProbeHits` 3.0→**1.0**; body IgnoreCollision as it was |
+| 4 contacts | accepted | `GetContacts` NonAlloc; stance/oneg_l/walk without fold; revert — `useGetContactsProbe=false` |
+| 5 solver | table | 6/2 drop 0.0034, **8/3** drop 0.0016, 10/4 drop 0.0007; `wallPerSim` 0.81→0.85→0.87; prod **8/3** |
+
+After the series: swing liftoff on walk, not a new World profile and not 100 Hz.
+
+# Mobile/WebGL memory - notes from a shipped case (18.09.2026)
+
+Reference for the memory budget, not a new rule. Source: "Optimizing Deep Rock Galactic: Survivor
+for mobile" (https://unity.com/blog/optimizing-deep-rock-galactic-survivor-for-mobile).
+
+- They hold ~1850 MB on a 3 GB iPad; Addressables decide what is resident, not what is loaded.
+- Damage numbers as a ParticleSystem + a digit sprite atlas instead of TMP text objects.
+- Enemy animation baked into a texture and animated in the vertex shader, plus GPU instancing.
+- Flow field instead of NavMesh; KD-tree instead of heavy physics queries at scale.
+- Custom batched draw for procedural geometry - the same class of problem as our procedural shapes.
+- Automated capture scenarios + Profiler runs, not eyeballing.
+
+Use these when we measure the WebGL/mobile memory budget after the burn campaign, together with
+UUM-149540 (`Resources.UnloadUnusedAssets` in players) and the Light2D scene-unload leak (the release
+notes put that fix in 6000.6.2, the issue tracker lists only 6000.7.0b1 - sources disagree, verify at the
+upgrade).
+
+# WebGL pre-build: output-asset size limit (28.09.2026)
+
+A WebGL build fails hard when the summed output assets pass 2 GB ("System.IO.IOException: The file is too
+long." - "This operation is currently limited to supporting files less than 2 gigabytes in size"), and
+outputs above 4 GB are unsupported in any version (UUM-112909 / issue 6820). The 2 GB fix sits in
+`6000.6.3f1` and `6000.7.0a4` - we are on 6.6.3 since 30.09, so the limit is lifted; keep the pre-build
+sum anyway and keep headroom under 2 GB.
+
+One trap for the same metric (02.10): content directories are **not compressed by default** while
+AssetBundles are, so a naive switch shows the new pipeline as "bigger". Set compression explicitly
+(Addressables 4.1: Content Directory Archive Mode = LZ4 / Uncompressed / None) and compare all three
+modes against the current AssetBundle build for size and time together.
+
+# WebGL pre-build: Web Memory Size (29.09.2026)
+
+Keep the Web Memory Size setting under 4 GB: above it the player switches to Wasm64 - no threads and a
+noticeable performance penalty (Unity staff in the WebGPU/Wasm64 forum thread, fetched via the 29.09
+digest). Check it before the first WebGL build, together with the output-asset sizes above.
+
+# Android pre-build: 16 KB page sizes (21.09.2026)
+
+Google Play rejects an AAB when any third-party `.so` is not 16 KB aligned. The engine side is fine:
+Unity supports 16 KB page sizes from 6000.0.38f1, so our 6000.5.8f1 is in.
+
+Our state, verified 21.09.2026: `com.unity.burst` resolves to **1.8.30** (`Library/PackageCache`,
+`packages-lock.json`) where 1.8.21+ is required, and `Assets` contains no `.so`, `.aar` or `.jar` at
+all - the only plugin folder is `Assets/Plugins/WebGL`. Nothing can misalign today.
+
+Keep it as a one-time check before the first Android build and repeat it whenever a third-party
+plugin or SDK lands: open the AAB with APK Analyzer, look at `lib/arm64-v8a`, confirm the alignment.
+Retired SDKs are the usual offenders in that thread (e.g. NiceVibrations).
+
+# Build-loop candidate: Unity CLI recompile (23.09.2026)
+
+Installed CLI is `1.0.0-beta.9` (`~/AppData/Local/Unity/bin/unity`): it exposes `build`, `run`, `test`,
+`job`, `command`, `pipeline`, `status`, `doctor` - but NOT `recompile`. beta.11 (2026-09-22) adds
+`unity recompile`: a compile check without a full build that lists errors with file and line, exit
+codes 0/6/7, plus `--strict` (fails on warnings too). That is a cheaper pre-gate than the current
+10-minute full batch build.
+
+Do NOT swap the compile gate while the burn campaign is live - the gate is bound to the harness.
+After the campaign: reinstall the CLI (the thread reports `unity self-update` does not cross that
+range cleanly) and A/B `unity recompile` against the existing gate before wiring it in.
+
+# Mobile pre-flight checklist (before the first Android/iOS build, 22.09.2026)
+
+Verified in the repo on 22.09.2026, so these are re-checks with a known answer, not open risks:
+
+- Render pipeline / quality: `ProjectSettings/QualitySettings.asset` has 6 levels (Very Low, Low,
+  Medium, High, Very High, Ultra); only Ultra assigns a pipeline asset (`Assets/Settings/URP-2D.asset`),
+  the other five fall back to `GraphicsSettings.m_CustomRenderPipeline`, which is the same URP-2D asset.
+  One asset for every platform - nothing diverges desktop vs Android today. Re-check after adding a
+  mobile-specific URP asset: the classic symptom (22.09 thread) is that switching the platform to
+  Android changes the picture through a mobile URP asset in Quality Settings.
+- Managed stripping: `ProjectSettings/ProjectSettings.asset` has `managedStrippingLevel: {}` (Unity
+  per-platform defaults, not Medium), and the project holds 0 `[Preserve]` attributes, 0
+  `GetCustomAttribute` calls and no DI framework (Zenject/UniDi/VContainer absent). So the reported
+  6000.5+ bug - Medium stripping drops `CustomAttribute` entries on attributes derived from
+  `UnityEngine.Scripting.PreserveAttribute`, visible only on device, silent in the editor - cannot
+  reach us. Re-check if a DI framework or Preserve-derived attributes enter, or if stripping is
+  raised to Medium.
+- Native dependencies: `Assets` holds no `.so`/`.aar`/`.jar` (see the 16 KB section above). When the
+  first native dependency arrives, `com.unity.external-dependency-manager` 2.1.0 (official Unity
+  package, UPM, 2022.3+; announced 2026-09-29) is the manager to use, and the same place where we would
+  control what goes into `lib/arm64-v8a`. Deadline pressure for other projects: Google deprecates EDM4U
+  on 2026-10-26 and EDM replaces it with the same XML declaration format - we hold no EDM4U setup, so
+  nothing to migrate today; the note exists so the first native SDK lands on EDM, not on EDM4U.
+- Android minimum spec from 6.6 (2026-09-30): the minimum is OpenGLES 3.1, and the "Require ES 3.1"
+  Player Setting is removed - all Android players go through Vulkan or GLES 3.1/3.2, with Vulkan
+  recommended and automatic fallback. Unity's own thread quotes the reach cost: GLES 3.0 cuts ~0.4% of
+  players, 3.1 ~0.7%. We have no Android build yet, so this is a note for the first mobile config.
+- 2D light budget (2026-09-30): Unity staff say web platforms get the mobile shader limits and that the
+  per-camera limit on additional lights can be raised via the URP Config package, while Forward+ removes
+  the 8-light-per-object cap (Deferred is not available on WebGL). Our case is the 2D Renderer, where the
+  binding number is our own `Assets/Settings/Renderer2D.asset`: `m_MaxLightRenderTextureCount: 4` with
+  `m_LightRenderTextureScale: 0.5`. Scenes hold 0 Light2D components; lights are created at runtime
+  (Campfire, Torch, SceneLighting), at most one per scene (TreeApple, Clearing, Campfire) - so we sit far
+  under the budget. The URP asset also carries `m_AdditionalLightsRenderingMode: 0` (disabled), i.e. the
+  3D additional-light cap does not apply to us at all. Re-check the count if a scene ever lights several
+  sources at once.
+- Android system bars / immersive (checked 2026-09-27): since Unity 6.5 `Screen.fullScreen` "no longer
+  has an effect on Android" - Unity's own 6.5 upgrade guide says bar visibility must be driven through
+  `AndroidApplication.currentWindowInsets.Show/Hide`, and `PlayerSettings.Android.renderOutsideSafeArea`
+  now only covers the cutout. On top of that there is a real regression: once a tap reveals the bars
+  they can stick and immersive mode breaks (thread 1735775, active 25.09); Unity staff say the fix
+  shipped in 6.7.0b1 and is coming to 6.6. Our exposure today is zero - `Assets` has 0
+  `Screen.fullScreen`, 0 `AndroidApplication`/`currentWindowInsets` and no `UNITY_ANDROID` blocks - so
+  this is a rule for the first mobile build, not a fix: never drive the bars through the old fullscreen
+  API, use `currentWindowInsets`.

@@ -1,0 +1,44 @@
+---
+description: BASELINE STAND - the human must stand still, no tremor, no arm jerking
+globs: Assets/**/*.cs
+alwaysApply: true
+---
+
+# Baseline stand (Yury, 18.09.2026)
+
+The human has a BASELINE state: standing upright with no input. In that state the body
+must be still. Standing shaking, twitching arms or drifting is a DEFECT, not a style.
+
+## The check (run it after ANY change to arms, pose servos, balance, materials or colliders)
+1. Build from bash only (a bash launcher, never PowerShell). If Yury's editor is open, the
+   gate reports SKIPPED: do not burn turns, report the skip.
+2. Run the stance trial (label `stance_reg*`, 40 s, no input).
+3. Read the per-frame CSV, window 1.0-39.0 s, and report these numbers EVERY time:
+   - RMS joint speed of shoulder and elbow (deg/s);
+   - direction reversals per second of shoulderAngleL/R and elbowAngleL/R;
+   - joint-limit hit fraction (elbowLimitFraction, shoulderLimitFraction);
+   - pelvisDrop (m) and the fraction of frames with both feet grounded.
+## Known numbers (18.09.2026, build with the p_arms work, label stance_reg1b)
+GREEN: pelvisDrop 0.0194 m (19 mm) - the body holds its height.
+RED: rmsShoulderJointSpeed 181.72 deg/s, rmsElbowJointSpeed 311.56 deg/s; identical in
+stance_reg1 (18:17), burn_stance (18:49) and m_stand1 (14:30). An idle stand should be
+near zero, so the arm servos are oscillating and the elbow reaches its limit for ~26% of
+frames in the p_arms runs (elbowLimitFraction 0.2593 on p_arms39).
+## Acceptance
+- pelvisDrop <= 0.025 m over 40 s;
+- both feet grounded in >= 99% of quiet frames (wSupQuietFrames 200/200);
+- zero joint-limit hits in the arms during the quiet window;
+- RMS joint speed of shoulder and elbow BELOW the threshold pinned by the first clean
+  build (calibration run), and reversals per second consistent with a still body, not
+  with a limit cycle;
+- no reference signal that flips sign every frame: `Mathf.Sign(...)` inside a per-frame
+  target is forbidden unless latched at a step boundary (see PoseDriveController armPhase).
+
+## REGRESSION RECORD: the stand tremble, 18.09.2026 (measured, isolated)
+Quiet: p_swQ 10:49 rmsShoulder 6.4, rmsElbow 18.9, hip speed median 0.0.
+Trembling: p_swQ2 10:59 rmsShoulder 181.7, rmsElbow 311.6, hip speed median 88.0.
+The pair differs in TWO things: build 49e76bfb -> 4de6dec8 and armSwingFraction 0.0265 -> 0.9963.
+ISOLATION RUN (current build, 21:17): stance_now  vs  stance_noarm (-armSwing 0 -armElbowSwing 0)
+  shoulder 181.7 -> 7.4 | elbow 311.6 -> 21.5 | torsoAngVel 63.0 -> 3.9
+  neck 119.4 -> 13.4 | head 55.9 -> 7.3 | pelvisDrop 0.0194 -> 0.0138 | hip speed 88.0 -> 0.0
+So the ARMS are the driver, and switching the swing off returns the stand to the 10:49 baseline exactly.
