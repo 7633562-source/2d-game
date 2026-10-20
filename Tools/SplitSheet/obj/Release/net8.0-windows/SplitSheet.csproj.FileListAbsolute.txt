@@ -1,0 +1,14 @@
+e:\Games\2D Game\My project\Tools\SplitSheet\bin\Release\net8.0-windows\SplitSheet.exe
+e:\Games\2D Game\My project\Tools\SplitSheet\bin\Release\net8.0-windows\SplitSheet.deps.json
+e:\Games\2D Game\My project\Tools\SplitSheet\bin\Release\net8.0-windows\SplitSheet.runtimeconfig.json
+e:\Games\2D Game\My project\Tools\SplitSheet\bin\Release\net8.0-windows\SplitSheet.dll
+e:\Games\2D Game\My project\Tools\SplitSheet\bin\Release\net8.0-windows\SplitSheet.pdb
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.GeneratedMSBuildEditorConfig.editorconfig
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.AssemblyInfoInputs.cache
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.AssemblyInfo.cs
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.csproj.CoreCompileInputs.cache
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.dll
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\refint\SplitSheet.dll
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.pdb
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\SplitSheet.genruntimeconfig.cache
+e:\Games\2D Game\My project\Tools\SplitSheet\obj\Release\net8.0-windows\ref\SplitSheet.dll
