@@ -1,0 +1,146 @@
+<mujoco model="human2d">
+  <compiler angle="degree" inertiafromgeom="false"/>
+  <option timestep="0.005" gravity="0 0 -9.81" integrator="implicitfast" impratio="1" cone="pyramidal" iterations="50" noslip_iterations="0"/>
+  <default>
+    <joint limited="true" solreflimit="0.01 1" solimplimit="0.95 0.99 0.001" margin="0" damping="0" armature="0"/>
+    <geom contype="1" conaffinity="0" condim="3" solref="0.01 1" solimp="0.95 0.99 0.001" margin="0" rgba="0.7 0.6 0.5 1"/>
+  </default>
+  <worldbody>
+    <light pos="0 -3 3" dir="0 1 -1"/>
+    <geom name="floor" type="plane" pos="0 0 0.02" size="20 2 0.1" contype="0" conaffinity="1" friction="0.4000 0.005 0.0001" rgba="0.4 0.5 0.4 1"/>
+    <body name="pelvis" pos="0 0 1.01">
+      <joint name="rootx" type="slide" axis="1 0 0" limited="false"/>
+      <joint name="rootz" type="slide" axis="0 0 1" limited="false"/>
+      <joint name="rooty" type="hinge" axis="0 -1 0" limited="false"/>
+      <inertial pos="0 0 0" mass="7.819000" diaginertia="0.0542117 0.0542117 0.0542117"/>
+      <geom name="pelvis_g" type="box" size="0.12 0.05 0.08" friction="0.4000 0.005 0.0001"/>
+      <body name="torso" pos="0.000000 0 0.080000">
+        <joint name="lumbar" type="hinge" axis="0 1 0" range="-20 20"/>
+        <inertial pos="0.000000 0 0.170000" mass="22.603000" diaginertia="0.3262366 0.3262366 0.3262366"/>
+        <geom name="torso_g" type="box" pos="0.000000 0 0.170000" size="0.12000 0.05 0.17000" friction="0.4000 0.005 0.0001"/>
+        <body name="neck" pos="0.000000 0 0.340000">
+          <joint name="neck" type="hinge" axis="0 1 0" range="-30 30"/>
+          <inertial pos="0.000000 0 0.045000" mass="0.840000" diaginertia="0.0015750 0.0015750 0.0015750"/>
+          <geom name="neck_g" type="box" pos="0.000000 0 0.045000" size="0.06000 0.05 0.04500" friction="0.4000 0.005 0.0001"/>
+          <body name="head" pos="0.000000 0 0.090000">
+            <joint name="head" type="hinge" axis="0 1 0" range="-30 30"/>
+            <inertial pos="0.000000 0 0.115000" mass="4.858000" diaginertia="0.0376090 0.0376090 0.0376090"/>
+            <geom name="head_g" type="box" pos="0.000000 0 0.115000" size="0.10000 0.05 0.11500" friction="0.4000 0.005 0.0001"/>
+          </body>
+        </body>
+        <body name="upper_r" pos="-0.032125 0 0.250000">
+          <joint name="shoulder_r" type="hinge" axis="0 1 0" range="-160 90"/>
+          <inertial pos="0.000000 0 -0.165000" mass="1.897000" diaginertia="0.0187961 0.0187961 0.0187961"/>
+          <geom name="upper_r_g" type="box" pos="0.000000 0 -0.165000" size="0.05000 0.05 0.16500" friction="0.4000 0.005 0.0001"/>
+          <body name="lower_r" pos="0.000000 0 -0.330000">
+            <joint name="elbow_r" type="hinge" axis="0 1 0" range="-165 0"/>
+            <inertial pos="0.000000 0 -0.170000" mass="1.134000" diaginertia="0.0115290 0.0115290 0.0115290"/>
+            <geom name="lower_r_g" type="box" pos="0.000000 0 -0.170000" size="0.04000 0.05 0.17000" friction="0.4000 0.005 0.0001"/>
+            <body name="hand_r" pos="0.000000 0 -0.340000">
+              <joint name="wrist_r" type="hinge" axis="0 1 0" range="-60 60"/>
+              <inertial pos="0.000000 0 -0.080000" mass="0.427000" diaginertia="0.0010390 0.0010390 0.0010390"/>
+              <geom name="hand_r_g" type="box" pos="0.000000 0 -0.080000" size="0.03000 0.05 0.08000" friction="0.7480 0.005 0.0001"/>
+            </body>
+          </body>
+        </body>
+        <body name="upper_l" pos="0.032125 0 0.250000">
+          <joint name="shoulder_l" type="hinge" axis="0 1 0" range="-160 90"/>
+          <inertial pos="0.000000 0 -0.165000" mass="1.897000" diaginertia="0.0187961 0.0187961 0.0187961"/>
+          <geom name="upper_l_g" type="box" pos="0.000000 0 -0.165000" size="0.05000 0.05 0.16500" friction="0.4000 0.005 0.0001"/>
+          <body name="lower_l" pos="0.000000 0 -0.330000">
+            <joint name="elbow_l" type="hinge" axis="0 1 0" range="-165 0"/>
+            <inertial pos="0.000000 0 -0.170000" mass="1.134000" diaginertia="0.0115290 0.0115290 0.0115290"/>
+            <geom name="lower_l_g" type="box" pos="0.000000 0 -0.170000" size="0.04000 0.05 0.17000" friction="0.4000 0.005 0.0001"/>
+            <body name="hand_l" pos="0.000000 0 -0.340000">
+              <joint name="wrist_l" type="hinge" axis="0 1 0" range="-60 60"/>
+              <inertial pos="0.000000 0 -0.080000" mass="0.427000" diaginertia="0.0010390 0.0010390 0.0010390"/>
+              <geom name="hand_l_g" type="box" pos="0.000000 0 -0.080000" size="0.03000 0.05 0.08000" friction="0.7480 0.005 0.0001"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_r" pos="0.014760 0 -0.080000">
+        <joint name="hip_r" type="hinge" axis="0 1 0" range="-90 45"/>
+        <inertial pos="0.000000 0 -0.215000" mass="9.912000" diaginertia="0.1738730 0.1738730 0.1738730"/>
+        <geom name="thigh_r_g" type="box" pos="0.000000 0 -0.215000" size="0.08000 0.05 0.21500" friction="0.4000 0.005 0.0001"/>
+        <body name="shin_r" pos="0.000000 0 -0.430000">
+          <joint name="knee_r" type="hinge" axis="0 1 0" range="0 120"/>
+          <inertial pos="0.000000 0 -0.215000" mass="3.031000" diaginertia="0.0497589 0.0497589 0.0497589"/>
+          <geom name="shin_r_g" type="box" pos="0.000000 0 -0.215000" size="0.05500 0.05 0.21500" friction="0.4000 0.005 0.0001"/>
+          <body name="heel_r" pos="0 0 -0.430000">
+            <joint name="ankle_r" type="hinge" axis="0 1 0" range="-45 45"/>
+            <inertial pos="0 0 0" mass="0.479500" diaginertia="0.0009990 0.0009990 0.0009990"/>
+            <geom name="heel_r_g" type="box" pos="0 0 0" size="0.06500 0.05 0.04500" friction="0.6930 0.005 0.0001"/>
+            <body name="toe_r" pos="0.117000 0 0">
+              <inertial pos="0.013000 0 0" mass="0.479500" diaginertia="0.0009990 0.0009990 0.0009990"/>
+              <geom name="toe_r_g" type="box" pos="0.013000 0 0" size="0.06500 0.05 0.04500" friction="0.6930 0.005 0.0001"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_l" pos="-0.014760 0 -0.080000">
+        <joint name="hip_l" type="hinge" axis="0 1 0" range="-90 45"/>
+        <inertial pos="0.000000 0 -0.215000" mass="9.912000" diaginertia="0.1738730 0.1738730 0.1738730"/>
+        <geom name="thigh_l_g" type="box" pos="0.000000 0 -0.215000" size="0.08000 0.05 0.21500" friction="0.4000 0.005 0.0001"/>
+        <body name="shin_l" pos="0.000000 0 -0.430000">
+          <joint name="knee_l" type="hinge" axis="0 1 0" range="0 120"/>
+          <inertial pos="0.000000 0 -0.215000" mass="3.031000" diaginertia="0.0497589 0.0497589 0.0497589"/>
+          <geom name="shin_l_g" type="box" pos="0.000000 0 -0.215000" size="0.05500 0.05 0.21500" friction="0.4000 0.005 0.0001"/>
+          <body name="heel_l" pos="0 0 -0.430000">
+            <joint name="ankle_l" type="hinge" axis="0 1 0" range="-45 45"/>
+            <inertial pos="0 0 0" mass="0.479500" diaginertia="0.0009990 0.0009990 0.0009990"/>
+            <geom name="heel_l_g" type="box" pos="0 0 0" size="0.06500 0.05 0.04500" friction="0.6930 0.005 0.0001"/>
+            <body name="toe_l" pos="0.117000 0 0">
+              <inertial pos="0.013000 0 0" mass="0.479500" diaginertia="0.0009990 0.0009990 0.0009990"/>
+              <geom name="toe_l_g" type="box" pos="0.013000 0 0" size="0.06500 0.05 0.04500" friction="0.6930 0.005 0.0001"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="mtpdummy_r" pos="50 0 5">
+      <joint name="mtp_r" type="hinge" axis="0 1 0" range="-35 50"/>
+      <inertial pos="0 0 0" mass="0.287700" diaginertia="0.0003401 0.0003401 0.0003401"/>
+    </body>
+    <body name="mtpdummy_l" pos="51 0 5">
+      <joint name="mtp_l" type="hinge" axis="0 1 0" range="-35 50"/>
+      <inertial pos="0 0 0" mass="0.287700" diaginertia="0.0003401 0.0003401 0.0003401"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="m_lumbar" joint="lumbar" gear="90" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_neck" joint="neck" gear="15" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_head" joint="head" gear="15" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_shoulder_r" joint="shoulder_r" gear="40" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_elbow_r" joint="elbow_r" gear="30" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_wrist_r" joint="wrist_r" gear="10" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_shoulder_l" joint="shoulder_l" gear="40" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_elbow_l" joint="elbow_l" gear="30" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_wrist_l" joint="wrist_l" gear="10" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_hip_r" joint="hip_r" gear="100" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_knee_r" joint="knee_r" gear="130" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_ankle_r" joint="ankle_r" gear="65" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_mtp_r" joint="mtp_r" gear="12" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_hip_l" joint="hip_l" gear="100" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_knee_l" joint="knee_l" gear="130" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_ankle_l" joint="ankle_l" gear="65" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_mtp_l" joint="mtp_l" gear="12" ctrlrange="-1 1" ctrllimited="true"/>
+    <general name="f_lumbar" joint="lumbar" gainprm="0" biastype="affine" biasprm="0 0 -7.437899" forcerange="-40 40" forcelimited="true"/>
+    <general name="f_neck" joint="neck" gainprm="0" biastype="affine" biasprm="0 0 -0.006272" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_head" joint="head" gainprm="0" biastype="affine" biasprm="0 0 -0.006272" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_shoulder_r" joint="shoulder_r" gainprm="0" biastype="affine" biasprm="0 0 -0.142178" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_elbow_r" joint="elbow_r" gainprm="0" biastype="affine" biasprm="0 0 -0.040774" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_wrist_r" joint="wrist_r" gainprm="0" biastype="affine" biasprm="0 0 -0.009402" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_shoulder_l" joint="shoulder_l" gainprm="0" biastype="affine" biasprm="0 0 -0.142178" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_elbow_l" joint="elbow_l" gainprm="0" biastype="affine" biasprm="0 0 -0.040774" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_wrist_l" joint="wrist_l" gainprm="0" biastype="affine" biasprm="0 0 -0.009402" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_hip_r" joint="hip_r" gainprm="0" biastype="affine" biasprm="0 0 -6.612249" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_knee_r" joint="knee_r" gainprm="0" biastype="affine" biasprm="0 0 -6.189980" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_ankle_r" joint="ankle_r" gainprm="0" biastype="affine" biasprm="0 0 -0.863024" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_mtp_r" joint="mtp_r" gainprm="0" biastype="affine" biasprm="0 0 -0.016000" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_hip_l" joint="hip_l" gainprm="0" biastype="affine" biasprm="0 0 -6.612249" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_knee_l" joint="knee_l" gainprm="0" biastype="affine" biasprm="0 0 -6.189980" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_ankle_l" joint="ankle_l" gainprm="0" biastype="affine" biasprm="0 0 -0.863024" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_mtp_l" joint="mtp_l" gainprm="0" biastype="affine" biasprm="0 0 -0.016000" forcerange="-15 15" forcelimited="true"/>
+  </actuator>
+</mujoco>
