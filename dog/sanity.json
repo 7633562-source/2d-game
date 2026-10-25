@@ -1,0 +1,32 @@
+{
+ "stand": {
+  "lift_m": 0.0,
+  "impact_s": 0.005,
+  "chestY_start": -1.534194,
+  "chestY_end": -1.523739410774979,
+  "chestY_min": -1.534194,
+  "drop_m": 0.0,
+  "pitch_maxabs": 10.244583328528376,
+  "pitch_end": -7.9149940105156285,
+  "comX_drift_m": 0.1282199528236465,
+  "paws_down_end": 4,
+  "body_touch": false,
+  "servo_saturated_frac": 0.0,
+  "stands": true
+ },
+ "drop": {
+  "lift_m": 0.3,
+  "impact_s": 0.245,
+  "chestY_start": -1.234194,
+  "chestY_end": -1.5753847772675762,
+  "chestY_min": -1.5779660588994169,
+  "drop_m": 0.34377205889941687,
+  "pitch_maxabs": 21.70217836500229,
+  "pitch_end": -21.70217836500229,
+  "comX_drift_m": 0.2125908079120406,
+  "paws_down_end": 4,
+  "body_touch": false,
+  "servo_saturated_frac": 0.0,
+  "stands": true
+ }
+}

@@ -1,0 +1,18 @@
+{
+ "tail_k4": {
+  "nominal": {
+   "success": 10,
+   "falls": 0,
+   "speed_mean": 0.876,
+   "diag_mean": 0.893,
+   "assist_bw_pct_mean": 0.34
+  },
+  "dr": {
+   "success": 9,
+   "falls": 0,
+   "speed_mean": 0.878,
+   "diag_mean": 0.879,
+   "assist_bw_pct_mean": 0.46
+  }
+ }
+}

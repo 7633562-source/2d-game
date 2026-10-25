@@ -1,0 +1,56 @@
+{
+ "x0": {
+  "nominal": {
+   "success": 10,
+   "falls": 0,
+   "speed_mean": 0.876,
+   "diag_mean": 0.893,
+   "assist_bw_pct_mean": 0.34,
+   "t_fall": []
+  },
+  "dr": {
+   "success": 9,
+   "falls": 0,
+   "speed_mean": 0.878,
+   "diag_mean": 0.879,
+   "assist_bw_pct_mean": 0.46,
+   "t_fall": []
+  }
+ },
+ "x1": {
+  "nominal": {
+   "success": 10,
+   "falls": 0,
+   "speed_mean": 0.883,
+   "diag_mean": 0.893,
+   "assist_bw_pct_mean": 0.37,
+   "t_fall": []
+  },
+  "dr": {
+   "success": 9,
+   "falls": 0,
+   "speed_mean": 0.883,
+   "diag_mean": 0.873,
+   "assist_bw_pct_mean": 0.48,
+   "t_fall": []
+  }
+ },
+ "x2": {
+  "nominal": {
+   "success": 10,
+   "falls": 0,
+   "speed_mean": 0.899,
+   "diag_mean": 0.876,
+   "assist_bw_pct_mean": 0.48,
+   "t_fall": []
+  },
+  "dr": {
+   "success": 9,
+   "falls": 0,
+   "speed_mean": 0.902,
+   "diag_mean": 0.859,
+   "assist_bw_pct_mean": 0.55,
+   "t_fall": []
+  }
+ }
+}

@@ -1,0 +1,162 @@
+{
+ "implicit": {
+  "nominal": {
+   "success": 10,
+   "falls": 0,
+   "speed_mean": 0.876,
+   "diag_mean": 0.893,
+   "assist_bw_pct_mean": 0.34,
+   "t_fall": [],
+   "alt_vs_qd_deg_s": {
+    "lumbar": [
+     8.2,
+     44.5
+    ],
+    "neck": [
+     12.4,
+     55.8
+    ],
+    "head": [
+     19.3,
+     162.4
+    ],
+    "shoulder_r": [
+     18.9,
+     331.0
+    ],
+    "elbow_r": [
+     34.5,
+     367.8
+    ],
+    "fpaw_r": [
+     59.1,
+     267.9
+    ],
+    "shoulder_l": [
+     20.5,
+     308.9
+    ],
+    "elbow_l": [
+     37.1,
+     373.9
+    ],
+    "fpaw_l": [
+     57.1,
+     219.7
+    ],
+    "hip_r": [
+     19.6,
+     308.1
+    ],
+    "knee_r": [
+     29.7,
+     315.1
+    ],
+    "rpaw_r": [
+     51.9,
+     255.5
+    ],
+    "hip_l": [
+     18.0,
+     305.1
+    ],
+    "knee_l": [
+     29.2,
+     287.5
+    ],
+    "rpaw_l": [
+     59.3,
+     221.7
+    ]
+   }
+  },
+  "dr": {
+   "success": 9,
+   "falls": 0,
+   "speed_mean": 0.878,
+   "diag_mean": 0.879,
+   "assist_bw_pct_mean": 0.46,
+   "t_fall": []
+  }
+ },
+ "explicit": {
+  "nominal": {
+   "success": 10,
+   "falls": 0,
+   "speed_mean": 0.881,
+   "diag_mean": 0.892,
+   "assist_bw_pct_mean": 0.35,
+   "t_fall": [],
+   "alt_vs_qd_deg_s": {
+    "lumbar": [
+     12.7,
+     44.2
+    ],
+    "neck": [
+     15.3,
+     61.4
+    ],
+    "head": [
+     21.6,
+     164.8
+    ],
+    "shoulder_r": [
+     21.9,
+     330.6
+    ],
+    "elbow_r": [
+     39.3,
+     364.7
+    ],
+    "fpaw_r": [
+     80.8,
+     268.8
+    ],
+    "shoulder_l": [
+     23.3,
+     307.7
+    ],
+    "elbow_l": [
+     41.4,
+     370.7
+    ],
+    "fpaw_l": [
+     67.1,
+     218.4
+    ],
+    "hip_r": [
+     24.2,
+     306.2
+    ],
+    "knee_r": [
+     33.5,
+     313.8
+    ],
+    "rpaw_r": [
+     65.0,
+     252.5
+    ],
+    "hip_l": [
+     22.5,
+     304.0
+    ],
+    "knee_l": [
+     32.4,
+     283.5
+    ],
+    "rpaw_l": [
+     66.2,
+     220.0
+    ]
+   }
+  },
+  "dr": {
+   "success": 9,
+   "falls": 0,
+   "speed_mean": 0.882,
+   "diag_mean": 0.878,
+   "assist_bw_pct_mean": 0.46,
+   "t_fall": []
+  }
+ }
+}

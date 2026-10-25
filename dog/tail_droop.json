@@ -1,0 +1,56 @@
+[
+ {
+  "tail_len": 0.2,
+  "spring": 2.0,
+  "v": 0.0,
+  "mean": 23.6,
+  "min": 6.9,
+  "max": 40.7,
+  "fell": false
+ },
+ {
+  "tail_len": 0.35,
+  "spring": 2.0,
+  "v": 0.0,
+  "mean": 34.9,
+  "min": 6.1,
+  "max": 62.6,
+  "fell": false
+ },
+ {
+  "tail_len": 0.35,
+  "spring": 4.0,
+  "v": 0.0,
+  "mean": 22.0,
+  "min": 2.9,
+  "max": 41.6,
+  "fell": false
+ },
+ {
+  "tail_len": 0.35,
+  "spring": 6.0,
+  "v": 0.0,
+  "mean": 16.3,
+  "min": 3.3,
+  "max": 28.7,
+  "fell": false
+ },
+ {
+  "tail_len": 0.2,
+  "spring": 2.0,
+  "v": 0.8,
+  "mean": 18.5,
+  "min": -31.7,
+  "max": 59.5,
+  "fell": false
+ },
+ {
+  "tail_len": 0.35,
+  "spring": 2.0,
+  "v": 0.8,
+  "mean": 32.3,
+  "min": 3.3,
+  "max": 52.3,
+  "fell": false
+ }
+]

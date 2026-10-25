@@ -1,0 +1,27 @@
+{
+ "policy": "runs/d5_tail35/last.zip",
+ "fell": false,
+ "t": 5.3,
+ "cycles": [
+  {
+   "open_peak_deg": 39.75,
+   "t_open90_s": 0.039999999999999925,
+   "closed_min_deg": 1.09,
+   "t_close90_s": 0.040000000000000036
+  },
+  {
+   "open_peak_deg": 39.84,
+   "t_open90_s": 0.040000000000000036,
+   "closed_min_deg": 1.28,
+   "t_close90_s": 0.040000000000000036
+  },
+  {
+   "open_peak_deg": 39.8,
+   "t_open90_s": 0.040000000000000036,
+   "closed_min_deg": 1.34,
+   "t_close90_s": 0.03999999999999959
+  }
+ ],
+ "closed_droop_stand_deg": 1.51,
+ "tau_peak_nm": 1.103
+}

@@ -1,0 +1,82 @@
+[
+ {
+  "tail_len": 0.2,
+  "jaw_hinge": false,
+  "dr": false,
+  "steps": [
+   631,
+   631
+  ],
+  "ngeom": [
+   23,
+   25
+  ],
+  "max_abs_qpos_diff": 0.0,
+  "fell": [
+   false,
+   false
+  ],
+  "jaw_max_deg": null,
+  "jaw_p95_deg": null
+ },
+ {
+  "tail_len": 0.2,
+  "jaw_hinge": false,
+  "dr": true,
+  "steps": [
+   631,
+   631
+  ],
+  "ngeom": [
+   23,
+   25
+  ],
+  "max_abs_qpos_diff": 0.0,
+  "fell": [
+   false,
+   false
+  ],
+  "jaw_max_deg": null,
+  "jaw_p95_deg": null
+ },
+ {
+  "tail_len": 0.35,
+  "jaw_hinge": true,
+  "dr": false,
+  "steps": [
+   631,
+   631
+  ],
+  "ngeom": [
+   23,
+   25
+  ],
+  "max_abs_qpos_diff": 0.0,
+  "fell": [
+   false,
+   false
+  ],
+  "jaw_max_deg": 3.062155782818364,
+  "jaw_p95_deg": 2.469743191715085
+ },
+ {
+  "tail_len": 0.35,
+  "jaw_hinge": true,
+  "dr": true,
+  "steps": [
+   631,
+   631
+  ],
+  "ngeom": [
+   23,
+   25
+  ],
+  "max_abs_qpos_diff": 0.0,
+  "fell": [
+   false,
+   false
+  ],
+  "jaw_max_deg": 3.4921846099902094,
+  "jaw_p95_deg": 3.0887997326899197
+ }
+]

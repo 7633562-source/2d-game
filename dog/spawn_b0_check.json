@@ -1,0 +1,74 @@
+{
+ "d8_spawn_nom": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.443,
+  "h_trot": 0.376,
+  "v_trot": 0.879,
+  "h_end": 0.376,
+  "v_end_abs": 0.879
+ },
+ "d8_spawn_dr": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.443,
+  "h_trot": 0.377,
+  "v_trot": 0.884,
+  "h_end": 0.377,
+  "v_end_abs": 0.88
+ },
+ "d8_stand_nom": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.406,
+  "h_trot": 0.376,
+  "v_trot": 0.879,
+  "h_end": 0.376,
+  "v_end_abs": 0.879
+ },
+ "d8_stand_dr": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.406,
+  "h_trot": 0.377,
+  "v_trot": 0.884,
+  "h_end": 0.376,
+  "v_end_abs": 0.88
+ },
+ "ds_spawn_nom": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.443,
+  "h_trot": 0.376,
+  "v_trot": 0.879,
+  "h_end": 0.439,
+  "v_end_abs": 0.005
+ },
+ "ds_spawn_dr": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.443,
+  "h_trot": 0.377,
+  "v_trot": 0.884,
+  "h_end": 0.439,
+  "v_end_abs": 0.008
+ },
+ "ds_stand_nom": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.406,
+  "h_trot": 0.376,
+  "v_trot": 0.879,
+  "h_end": 0.405,
+  "v_end_abs": 0.0
+ },
+ "ds_stand_dr": {
+  "falls": 0,
+  "t_fall": [],
+  "h_stand": 0.406,
+  "h_trot": 0.377,
+  "v_trot": 0.884,
+  "h_end": 0.405,
+  "v_end_abs": 0.002
+ }
+}

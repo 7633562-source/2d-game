@@ -1,0 +1,167 @@
+<mujoco model="dog2d">
+  <compiler angle="degree" inertiafromgeom="false"/>
+  <option timestep="0.005" gravity="0 0 -9.81" integrator="implicitfast" impratio="1" cone="pyramidal" iterations="50" noslip_iterations="0"/>
+  <visual><global offwidth="1280" offheight="720"/></visual>
+  <default>
+    <joint limited="true" solreflimit="0.01 1" solimplimit="0.95 0.99 0.001" damping="0" armature="0"/>
+    <geom contype="1" conaffinity="0" condim="3" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+  </default>
+  <worldbody>
+    <light pos="0 -3 3" dir="0 1 -1"/>
+    <geom name="floor" type="plane" pos="0 0 0.02" size="60 2 0.1" contype="0" conaffinity="1" friction="0.4000 0.005 0.0001" rgba="0.45 0.55 0.4 1"/>
+    <body name="pelvis" pos="-0.288248 0 0.490857">
+      <joint name="rootx" type="slide" axis="1 0 0" limited="false"/>
+      <joint name="rootz" type="slide" axis="0 0 1" limited="false"/>
+      <joint name="rooty" type="hinge" axis="0 -1 0" limited="false"/>
+      <inertial pos="0.000000 0 0.000000" mass="3.837719" diaginertia="0.02088359 0.02088359 0.02088359"/>
+      <geom name="pelvis_g" type="box" pos="0.000000 0 0.000000" euler="0 -0.0000 0" size="0.11000 0.04 0.06500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.7 0.5 0.3 1"/>
+      <geom name="hip_bridge_v" type="box" pos="-0.040000 0 -0.108287" euler="0 -0.0000 0" size="0.05000 0.039 0.04464" contype="0" conaffinity="0" rgba="0.7 0.5 0.3 1"/>
+      <body name="chest" pos="0.110000 0 0.000000">
+        <joint name="lumbar" type="hinge" axis="0 1 0" range="-20 20"/>
+        <inertial pos="0.178248 0 -0.025051" mass="6.030702" diaginertia="0.07498173 0.07498173 0.07498173"/>
+        <geom name="chest_g" type="box" pos="0.178248 0 -0.025051" euler="0 8.0000 0" size="0.18000 0.04 0.07000" friction="0.4000 0.005 0.0001" contype="1" rgba="0.75 0.55 0.35 1"/>
+        <geom name="shoulder_bridge_v" type="box" pos="0.267533 0 -0.108287" euler="0 8.0000 0" size="0.04375 0.039 0.02050" contype="0" conaffinity="0" rgba="0.75 0.55 0.35 1"/>
+        <body name="neck" pos="0.356497 0 -0.050102">
+          <joint name="neck" type="hinge" axis="0 1 0" range="-30 30"/>
+          <inertial pos="0.050000 0 0.000000" mass="0.822368" diaginertia="0.00112390 0.00112390 0.00112390"/>
+          <geom name="neck_g" type="box" pos="0.050000 0 0.000000" euler="0 -0.0000 0" size="0.05000 0.04 0.04000" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+          <body name="head" pos="0.100000 0 0.000000">
+            <joint name="head" type="hinge" axis="0 1 0" range="-30 30"/>
+            <inertial pos="0.070000 0 0.000000" mass="1.918860" diaginertia="0.00473319 0.00473319 0.00473319"/>
+            <geom name="head_g" type="box" pos="0.070000 0 0.000000" euler="0 -0.0000 0" size="0.07000 0.04 0.05000" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+            <body name="jaw" pos="0.044800 0 -0.038000">
+              <joint name="jaw" type="hinge" axis="0 1 0" range="0 40" solreflimit="-40000 -400"/>
+              <inertial pos="0.050000 0 0.000000" mass="0.219298" diaginertia="0.00020146 0.00020146 0.00020146"/>
+              <geom name="jaw_g" type="box" pos="0.050000 0 0.000000" euler="0 -0.0000 0" size="0.05000 0.042 0.01600" friction="0.4000 0.005 0.0001" contype="0" rgba="0.86 0.76 0.58 1"/>
+            </body>
+          </body>
+        </body>
+        <body name="upper_fr" pos="0.267533 0 -0.108287">
+          <joint name="shoulder_r" type="hinge" axis="0 1 0" range="-90 90"/>
+          <inertial pos="0.017672 0 -0.083143" mass="1.096491" diaginertia="0.00308845 0.00308845 0.00308845"/>
+          <geom name="upper_fr_g" type="box" pos="0.017672 0 -0.083143" euler="0 -12.0000 0" size="0.03500 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+          <body name="lower_fr" pos="0.035345 0 -0.166285">
+            <joint name="elbow_r" type="hinge" axis="0 1 0" range="0 120"/>
+            <inertial pos="-0.017672 0 -0.083143" mass="0.767544" diaginertia="0.00207876 0.00207876 0.00207876"/>
+            <geom name="lower_fr_g" type="box" pos="-0.017672 0 -0.083143" euler="0 12.0000 0" size="0.03000 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+            <body name="paw_fr" pos="-0.035345 0 -0.166285">
+              <joint name="fpaw_r" type="hinge" axis="0 1 0" range="-45 45"/>
+              <inertial pos="0.025000 0 -0.025000" mass="0.328947" diaginertia="0.00034265 0.00034265 0.00034265"/>
+              <geom name="paw_fr_g" type="box" pos="0.025000 0 -0.025000" euler="0 -0.0000 0" size="0.05000 0.04 0.02500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.25 0.2 0.15 1"/>
+            </body>
+          </body>
+        </body>
+        <body name="upper_fl" pos="0.267533 0 -0.108287">
+          <joint name="shoulder_l" type="hinge" axis="0 1 0" range="-90 90"/>
+          <inertial pos="0.017672 0 -0.083143" mass="1.096491" diaginertia="0.00308845 0.00308845 0.00308845"/>
+          <geom name="upper_fl_g" type="box" pos="0.017672 0 -0.083143" euler="0 -12.0000 0" size="0.03500 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.55 0.42 0.3 1"/>
+          <body name="lower_fl" pos="0.035345 0 -0.166285">
+            <joint name="elbow_l" type="hinge" axis="0 1 0" range="0 120"/>
+            <inertial pos="-0.017672 0 -0.083143" mass="0.767544" diaginertia="0.00207876 0.00207876 0.00207876"/>
+            <geom name="lower_fl_g" type="box" pos="-0.017672 0 -0.083143" euler="0 12.0000 0" size="0.03000 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.55 0.42 0.3 1"/>
+            <body name="paw_fl" pos="-0.035345 0 -0.166285">
+              <joint name="fpaw_l" type="hinge" axis="0 1 0" range="-45 45"/>
+              <inertial pos="0.025000 0 -0.025000" mass="0.328947" diaginertia="0.00034265 0.00034265 0.00034265"/>
+              <geom name="paw_fl_g" type="box" pos="0.025000 0 -0.025000" euler="0 -0.0000 0" size="0.05000 0.04 0.02500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.55 0.42 0.3 1"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="tail0" pos="-0.110000 0 0.000000">
+        <joint name="tail0" type="hinge" axis="0 1 0" range="-40 40" stiffness="2" springref="0"/>
+        <inertial pos="-0.035000 0 0.000000" mass="0.109649" diaginertia="0.00006762 0.00006762 0.00006762"/>
+        <geom name="tail0_g" type="box" pos="-0.035000 0 0.000000" euler="0 -0.0000 0" size="0.03500 0.04 0.02500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+        <body name="tail1" pos="-0.070000 0 0.000000">
+          <joint name="tail1" type="hinge" axis="0 1 0" range="-40 40" stiffness="2" springref="0"/>
+          <inertial pos="-0.035000 0 0.000000" mass="0.109649" diaginertia="0.00006177 0.00006177 0.00006177"/>
+          <geom name="tail1_g" type="box" pos="-0.035000 0 0.000000" euler="0 -0.0000 0" size="0.03500 0.04 0.02156" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+          <body name="tail2" pos="-0.070000 0 0.000000">
+            <joint name="tail2" type="hinge" axis="0 1 0" range="-40 40" stiffness="2" springref="0"/>
+            <inertial pos="-0.035000 0 0.000000" mass="0.109649" diaginertia="0.00005678 0.00005678 0.00005678"/>
+            <geom name="tail2_g" type="box" pos="-0.035000 0 0.000000" euler="0 -0.0000 0" size="0.03500 0.04 0.01812" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+            <body name="tail3" pos="-0.070000 0 0.000000">
+              <joint name="tail3" type="hinge" axis="0 1 0" range="-40 40" stiffness="2" springref="0"/>
+              <inertial pos="-0.035000 0 0.000000" mass="0.109649" diaginertia="0.00005266 0.00005266 0.00005266"/>
+              <geom name="tail3_g" type="box" pos="-0.035000 0 0.000000" euler="0 -0.0000 0" size="0.03500 0.04 0.01469" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+              <body name="tail4" pos="-0.070000 0 0.000000">
+                <joint name="tail4" type="hinge" axis="0 1 0" range="-40 40" stiffness="2" springref="0"/>
+                <inertial pos="-0.035000 0 0.000000" mass="0.109649" diaginertia="0.00004940 0.00004940 0.00004940"/>
+                <geom name="tail4_g" type="box" pos="-0.035000 0 0.000000" euler="0 -0.0000 0" size="0.03500 0.04 0.01125" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_rr" pos="-0.040000 0 -0.108287">
+        <joint name="hip_r" type="hinge" axis="0 1 0" range="-90 90"/>
+        <inertial pos="0.017672 0 -0.083143" mass="2.192982" diaginertia="0.00645102 0.00645102 0.00645102"/>
+        <geom name="thigh_rr_g" type="box" pos="0.017672 0 -0.083143" euler="0 -12.0000 0" size="0.04000 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+        <body name="shin_rr" pos="0.035345 0 -0.166285">
+          <joint name="knee_r" type="hinge" axis="0 1 0" range="0 120"/>
+          <inertial pos="-0.017672 0 -0.083143" mass="1.096491" diaginertia="0.00296966 0.00296966 0.00296966"/>
+          <geom name="shin_rr_g" type="box" pos="-0.017672 0 -0.083143" euler="0 12.0000 0" size="0.03000 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.8 0.62 0.42 1"/>
+          <body name="paw_rr" pos="-0.035345 0 -0.166285">
+            <joint name="rpaw_r" type="hinge" axis="0 1 0" range="-45 45"/>
+            <inertial pos="0.025000 0 -0.025000" mass="0.328947" diaginertia="0.00034265 0.00034265 0.00034265"/>
+            <geom name="paw_rr_g" type="box" pos="0.025000 0 -0.025000" euler="0 -0.0000 0" size="0.05000 0.04 0.02500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.25 0.2 0.15 1"/>
+          </body>
+        </body>
+      </body>
+      <body name="thigh_rl" pos="-0.040000 0 -0.108287">
+        <joint name="hip_l" type="hinge" axis="0 1 0" range="-90 90"/>
+        <inertial pos="0.017672 0 -0.083143" mass="2.192982" diaginertia="0.00645102 0.00645102 0.00645102"/>
+        <geom name="thigh_rl_g" type="box" pos="0.017672 0 -0.083143" euler="0 -12.0000 0" size="0.04000 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.55 0.42 0.3 1"/>
+        <body name="shin_rl" pos="0.035345 0 -0.166285">
+          <joint name="knee_l" type="hinge" axis="0 1 0" range="0 120"/>
+          <inertial pos="-0.017672 0 -0.083143" mass="1.096491" diaginertia="0.00296966 0.00296966 0.00296966"/>
+          <geom name="shin_rl_g" type="box" pos="-0.017672 0 -0.083143" euler="0 12.0000 0" size="0.03000 0.04 0.08500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.55 0.42 0.3 1"/>
+          <body name="paw_rl" pos="-0.035345 0 -0.166285">
+            <joint name="rpaw_l" type="hinge" axis="0 1 0" range="-45 45"/>
+            <inertial pos="0.025000 0 -0.025000" mass="0.328947" diaginertia="0.00034265 0.00034265 0.00034265"/>
+            <geom name="paw_rl_g" type="box" pos="0.025000 0 -0.025000" euler="0 -0.0000 0" size="0.05000 0.04 0.02500" friction="0.4000 0.005 0.0001" contype="1" rgba="0.55 0.42 0.3 1"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="m_lumbar" joint="lumbar" gear="80" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_neck" joint="neck" gear="8" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_head" joint="head" gear="8" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_tail0" joint="tail0" gear="3" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_shoulder_r" joint="shoulder_r" gear="35" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_elbow_r" joint="elbow_r" gear="40" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_fpaw_r" joint="fpaw_r" gear="17" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_shoulder_l" joint="shoulder_l" gear="35" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_elbow_l" joint="elbow_l" gear="40" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_fpaw_l" joint="fpaw_l" gear="17" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_hip_r" joint="hip_r" gear="40" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_knee_r" joint="knee_r" gear="45" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_rpaw_r" joint="rpaw_r" gear="17" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_hip_l" joint="hip_l" gear="40" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_knee_l" joint="knee_l" gear="45" ctrlrange="-1 1" ctrllimited="true"/>
+    <motor name="m_rpaw_l" joint="rpaw_l" gear="17" ctrlrange="-1 1" ctrllimited="true"/>
+    <general name="f_lumbar" joint="lumbar" gainprm="0" biastype="affine" biasprm="0 0 -3.266849" forcerange="-20 20" forcelimited="true"/>
+    <general name="f_neck" joint="neck" gainprm="0" biastype="affine" biasprm="0 0 -0.010000" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_head" joint="head" gainprm="0" biastype="affine" biasprm="0 0 -0.010000" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_tail0" joint="tail0" gainprm="0" biastype="affine" biasprm="0 0 -0.013480" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_tail1" joint="tail1" gainprm="0" biastype="affine" biasprm="0 0 -0.006456" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_tail2" joint="tail2" gainprm="0" biastype="affine" biasprm="0 0 -0.005917" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_tail3" joint="tail3" gainprm="0" biastype="affine" biasprm="0 0 -0.005464" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_tail4" joint="tail4" gainprm="0" biastype="affine" biasprm="0 0 -0.005098" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_shoulder_r" joint="shoulder_r" gainprm="0" biastype="affine" biasprm="0 0 -0.593254" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_elbow_r" joint="elbow_r" gainprm="0" biastype="affine" biasprm="0 0 -0.248496" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_fpaw_r" joint="fpaw_r" gainprm="0" biastype="affine" biasprm="0 0 -0.058833" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_shoulder_l" joint="shoulder_l" gainprm="0" biastype="affine" biasprm="0 0 -0.593254" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_elbow_l" joint="elbow_l" gainprm="0" biastype="affine" biasprm="0 0 -0.248496" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_fpaw_l" joint="fpaw_l" gainprm="0" biastype="affine" biasprm="0 0 -0.058833" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_hip_r" joint="hip_r" gainprm="0" biastype="affine" biasprm="0 0 -0.985714" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_knee_r" joint="knee_r" gainprm="0" biastype="affine" biasprm="0 0 -0.406709" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_rpaw_r" joint="rpaw_r" gainprm="0" biastype="affine" biasprm="0 0 -0.061441" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_hip_l" joint="hip_l" gainprm="0" biastype="affine" biasprm="0 0 -0.985714" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_knee_l" joint="knee_l" gainprm="0" biastype="affine" biasprm="0 0 -0.406709" forcerange="-15 15" forcelimited="true"/>
+    <general name="f_rpaw_l" joint="rpaw_l" gainprm="0" biastype="affine" biasprm="0 0 -0.061441" forcerange="-15 15" forcelimited="true"/>
+    <motor name="m_jaw" joint="jaw" gear="2.5" ctrlrange="-1 1" ctrllimited="true"/>
+    <general name="f_jaw" joint="jaw" gainprm="0" biastype="affine" biasprm="0 0 -0.010000" forcerange="-15 15" forcelimited="true"/>
+  </actuator>
+</mujoco>
